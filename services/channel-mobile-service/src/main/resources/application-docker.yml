@@ -1,0 +1,18 @@
+# Overrides para ejecución en contenedor Docker.
+# Activa con: SPRING_PROFILES_ACTIVE=docker
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+
+fintech:
+  channel-mobile:
+    identity-service-url: ${IDENTITY_SERVICE_URL:http://identity-service:8080}
+    audit-service-url: ${AUDIT_SERVICE_URL:http://audit-service:8080}
+    origination-service-url: ${ORIGINATION_SERVICE_URL:http://origination-service:8080}
+    credit-product-service-url: ${CREDIT_PRODUCT_SERVICE_URL:http://credit-product-service:8080}
+
+logging:
+  level:
+    com.fintech: INFO

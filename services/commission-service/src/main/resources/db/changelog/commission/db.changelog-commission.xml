@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+    <include file="db/changelog/commission/001-create-schema.sql"              relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/002-create-commission-policies.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/003-create-commission-records.sql"  relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/004-create-liquidation-batches.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/005-create-readmodels.sql"          relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/006-create-event-publication.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/007-seed-commission-policies.sql"   relativeToChangelogFile="false"/>
+</databaseChangeLog>

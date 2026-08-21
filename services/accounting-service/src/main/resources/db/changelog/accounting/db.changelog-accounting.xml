@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <include file="db/changelog/accounting/001-create-schema.sql"          relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/002-create-catalog.sql"         relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/003-create-journal.sql"         relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/004-create-readmodels.sql"      relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/005-seed-catalog.sql"           relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/006-create-event-publication.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/007-create-vouchers.sql"         relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/008-order-accounts.sql"          relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/009-opening-balance.sql"        relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/010-writeoff-derecognition.sql" relativeToChangelogFile="false"/>
+</databaseChangeLog>

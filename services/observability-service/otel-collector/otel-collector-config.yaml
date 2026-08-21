@@ -1,0 +1,49 @@
+# Único punto de entrada de telemetría — recibe OTLP de los 19 servicios, reenvía a Tempo.
+# Solo trazas: métricas van por Micrometer/Prometheus (pull), logs van por Fluent Bit. Ver
+# docs/dominios/T7_observability.md §Resumen ejecutivo para la justificación de este split.
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  # Evita que un servicio con un bug de instrumentación tumbe el collector por volumen.
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 400
+    spike_limit_mib: 100
+  # Descarta el ruido de los scrapes de Prometheus a /actuator (el server span y su handler
+  # OperationHandler.handle que aparece con controller-telemetry). Sin esto, cada scrape cada
+  # 15s ensucia la lista de trazas Y genera aristas espurias `user -> servicio` en el service
+  # graph. `error_mode: ignore` → si un span no tiene http.route, la condición no rompe nada.
+  filter/actuator:
+    error_mode: ignore
+    traces:
+      span:
+        - 'IsMatch(attributes["http.route"], "/actuator.*")'
+        - 'name == "OperationHandler.handle"'
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/actuator, batch]
+      exporters: [otlp/tempo, debug]
+  telemetry:
+    logs:
+      level: info

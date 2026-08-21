@@ -1,0 +1,136 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-credit-product-schema
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/001-create-schema.sql
+            relativeToChangelogFile: false
+            splitStatements: false
+
+  - changeSet:
+      id: 002-create-credit-product-definitions
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/002-create-credit-product-definitions.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 003-create-eligible-party-types
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/003-create-eligible-party-types.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 004-create-required-documents
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/004-create-required-documents.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 005-create-channel-availability
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/005-create-channel-availability.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  # Table must exist before the seeds insert into it (006/008 reference it)
+  - changeSet:
+      id: 007-create-payment-frequencies-table
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/007-create-payment-frequencies-table.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 006-seed-initial-products
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/006-seed-initial-products.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 008-seed-credit-card-micro-loan
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/008-seed-credit-card-micro-loan.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 009-create-rate-cards
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/010-create-rate-cards.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 010-create-eligibility-rules
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/011-create-eligibility-rules.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 011-seed-b2b-products
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/012-seed-b2b-products.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 012-fix-distributor-line-eligibility
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/013-fix-distributor-line-eligibility.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 013-distributor-line-disposition-terms
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/014-distributor-line-disposition-terms.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 014-distributor-placement-limits
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/015-distributor-placement-limits.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 015-distributor-line-biweekly
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/016-distributor-line-biweekly.sql
+            relativeToChangelogFile: false
+            splitStatements: true

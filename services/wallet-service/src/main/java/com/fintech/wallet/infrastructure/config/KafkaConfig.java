@@ -1,0 +1,64 @@
+package com.fintech.wallet.infrastructure.config;
+
+import com.fintech.wallet.infrastructure.adapter.in.messaging.BalanceUpdatedPayload;
+import com.fintech.wallet.infrastructure.adapter.in.messaging.CreditAccountActivatedPayload;
+import com.fintech.wallet.infrastructure.adapter.in.messaging.DispositionCompletedPayload;
+import com.fintech.wallet.infrastructure.adapter.in.messaging.InstallmentDuePayload;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.support.serializer.JsonDeserializer;
+
+import java.util.Map;
+
+@Configuration
+public class KafkaConfig {
+
+    private <T> ConsumerFactory<String, T> jsonConsumerFactory(KafkaProperties properties, Class<T> type) {
+        Map<String, Object> config = properties.buildConsumerProperties(null);
+        config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(JsonDeserializer.TRUSTED_PACKAGES, "com.fintech.*");
+        config.put(JsonDeserializer.VALUE_DEFAULT_TYPE, type.getName());
+        config.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
+        return new DefaultKafkaConsumerFactory<>(config);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, CreditAccountActivatedPayload>
+    creditAccountActivatedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, CreditAccountActivatedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, CreditAccountActivatedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, BalanceUpdatedPayload>
+    balanceUpdatedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, BalanceUpdatedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, BalanceUpdatedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, InstallmentDuePayload>
+    installmentDueListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, InstallmentDuePayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, InstallmentDuePayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, DispositionCompletedPayload>
+    dispositionCompletedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, DispositionCompletedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, DispositionCompletedPayload.class));
+        return factory;
+    }
+}

@@ -1,0 +1,111 @@
+spring:
+  application:
+    name: disbursement-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: disbursement
+    open-in-view: false
+
+  liquibase:
+    change-log: classpath:db/changelog/disbursement/db.changelog-disbursement.xml
+    default-schema: disbursement
+    # Crítico: la tabla de control va en public. Sin esto, el primer arranque falla porque
+    # Liquibase intenta crear DATABASECHANGELOG en un schema que aún no existe.
+    liquibase-schema: public
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: disbursement-service
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+server:
+  port: ${SERVER_PORT:8100}
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+fintech:
+  disbursement:
+    dispatch:
+      enabled: ${DISBURSEMENT_DISPATCH_ENABLED:true}
+      # ISO-8601 obligatorio: este valor lo lee @Scheduled, que no entiende "5s".
+      interval: PT5S
+      batch-size: 50
+      max-attempts: 6
+      retry-backoff: PT15S
+
+    rails:
+      SPEI:
+        enabled: true
+        # Ventana envolvente: abre 17:10 y cierra 16:50 del día siguiente. La franja cerrada es el
+        # corte diario de Banxico. Fuera de ventana la orden espera; no se rechaza.
+        window:
+          start: "17:10"
+          end: "16:50"
+          zone: America/Mexico_City
+          days: MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY,SUNDAY
+      INTERNAL:
+        enabled: true
+        # start == end significa 24 h.
+        window:
+          start: "00:00"
+          end: "00:00"
+          zone: America/Mexico_City
+          days: MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY,SUNDAY
+
+    topics:
+      # Un topic por proveedor. Añadir uno es una entrada aquí y una fila en routing_rules.
+      provider:
+        STP: ${DISBURSEMENT_STP_TOPIC:disbursement.stp-requested}
+
+      # Entradas ACL. Configurables para que un comprador use su propia nomenclatura.
+      inbound:
+        credit-account-activated: ${DISBURSEMENT_TOPIC_CREDIT_ACTIVATED:credit-portfolio.credit-account-activated}
+        disposition-authorized: ${DISBURSEMENT_TOPIC_DISPOSITION_AUTHORIZED:credit-portfolio.disposition-authorized}
+        wallet-withdrawal-completed: ${DISBURSEMENT_TOPIC_WALLET_WITHDRAWAL:wallet.withdrawal-completed}
+
+      # Resultados que reportan los conectores.
+      provider-outcomes:
+        accepted: ${DISBURSEMENT_TOPIC_PROVIDER_ACCEPTED:stp.order-accepted}
+        settled: ${DISBURSEMENT_TOPIC_PROVIDER_SETTLED:stp.order-settled}
+        rejected: ${DISBURSEMENT_TOPIC_PROVIDER_REJECTED:stp.order-rejected}
+        returned: ${DISBURSEMENT_TOPIC_PROVIDER_RETURNED:stp.order-returned}
+
+      # Hechos que publica este servicio.
+      accepted: disbursement.accepted
+      completed: disbursement.completed
+      failed: disbursement.failed
+      returned: disbursement.returned

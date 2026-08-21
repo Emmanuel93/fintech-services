@@ -1,0 +1,101 @@
+spring:
+  application:
+    name: configuration-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fintech}
+    username: ${SPRING_DATASOURCE_USERNAME:fintech}
+    password: ${SPRING_DATASOURCE_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        jdbc:
+          time_zone: UTC
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+
+  cache:
+    type: redis
+    redis:
+      key-prefix: "configuration:"
+      use-key-prefix: true
+      cache-null-values: false
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+  liquibase:
+    change-log: classpath:db/changelog/configuration/db.changelog-configuration.yaml
+    enabled: true
+
+  security:
+    filter:
+      order: 10
+
+server:
+  port: ${SERVER_PORT:8086}
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: ${spring.application.name}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    display-request-duration: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+    try-it-out-enabled: true
+    persist-authorization: true
+    filter: true
+  show-actuator: false
+
+fintech:
+  configuration:
+    jwt-secret: ${JWT_SECRET:change-me-in-production-use-at-least-256-bit-key}
+    cache-ttl-seconds: ${CONFIG_CACHE_TTL_SECONDS:300}

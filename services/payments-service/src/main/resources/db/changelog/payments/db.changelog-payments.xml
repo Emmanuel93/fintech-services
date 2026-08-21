@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <include file="db/changelog/payments/001-create-schema.sql"                   relativeToChangelogFile="false"/>
+    <include file="db/changelog/payments/002-create-payment-orders.sql"           relativeToChangelogFile="false"/>
+    <include file="db/changelog/payments/003-create-account-balance-snapshots.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/payments/004-create-event-publication.sql"        relativeToChangelogFile="false"/>
+    <include file="db/changelog/payments/005-add-overpayment-columns.sql"         relativeToChangelogFile="false"/>
+
+</databaseChangeLog>

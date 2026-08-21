@@ -1,0 +1,5 @@
+# Perfil para desarrollo local. Activa con: --spring.profiles.active=local
+fintech:
+  channel-mobile:
+    otp-code-validation: false
+    otp-dev-code: "123456"

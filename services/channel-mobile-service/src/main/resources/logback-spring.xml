@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- JSON estructurado compartido — ver shared/src/main/resources/logback-base.xml (T7 Observability). -->
+<configuration>
+    <include resource="logback-base.xml"/>
+</configuration>

@@ -1,0 +1,45 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-configuration-schema
+      author: configuration-service
+      changes:
+        - sqlFile:
+            path: db/changelog/configuration/001-create-schema.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 002-create-config-parameters
+      author: configuration-service
+      changes:
+        - sqlFile:
+            path: db/changelog/configuration/002-create-config-parameters.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 003-create-config-audit-trail
+      author: configuration-service
+      changes:
+        - sqlFile:
+            path: db/changelog/configuration/003-create-config-audit-trail.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 004-create-event-publication
+      author: configuration-service
+      changes:
+        - sqlFile:
+            path: db/changelog/configuration/004-create-event-publication.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 005-seed-initial-params
+      author: configuration-service
+      changes:
+        - sqlFile:
+            path: db/changelog/configuration/005-seed-initial-params.sql
+            relativeToChangelogFile: false
+            splitStatements: true

@@ -1,0 +1,5 @@
+fintech:
+  origination:
+    committee-threshold-amount: ${ORIGINATION_COMMITTEE_THRESHOLD:50000}
+    reapplication-cooldown-days: ${ORIGINATION_COOLDOWN_DAYS:30}
+    offer-validity-hours: ${ORIGINATION_OFFER_VALIDITY_HOURS:48}

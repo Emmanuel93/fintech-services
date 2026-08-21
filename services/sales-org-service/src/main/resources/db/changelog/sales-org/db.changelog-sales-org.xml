@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+    <include file="db/changelog/sales-org/001-create-schema.sql"        relativeToChangelogFile="false"/>
+    <include file="db/changelog/sales-org/002-create-org-levels.sql"    relativeToChangelogFile="false"/>
+    <include file="db/changelog/sales-org/003-create-org-units.sql"     relativeToChangelogFile="false"/>
+    <include file="db/changelog/sales-org/004-create-event-publication.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/sales-org/005-seed-default-ladder.sql"  relativeToChangelogFile="false"/>
+    <include file="db/changelog/sales-org/006-create-unit-assignments.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/sales-org/007-distributor-nodes.sql"       relativeToChangelogFile="false"/>
+    <include file="db/changelog/sales-org/008-iva-por-unidad.sql"          relativeToChangelogFile="false"/>
+</databaseChangeLog>

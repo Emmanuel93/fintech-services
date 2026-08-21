@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <include file="db/changelog/stp/001-create-schema.sql"                 relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/002-create-companies.sql"              relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/003-create-company-keys.sql"           relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/004-create-ordering-accounts.sql"      relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/005-create-payment-orders.sql"         relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/006-create-payment-order-events.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/007-create-settlement-observations.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/008-create-tracking-key-sequences.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/009-create-outbox-messages.sql"        relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/010-create-stub-orders.sql"            relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/011-create-event-publication.sql"      relativeToChangelogFile="false"/>
+
+</databaseChangeLog>

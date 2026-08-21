@@ -1,0 +1,67 @@
+spring:
+  application:
+    name: risk-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: risk
+    open-in-view: false
+
+  liquibase:
+    change-log: classpath:db/changelog/risk/db.changelog-risk.xml
+    default-schema: risk
+    liquibase-schema: public
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: risk
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+server:
+  port: 8094
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+fintech:
+  risk:
+    # IFRS-9 staging thresholds (días). Stage 2 = SICR backstop 30d; Stage 3 = default 90d.
+    stage2-days-threshold: ${RISK_STAGE2_DAYS:30}
+    stage3-days-threshold: ${RISK_STAGE3_DAYS:90}
+    # Meses de cura tras una reestructura antes de poder bajar de STAGE_2 (RC-04).
+    cure-months: ${RISK_CURE_MONTHS:6}
+  test-support:
+    # Endpoints /internal/test-support/* — solo para pruebas E2E, deshabilitados por default.
+    enabled: ${TEST_SUPPORT_ENABLED:false}

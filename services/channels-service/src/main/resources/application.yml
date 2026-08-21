@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: channels-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: channels
+    open-in-view: false
+
+  liquibase:
+    change-log: classpath:db/changelog/channels/db.changelog-channels.xml
+    default-schema: channels
+    liquibase-schema: public
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        spring.json.add.type.headers: false
+
+server:
+  port: 8091
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+fintech:
+  channels:
+    default-session-ttl-minutes: 30
+    default-max-idle-minutes: 10
+    lead-ttl-days-digital: 30
+    lead-ttl-days-promoter: 7
+    party-service-url: ${PARTY_SERVICE_URL:http://party-service:8080}

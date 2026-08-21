@@ -1,0 +1,43 @@
+package com.fintech.scoring.infrastructure.adapter.out.circulo.dto;
+
+import java.math.BigDecimal;
+
+public record CdcCredito(
+        String fechaActualizacion,
+        Integer registroImpugnado,
+        String claveOtorgante,
+        String nombreOtorgante,
+        String cuentaActual,
+        String tipoResponsabilidad,
+        String tipoCuenta,
+        String tipoCredito,
+        String claveUnidadMonetaria,
+        Integer valorActivoValuacion,
+        Integer numeroPagos,
+        String frecuenciaPagos,
+        BigDecimal montoPagar,
+        String fechaAperturaCuenta,
+        String fechaUltimoPago,
+        String fechaUltimaCompra,
+        String fechaCierreCuenta,
+        String fechaReporte,
+        String ultimaFechaSaldoCero,
+        String garantia,
+        BigDecimal creditoMaximo,
+        BigDecimal saldoActual,
+        BigDecimal limiteCredito,
+        BigDecimal saldoVencido,
+        Integer numeroPagosVencidos,
+        String pagoActual,
+        String historicoPagos,
+        String fechaRecienteHistoricoPagos,
+        String fechaAntiguaHistoricoPagos,
+        String clavePrevencion,
+        Integer totalPagosReportados,
+        BigDecimal peorAtraso,
+        String fechaPeorAtraso,
+        BigDecimal saldoVencidoPeorAtraso,
+        BigDecimal montoUltimoPago,
+        String idDomicilio,
+        String servicios
+) {}

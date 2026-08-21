@@ -1,0 +1,5 @@
+# Perfil para ambiente de staging. Activa con: --spring.profiles.active=staging
+fintech:
+  channel-mobile:
+    otp-code-validation: false
+    otp-dev-code: "123456"

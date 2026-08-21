@@ -1,0 +1,135 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-origination-schema
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/001-create-origination-schema.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 002-create-prospects
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/002-create-prospects.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 003-create-event-publication
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/003-create-event-publication.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 004-create-prospect-documents
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/004-add-bureau-consent-and-documents.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 005-drop-product-type-intent
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/005-drop-product-type-intent.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 006-create-credit-applications
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/006-create-credit-applications.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 007-add-offer-columns
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/007-add-offer-columns.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 008-add-contract-columns
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/008-add-contract-columns.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 009-add-approval-fields
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/009-add-approval-fields.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 010-add-promoter-code
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/010-add-promoter-code.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 011-extend-product-and-prospect-types
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/011-extend-product-and-prospect-types.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 012-add-application-search-index
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/012-add-application-search-index.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 013-add-documents-fields
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/013-add-documents-fields.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 014-create-document-files
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/014-create-document-files.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 015-document-review
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/015-document-review.sql
+            relativeToChangelogFile: false
+            splitStatements: true

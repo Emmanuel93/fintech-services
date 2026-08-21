@@ -1,0 +1,107 @@
+# Scrape estático de los 19 servicios Java — docker-compose no tiene service discovery
+# nativo (a diferencia de Kubernetes), así que la lista vive acá, mecánica y explícita.
+# `job_name` = nombre del servicio → es la label que usa el dashboard ($service).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: identity-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["identity-service:8080"]
+
+  - job_name: configuration-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["configuration-service:8080"]
+
+  - job_name: party-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["party-service:8080"]
+
+  - job_name: scoring-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["scoring-service:8080"]
+
+  - job_name: credit-product-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["credit-product-service:8080"]
+
+  - job_name: origination-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["origination-service:8080"]
+
+  - job_name: credit-portfolio-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["credit-portfolio-service:8080"]
+
+  - job_name: charges-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["charges-service:8080"]
+
+  - job_name: payments-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["payments-service:8080"]
+
+  - job_name: channel-mobile-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["channel-mobile-service:8085"]
+
+  - job_name: audit-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["audit-service:8080"]
+
+  - job_name: channels-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["channels-service:8080"]
+
+  - job_name: wallet-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["wallet-service:8080"]
+
+  - job_name: collections-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["collections-service:8080"]
+
+  - job_name: risk-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["risk-service:8080"]
+
+  - job_name: accounting-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["accounting-service:8080"]
+
+  - job_name: invoicing-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["invoicing-service:8080"]
+
+  - job_name: commission-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["commission-service:8080"]
+
+  - job_name: notifications-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["notifications-service:8080"]

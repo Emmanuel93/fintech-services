@@ -1,0 +1,94 @@
+spring:
+  application:
+    name: channel-backoffice-service
+
+  # Sin base de datos — el BFF es stateless; Redis solo cachea agregados caros.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.liquibase.LiquibaseAutoConfiguration
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000
+
+server:
+  port: ${SERVER_PORT:8099}
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: never
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: ${spring.application.name}
+    description: "BFF — Backend For Frontend de la consola operativa de crédito"
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    display-request-duration: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+    try-it-out-enabled: true
+    persist-authorization: true
+  show-actuator: false
+
+fintech:
+  channel-backoffice:
+    # Puertos locales por servicio (fuera de Docker). En contenedor todos escuchan 8080
+    # y se resuelven por nombre — ver application-docker.yml.
+    identity-service-url:         ${IDENTITY_SERVICE_URL:http://localhost:8080}
+    origination-service-url:      ${ORIGINATION_SERVICE_URL:http://localhost:8081}
+    scoring-service-url:          ${SCORING_SERVICE_URL:http://localhost:8082}
+    party-service-url:            ${PARTY_SERVICE_URL:http://localhost:8083}
+    credit-product-service-url:   ${CREDIT_PRODUCT_SERVICE_URL:http://localhost:8084}
+    configuration-service-url:    ${CONFIGURATION_SERVICE_URL:http://localhost:8086}
+    credit-portfolio-service-url: ${CREDIT_PORTFOLIO_SERVICE_URL:http://localhost:8087}
+    charges-service-url:          ${CHARGES_SERVICE_URL:http://localhost:8088}
+    payments-service-url:         ${PAYMENTS_SERVICE_URL:http://localhost:8089}
+    audit-service-url:            ${AUDIT_SERVICE_URL:http://localhost:8090}
+    wallet-service-url:           ${WALLET_SERVICE_URL:http://localhost:8092}
+    collections-service-url:      ${COLLECTIONS_SERVICE_URL:http://localhost:8093}
+    risk-service-url:             ${RISK_SERVICE_URL:http://localhost:8094}
+    accounting-service-url:       ${ACCOUNTING_SERVICE_URL:http://localhost:8095}
+    invoicing-service-url:        ${INVOICING_SERVICE_URL:http://localhost:8096}
+    commission-service-url:       ${COMMISSION_SERVICE_URL:http://localhost:8097}
+    notifications-service-url:    ${NOTIFICATIONS_SERVICE_URL:http://localhost:8098}
+    sales-org-service-url:        ${SALES_ORG_SERVICE_URL:http://localhost:8100}
+    beneficiary-service-url:      ${BENEFICIARY_SERVICE_URL:http://localhost:8102}
+    summary-cache-ttl-seconds:    ${SUMMARY_CACHE_TTL_SECONDS:60}
+    fan-out-timeout-millis:       ${FAN_OUT_TIMEOUT_MILLIS:2000}
+
+    # Con qué se identifica el canal —no el empleado— ante identity-service, para poder resolver
+    # quién actuó al escribir la bitácora. Sin secreto el canal no pregunta y la entrada guarda el
+    # UUID pelado: arrancar importa más que adornar un registro. Sembrada en identity:013.
+    service-client:
+      client-id: ${IDENTITY_SERVICE_CLIENT_ID:channel-backoffice-service}
+      secret:    ${IDENTITY_SERVICE_CLIENT_SECRET:}
+
+logging:
+  level:
+    com.fintech: DEBUG

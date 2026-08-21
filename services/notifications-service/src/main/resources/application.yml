@@ -1,0 +1,78 @@
+spring:
+  application:
+    name: notifications-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: notifications
+    open-in-view: false
+
+  liquibase:
+    change-log: classpath:db/changelog/notifications/db.changelog-notifications.xml
+    default-schema: notifications
+    liquibase-schema: public
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: notifications
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+  # SMTP real y gratuito para arrancar (Brevo/Resend free tier, o Gmail SMTP en dev) — deshabilitado
+  # por default; se activa con fintech.notifications.email.smtp-enabled=true + estas credenciales.
+  mail:
+    host: ${SMTP_HOST:localhost}
+    port: ${SMTP_PORT:587}
+    username: ${SMTP_USERNAME:}
+    password: ${SMTP_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+server:
+  port: 8098
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+fintech:
+  notifications:
+    # Días de retención de NotificationRecord — no aplica todavía en v1 (sin eventos regulatorios, NT-06 diferida).
+    default-locale: es-MX
+    email:
+      smtp-enabled: ${NOTIFICATIONS_SMTP_ENABLED:false}
+      from-address: ${NOTIFICATIONS_FROM_EMAIL:no-reply@fintech.local}

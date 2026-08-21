@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" agent="claude-code" version="24.0.0" type="device">
+  <diagram id="apigee-aws-migration" name="Apigee to AWS API Gateway Migration">
+    <mxGraphModel dx="1780" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1602" pageHeight="2040" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <!-- ===================== TITLE ===================== -->
+        <mxCell id="titleText" value="Migracion de API Gateway: Apigee Edge (Legacy) -&gt; AWS API Gateway HTTP v2 (New)" style="text;html=1;align=left;verticalAlign=middle;fontSize=17;fontStyle=1;fontColor=#232F3E;" vertex="1" parent="1">
+          <mxGeometry x="54" y="13" width="1170" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitleText" value="Coexistencia de flujos legacy y nuevo durante la migracion gradual &#8226; Route53 es servicio global AWS (fuera de Region) &#8226; Imperva y Apigee son SaaS externo (fuera de AWS Cloud)" style="text;html=1;align=left;verticalAlign=middle;fontSize=10.2;fontStyle=2;fontColor=#757575;" vertex="1" parent="1">
+          <mxGeometry x="54" y="38" width="1170" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== MOBILE / WEB APPS (client, outside everything) ===================== -->
+        <mxCell id="mobileApp_card" value="&lt;b&gt;Mobile / Web Apps&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:3.4px;text-align:left&quot;&gt;&#8226; Clientes que consumen APIs&lt;br&gt;&#8226; Config. dinamica por feature flags&lt;br&gt;&#8226; Apunta a dominio legacy o nuevo&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#232F3E;strokeWidth=2;arcSize=8;fontColor=#232F3E;verticalAlign=top;align=center;spacingTop=47.6;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="666" y="76" width="270" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="mobileApp_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#232F3E;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=8.5;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.client;" vertex="1" parent="1">
+          <mxGeometry x="779" y="83" width="43" height="41" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EXTERNAL SaaS: IMPERVA (WAF) - own box ===================== -->
+        <mxCell id="grpImperva" value="EXTERNAL SaaS (Imperva - WAF)" style="rounded=1;dashed=1;dashPattern=8 4;whiteSpace=wrap;html=1;fillColor=#E0F7FA;strokeColor=#00838F;strokeWidth=1.5;verticalAlign=top;align=left;spacingLeft=9;spacingTop=6.8;fontSize=9.3;fontStyle=1;fontColor=#006064;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="558" y="246" width="306" height="144" as="geometry" />
+        </mxCell>
+        <mxCell id="imperva_card" value="&lt;b&gt;&#128737; Imperva WAF&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:3.4px;text-align:left&quot;&gt;&#8226; DDoS Protection &#183; Bot Management&lt;br&gt;&#8226; WAF Rules &#183; SSL/TLS&lt;br&gt;&#8226; Protege ambos dominios (legacy y nuevo)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F5F5;strokeColor=#757575;strokeWidth=2;arcSize=8;fontColor=#424242;verticalAlign=top;align=center;spacingTop=11.9;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="585" y="280" width="252" height="94" as="geometry" />
+        </mxCell>
+        <mxCell id="imperva_badge" value="SHARED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#757575;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="774" y="272" width="63" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EXTERNAL / NON-AWS: APIGEE EDGE - own box ===================== -->
+        <mxCell id="grpExternalApigee" value="EXTERNAL / NON-AWS (Google Cloud - Apigee)" style="rounded=1;dashed=1;dashPattern=8 4;whiteSpace=wrap;html=1;fillColor=#FBE9E7;strokeColor=#E64A19;strokeWidth=1.5;verticalAlign=top;align=left;spacingLeft=9;spacingTop=6.8;fontSize=9.3;fontStyle=1;fontColor=#BF360C;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="54" y="425" width="306" height="162" as="geometry" />
+        </mxCell>
+        <mxCell id="apigee_card" value="&lt;b&gt;&#128520; Apigee Edge&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:3.4px;text-align:left&quot;&gt;&#8226; Multiples proxies fragmentados&lt;br&gt;&#8226; JWT Validation&lt;br&gt;&#8226; CORS Policies&lt;br&gt;&#8226; Header Transformation&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#E53935;strokeWidth=2;arcSize=8;fontColor=#B71C1C;verticalAlign=top;align=center;spacingTop=11.9;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="81" y="466" width="252" height="102" as="geometry" />
+        </mxCell>
+        <mxCell id="apigee_badge" value="LEGACY" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E53935;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="270" y="457" width="63" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== AWS CLOUD ===================== -->
+        <mxCell id="grpAwsCloud" value="AWS Cloud" style="points=[[0,0,0],[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0,0],[0,1,0],[0.25,1,0],[0.5,1,0],[0.75,1,0],[1,1,0],[0,0.25,0],[0,0.5,0],[0,0.75,0],[1,0.25,0],[1,0.5,0],[1,0.75,0]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11.9;fontStyle=1;container=0;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_aws_cloud_alt;strokeColor=#232F3E;fillColor=none;verticalAlign=top;align=left;spacingLeft=28.8;spacingTop=5.1;fontColor=#232F3E;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="378" y="425" width="1152" height="1313" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== ROUTE53 (global service, AWS Cloud level - outside Region) ===================== -->
+        <mxCell id="route53_card" value="&lt;b&gt;Route 53 Hosted Zone&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:3.4px;text-align:left&quot;&gt;&#8226; Servicio global (no regional)&lt;br&gt;&#8226; Solo flujo nuevo &#183; CNAME -&gt; Imperva&lt;br&gt;&#8226; DNS delegation&lt;br&gt;&#8226; Cuenta AWS: 111122223333 (bu-payments-prod)&lt;br&gt;&#8226; Recurso: hostedzone/Z0123456789ABC&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E5F5;strokeColor=#8C4FFF;strokeWidth=2;arcSize=8;fontColor=#4A148C;verticalAlign=top;align=center;spacingTop=47.6;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="864" y="459" width="252" height="149" as="geometry" />
+        </mxCell>
+        <mxCell id="route53_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=8.5;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.route_53;" vertex="1" parent="1">
+          <mxGeometry x="968" y="466" width="43" height="41" as="geometry" />
+        </mxCell>
+        <mxCell id="route53_badge" value="BU OWNED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#8C4FFF;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1053" y="450" width="72" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== REGION ===================== -->
+        <mxCell id="grpRegion" value="Region: us-east-1" style="points=[[0,0,0],[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0,0],[0,1,0],[0.25,1,0],[0.5,1,0],[0.75,1,0],[1,1,0],[0,0.25,0],[0,0.5,0],[0,0.75,0],[1,0.25,0],[1,0.5,0],[1,0.75,0]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=1;container=0;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_region;strokeColor=#147EBA;fillColor=none;verticalAlign=top;align=left;spacingLeft=28.8;spacingTop=5.1;fontColor=#147EBA;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="405" y="633" width="1098" height="1080" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== API PROCESSING LAYER (new sub-group inside Region) ===================== -->
+        <mxCell id="grpApiLayer" value="API Processing Layer (New Flow)" style="rounded=1;dashed=1;dashPattern=6 3;whiteSpace=wrap;html=1;fillColor=#F5F9FF;strokeColor=#1E88E5;strokeWidth=1.5;verticalAlign=top;align=left;spacingLeft=10.8;spacingTop=6.8;fontSize=10.2;fontStyle=1;fontColor=#0D47A1;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="837" y="667" width="306" height="455" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== API GATEWAY HTTP v2 (NEW) ===================== -->
+        <mxCell id="apigw_card" value="&lt;b&gt;AWS API Gateway HTTP v2&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:3.4px;text-align:left&quot;&gt;&#8226; Custom Domain&lt;br&gt;&#8226; Stage: $default&lt;br&gt;&#8226; Routes: /tr/domain/service-x/*&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#1E88E5;strokeWidth=2;arcSize=8;fontColor=#0D47A1;verticalAlign=top;align=center;spacingTop=47.6;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="864" y="701" width="252" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="apigw_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=8.5;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.api_gateway;" vertex="1" parent="1">
+          <mxGeometry x="968" y="708" width="43" height="41" as="geometry" />
+        </mxCell>
+        <mxCell id="apigw_badge" value="NEW" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1E88E5;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1053" y="693" width="63" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== LAMBDA AUTHORIZER (NEW) ===================== -->
+        <mxCell id="lambdaAuth_card" value="&lt;b&gt;Lambda Authorizer (Go)&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:3.4px;text-align:left&quot;&gt;&#8226; Validator A: JWT (Auth0)&lt;br&gt;&#8226; Validator B: JWT (Cognito)&lt;br&gt;&#8226; Validator C: Custom&lt;br&gt;&#8226; Retorna: isAuthorized, userId, ctx&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#1E88E5;strokeWidth=2;arcSize=8;fontColor=#0D47A1;verticalAlign=top;align=center;spacingTop=47.6;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="864" y="850" width="252" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="lambdaAuth_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=8.5;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.lambda;" vertex="1" parent="1">
+          <mxGeometry x="968" y="857" width="43" height="41" as="geometry" />
+        </mxCell>
+        <mxCell id="lambdaAuth_badge" value="NEW" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1E88E5;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1053" y="842" width="63" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== REQUEST TRANSFORMATION (NEW) ===================== -->
+        <mxCell id="transform_card" value="&lt;b&gt;&#9881; Request Transformation&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:3.4px;text-align:left&quot;&gt;&#8226; Policy: overwrite-x-user-id-header&lt;br&gt;&#8226; Input: $context.authorizer.userId&lt;br&gt;&#8226; Output: header x-user-id&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#1E88E5;strokeWidth=2;arcSize=8;fontColor=#0D47A1;verticalAlign=top;align=center;spacingTop=11.9;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="864" y="1020" width="252" height="89" as="geometry" />
+        </mxCell>
+        <mxCell id="transform_badge" value="NEW" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1E88E5;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1053" y="1012" width="63" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== VPC LINK (NEW, straddles Region/VPC boundary) ===================== -->
+        <mxCell id="vpclink_card" value="&lt;b&gt;VPC Link&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:1.7px;text-align:left&quot;&gt;&#8226; Conecta API GW &lt;-&gt; ALB privado&lt;br&gt;&#8226; HTTPS (TLS) &#183; SNI verification&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#1E88E5;strokeWidth=2;arcSize=8;fontColor=#0D47A1;verticalAlign=top;align=center;spacingTop=40.8;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="864" y="1139" width="252" height="94" as="geometry" />
+        </mxCell>
+        <mxCell id="vpclink_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=8.5;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.vpc_privatelink;" vertex="1" parent="1">
+          <mxGeometry x="968" y="1143" width="36" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="vpclink_badge" value="NEW" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1E88E5;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1053" y="1130" width="63" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== VPC ===================== -->
+        <mxCell id="grpVPC" value="VPC: prod-vpc (10.0.0.0/16)" style="points=[[0,0,0],[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0,0],[0,1,0],[0.25,1,0],[0.5,1,0],[0.75,1,0],[1,1,0],[0,0.25,0],[0,0.5,0],[0,0.75,0],[1,0.25,0],[1,0.5,0],[1,0.75,0]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=11;fontStyle=1;container=0;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_vpc2;strokeColor=#8C4FFF;fillColor=none;verticalAlign=top;align=left;spacingLeft=28.8;spacingTop=5.1;fontColor=#8C4FFF;dashed=0;" vertex="1" parent="1">
+          <mxGeometry x="432" y="1177" width="1044" height="510" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== AVAILABILITY ZONE ===================== -->
+        <mxCell id="grpAZ" value="Availability Zone: us-east-1a" style="points=[[0,0,0],[0.25,0,0],[0.5,0,0],[0.75,0,0],[1,0,0],[0,1,0],[0.25,1,0],[0.5,1,0],[0.75,1,0],[1,1,0],[0,0.25,0],[0,0.5,0],[0,0.75,0],[1,0.25,0],[1,0.5,0],[1,0.75,0]];outlineConnect=0;gradientColor=none;html=1;whiteSpace=wrap;fontSize=10.2;fontStyle=1;container=0;pointerEvents=0;collapsible=0;recursiveResize=0;shape=mxgraph.aws4.group;grIcon=mxgraph.aws4.group_availability_zone;strokeColor=#147EBA;fillColor=none;verticalAlign=top;align=left;spacingLeft=28.8;spacingTop=5.1;fontColor=#147EBA;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="454" y="1216" width="999" height="446" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== PUBLIC SUBNET ===================== -->
+        <mxCell id="grpPublicSubnet" value="Public Subnet" style="rounded=1;dashed=1;dashPattern=6 3;whiteSpace=wrap;html=1;fillColor=#E8F5E9;strokeColor=#4CAF50;strokeWidth=1.5;verticalAlign=top;align=left;spacingLeft=10.8;spacingTop=6.8;fontSize=9.3;fontStyle=1;fontColor=#2E7D32;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="477" y="1254" width="297" height="153" as="geometry" />
+        </mxCell>
+        <mxCell id="albPublic_card" value="&lt;b&gt;ALB Publico&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:3.4px;text-align:left&quot;&gt;&#8226; Internet-facing&lt;br&gt;&#8226; Port 443 (HTTPS)&lt;br&gt;&#8226; Usado por Apigee Edge&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FADBD8;strokeColor=#E53935;strokeWidth=2;arcSize=8;fontColor=#B71C1C;verticalAlign=top;align=center;spacingTop=47.6;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="500" y="1279" width="252" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="albPublic_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=8.5;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.application_load_balancer;" vertex="1" parent="1">
+          <mxGeometry x="604" y="1286" width="43" height="41" as="geometry" />
+        </mxCell>
+        <mxCell id="albPublic_badge" value="LEGACY" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E53935;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="688" y="1271" width="63" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== PRIVATE SUBNET ===================== -->
+        <mxCell id="grpPrivateSubnet" value="Private Subnet" style="rounded=1;dashed=1;dashPattern=6 3;whiteSpace=wrap;html=1;fillColor=#E3F2FD;strokeColor=#1E88E5;strokeWidth=1.5;verticalAlign=top;align=left;spacingLeft=10.8;spacingTop=6.8;fontSize=9.3;fontStyle=1;fontColor=#0D47A1;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="810" y="1254" width="612" height="387" as="geometry" />
+        </mxCell>
+        <mxCell id="albPrivate_card" value="&lt;b&gt;ALB Privado&lt;/b&gt;&lt;div style=&quot;font-size:8.5px;margin-top:3.4px;text-align:left&quot;&gt;&#8226; Internal (sin acceso a Internet)&lt;br&gt;&#8226; Port 443 (HTTPS)&lt;br&gt;&#8226; Solo accesible via VPC Link&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DAE8FC;strokeColor=#1E88E5;strokeWidth=2;arcSize=8;fontColor=#0D47A1;verticalAlign=top;align=center;spacingTop=47.6;fontSize=10.2;" vertex="1" parent="1">
+          <mxGeometry x="837" y="1279" width="252" height="115" as="geometry" />
+        </mxCell>
+        <mxCell id="albPrivate_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#8C4FFF;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=8.5;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.application_load_balancer;" vertex="1" parent="1">
+          <mxGeometry x="941" y="1286" width="43" height="41" as="geometry" />
+        </mxCell>
+        <mxCell id="albPrivate_badge" value="NEW" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#1E88E5;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1026" y="1271" width="63" height="17" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== BACKEND CLUSTER (EKS) inside Private Subnet ===================== -->
+        <mxCell id="grpCluster" value="EKS Cluster (Kubernetes)" style="rounded=1;dashed=1;dashPattern=6 3;whiteSpace=wrap;html=1;fillColor=#FFF3E0;strokeColor=#ED7100;strokeWidth=2;verticalAlign=top;align=left;spacingLeft=45;spacingTop=8.5;fontSize=10.2;fontStyle=1;fontColor=#E65100;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="837" y="1428" width="558" height="191" as="geometry" />
+        </mxCell>
+        <mxCell id="cluster_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=6.8;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.eks;" vertex="1" parent="1">
+          <mxGeometry x="821" y="1416" width="31" height="29" as="geometry" />
+        </mxCell>
+        <mxCell id="cluster_badge" value="SHARED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#757575;strokeColor=none;fontColor=#FFFFFF;fontSize=7.6;fontStyle=1;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="1332" y="1420" width="63" height="17" as="geometry" />
+        </mxCell>
+
+        <mxCell id="svcA_card" value="&lt;b&gt;Service A&lt;/b&gt;&lt;div style=&quot;font-size:7.6px&quot;&gt;(EKS)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#ED7100;strokeWidth=1.5;arcSize=8;fontColor=#E65100;verticalAlign=top;align=center;spacingTop=49.3;fontSize=9.3;" vertex="1" parent="1">
+          <mxGeometry x="864" y="1479" width="112" height="119" as="geometry" />
+        </mxCell>
+        <mxCell id="svcA_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=7.6;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.eks;" vertex="1" parent="1">
+          <mxGeometry x="901" y="1488" width="40" height="37" as="geometry" />
+        </mxCell>
+
+        <mxCell id="svcB_card" value="&lt;b&gt;Service B&lt;/b&gt;&lt;div style=&quot;font-size:7.6px&quot;&gt;(EKS)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#ED7100;strokeWidth=1.5;arcSize=8;fontColor=#E65100;verticalAlign=top;align=center;spacingTop=49.3;fontSize=9.3;" vertex="1" parent="1">
+          <mxGeometry x="994" y="1479" width="112" height="119" as="geometry" />
+        </mxCell>
+        <mxCell id="svcB_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=7.6;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.eks;" vertex="1" parent="1">
+          <mxGeometry x="1031" y="1488" width="40" height="37" as="geometry" />
+        </mxCell>
+
+        <mxCell id="svcC_card" value="&lt;b&gt;Service C&lt;/b&gt;&lt;div style=&quot;font-size:7.6px&quot;&gt;(EKS)&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFE0B2;strokeColor=#ED7100;strokeWidth=1.5;arcSize=8;fontColor=#E65100;verticalAlign=top;align=center;spacingTop=49.3;fontSize=9.3;" vertex="1" parent="1">
+          <mxGeometry x="1125" y="1479" width="112" height="119" as="geometry" />
+        </mxCell>
+        <mxCell id="svcC_icon" value="" style="sketch=0;outlineConnect=0;fontColor=#232F3E;gradientColor=none;fillColor=#ED7100;strokeColor=#ffffff;dashed=0;verticalLabelPosition=bottom;verticalAlign=top;align=center;html=1;fontSize=7.6;fontStyle=0;aspect=fixed;shape=mxgraph.aws4.resourceIcon;resIcon=mxgraph.aws4.eks;" vertex="1" parent="1">
+          <mxGeometry x="1162" y="1488" width="40" height="37" as="geometry" />
+        </mxCell>
+
+        <mxCell id="svcN_card" value="&lt;div style=&quot;font-size:22.1px;font-weight:bold;margin-top:1.7px&quot;&gt;&#8230;&lt;/div&gt;&lt;b&gt;Service N&lt;/b&gt;&lt;div style=&quot;font-size:7.6px&quot;&gt;(+ servicios)&lt;/div&gt;" style="rounded=1;dashed=1;dashPattern=4 3;whiteSpace=wrap;html=1;fillColor=#FFF8E1;strokeColor=#ED7100;strokeWidth=1.5;arcSize=8;fontColor=#E65100;verticalAlign=top;align=center;spacingTop=11.9;fontSize=9.3;" vertex="1" parent="1">
+          <mxGeometry x="1256" y="1479" width="112" height="119" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EDGES: LEGACY FLOW (RED) ===================== -->
+        <mxCell id="e1" value="HTTPS&#10;old-domain.example.com" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#E53935;strokeWidth=2;fontColor=#B71C1C;fontSize=8.5;fontStyle=1;labelBackgroundColor=#FFFFFF;exitX=0.25;exitY=1;exitDx=0;exitDy=0;entryX=0.25;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="mobileApp_card" target="imperva_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="fork -&gt; Apigee (legacy)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#E53935;strokeWidth=2;fontColor=#B71C1C;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.2;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="imperva_card" target="apigee_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="Port 443 HTTPS&#10;JWT * CORS * Headers" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#E53935;strokeWidth=2;fontColor=#B71C1C;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="apigee_card" target="albPublic_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="Port 443" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#E53935;strokeWidth=2;fontColor=#B71C1C;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.3;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="albPublic_card" target="grpCluster">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== EDGES: NEW FLOW (BLUE) ===================== -->
+        <mxCell id="e2" value="HTTPS&#10;new-domain.example.com" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#1E88E5;strokeWidth=2;fontColor=#0D47A1;fontSize=8.5;fontStyle=1;labelBackgroundColor=#FFFFFF;exitX=0.75;exitY=1;exitDx=0;exitDy=0;entryX=0.75;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="mobileApp_card" target="imperva_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="fork -&gt; Route53 (new) / CNAME" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#1E88E5;strokeWidth=2;fontColor=#0D47A1;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.8;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="imperva_card" target="route53_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="HTTPS" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#1E88E5;strokeWidth=2;fontColor=#0D47A1;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="route53_card" target="apigw_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="Authorize&#10;Route: /tr/domain/*" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#1E88E5;strokeWidth=2;dashed=1;dashPattern=4 3;fontColor=#0D47A1;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="apigw_card" target="lambdaAuth_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="isAuthorized=true&#10;userId, context" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#1E88E5;strokeWidth=2;fontColor=#0D47A1;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="lambdaAuth_card" target="transform_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="x-user-id header set" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#1E88E5;strokeWidth=2;fontColor=#0D47A1;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="transform_card" target="vpclink_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="TLS + SNI&#10;Port 443" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#1E88E5;strokeWidth=2;fontColor=#0D47A1;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="vpclink_card" target="albPrivate_card">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="Port 443&#10;x-user-id" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;elbow=vertical;strokeColor=#1E88E5;strokeWidth=2;fontColor=#0D47A1;fontSize=8.5;labelBackgroundColor=#FFFFFF;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.7;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="albPrivate_card" target="grpCluster">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== NOTES ===================== -->
+        <mxCell id="noteMigration" value="&lt;b&gt;&#128260; Migracion Gradual&lt;/b&gt;&lt;div style=&quot;margin-top:5.1px&quot;&gt;Feature flags en las apps controlan a que dominio apuntar (legacy o nuevo). El mismo Imperva (WAF SaaS) protege ambos flujos y los mismos backends reciben trafico de ambas rutas durante la transicion.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F9A825;strokeWidth=1;align=left;verticalAlign=top;spacingLeft=9;spacingTop=6.8;fontSize=8.9;fontColor=#5D4037;arcSize=6;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="972" y="76" width="252" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="noteVpcLink" value="&lt;b&gt;&#128274; VPC Link &#8212; Trafico Privado&lt;/b&gt;&lt;div style=&quot;margin-top:5.1px&quot;&gt;Conecta el API Gateway con el ALB privado dentro de la VPC. Trafico HTTPS con verificacion SNI (server_name_to_verify) y validacion de certificado. El ALB privado NO es accesible desde Internet, solo desde el VPC Link.&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF9C4;strokeColor=#F9A825;strokeWidth=1;align=left;verticalAlign=top;spacingLeft=9;spacingTop=6.8;fontSize=8.9;fontColor=#5D4037;arcSize=6;shadow=0;" vertex="1" parent="1">
+          <mxGeometry x="1170" y="701" width="306" height="187" as="geometry" />
+        </mxCell>
+
+        <!-- ===================== LEGEND ===================== -->
+        <mxCell id="legendBox" value="&lt;b style=&quot;font-size:11px&quot;&gt;LEYENDA&lt;/b&gt;&lt;br/&gt;&lt;div style=&quot;margin-top:6.8px&quot;&gt;&lt;span style=&quot;display:inline-block;width:12.6px;height:11.9px;background:#1E88E5;border-radius:3px;margin-right:6px;vertical-align:middle&quot;&gt;&lt;/span&gt;Componente NUEVO (API Gateway, Lambda Authorizer, VPC Link, ALB Privado)&lt;/div&gt;&lt;div style=&quot;margin-top:5.1px&quot;&gt;&lt;span style=&quot;display:inline-block;width:12.6px;height:11.9px;background:#E53935;border-radius:3px;margin-right:6px;vertical-align:middle&quot;&gt;&lt;/span&gt;Componente LEGACY (Apigee Edge, ALB Publico) &#8212; a deprecar&lt;/div&gt;&lt;div style=&quot;margin-top:5.1px&quot;&gt;&lt;span style=&quot;display:inline-block;width:12.6px;height:11.9px;background:#757575;border-radius:3px;margin-right:6px;vertical-align:middle&quot;&gt;&lt;/span&gt;Componente COMPARTIDO / REUTILIZADO (Imperva WAF, Backend Services en EKS)&lt;/div&gt;&lt;div style=&quot;margin-top:5.1px&quot;&gt;&lt;span style=&quot;display:inline-block;width:12.6px;height:11.9px;background:#8C4FFF;border-radius:3px;margin-right:6px;vertical-align:middle&quot;&gt;&lt;/span&gt;Componente de UNIDAD DE NEGOCIO (Route53 - Hosted Zone propia, no compartida)&lt;/div&gt;&lt;div style=&quot;margin-top:8.5px&quot;&gt;&#8594; Flujo de datos (flecha solida)&lt;/div&gt;&lt;div style=&quot;margin-top:3.4px&quot;&gt;&#8677; Autenticacion / Autorizacion (flecha punteada azul)&lt;/div&gt;&lt;div style=&quot;margin-top:3.4px&quot;&gt;&lt;span style=&quot;color:#E53935&quot;&gt;&#9644;&#9644;&lt;/span&gt; Flujo Legacy &amp;nbsp;&amp;nbsp; &lt;span style=&quot;color:#1E88E5&quot;&gt;&#9644;&#9644;&lt;/span&gt; Flujo Nuevo&lt;/div&gt;&lt;div style=&quot;margin-top:8.5px&quot;&gt;&lt;b&gt;Agrupaciones AWS:&lt;/b&gt; AWS Cloud &gt; Region &gt; VPC &gt; Availability Zone &gt; Subnet&lt;/div&gt;&lt;div style=&quot;margin-top:3.4px&quot;&gt;Route53 = servicio global AWS (fuera de Region), propiedad de la unidad de negocio. Imperva/Apigee = SaaS externo (fuera de AWS Cloud).&lt;/div&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#BDBDBD;strokeWidth=1;align=left;verticalAlign=top;spacingLeft=12.6;spacingTop=10.2;fontSize=9.3;fontColor=#333333;arcSize=4;" vertex="1" parent="1">
+          <mxGeometry x="54" y="1764" width="504" height="246" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

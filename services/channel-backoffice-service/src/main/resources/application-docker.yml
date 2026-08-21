@@ -1,0 +1,34 @@
+# Overrides para ejecución en contenedor Docker.
+# Activa con: SPRING_PROFILES_ACTIVE=docker
+spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+
+fintech:
+  channel-backoffice:
+    # Dentro de la red de Docker todos los domain services escuchan en 8080.
+    identity-service-url:         ${IDENTITY_SERVICE_URL:http://identity-service:8080}
+    origination-service-url:      ${ORIGINATION_SERVICE_URL:http://origination-service:8080}
+    scoring-service-url:          ${SCORING_SERVICE_URL:http://scoring-service:8080}
+    party-service-url:            ${PARTY_SERVICE_URL:http://party-service:8080}
+    credit-product-service-url:   ${CREDIT_PRODUCT_SERVICE_URL:http://credit-product-service:8080}
+    configuration-service-url:    ${CONFIGURATION_SERVICE_URL:http://configuration-service:8080}
+    credit-portfolio-service-url: ${CREDIT_PORTFOLIO_SERVICE_URL:http://credit-portfolio-service:8080}
+    charges-service-url:          ${CHARGES_SERVICE_URL:http://charges-service:8080}
+    payments-service-url:         ${PAYMENTS_SERVICE_URL:http://payments-service:8080}
+    audit-service-url:            ${AUDIT_SERVICE_URL:http://audit-service:8080}
+    wallet-service-url:           ${WALLET_SERVICE_URL:http://wallet-service:8080}
+    collections-service-url:      ${COLLECTIONS_SERVICE_URL:http://collections-service:8080}
+    risk-service-url:             ${RISK_SERVICE_URL:http://risk-service:8080}
+    accounting-service-url:       ${ACCOUNTING_SERVICE_URL:http://accounting-service:8080}
+    invoicing-service-url:        ${INVOICING_SERVICE_URL:http://invoicing-service:8080}
+    commission-service-url:       ${COMMISSION_SERVICE_URL:http://commission-service:8080}
+    notifications-service-url:    ${NOTIFICATIONS_SERVICE_URL:http://notifications-service:8080}
+    sales-org-service-url:        ${SALES_ORG_SERVICE_URL:http://sales-org-service:8080}
+    beneficiary-service-url:      ${BENEFICIARY_SERVICE_URL:http://beneficiary-service:8080}
+
+logging:
+  level:
+    com.fintech: INFO

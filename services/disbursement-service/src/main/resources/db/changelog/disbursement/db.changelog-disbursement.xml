@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <include file="db/changelog/disbursement/001-create-schema.sql"              relativeToChangelogFile="false"/>
+    <include file="db/changelog/disbursement/002-create-company-mappings.sql"    relativeToChangelogFile="false"/>
+    <include file="db/changelog/disbursement/003-create-routing-rules.sql"       relativeToChangelogFile="false"/>
+    <include file="db/changelog/disbursement/004-create-disbursement-orders.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/disbursement/005-create-disbursement-events.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/disbursement/006-create-event-publication.sql"   relativeToChangelogFile="false"/>
+
+</databaseChangeLog>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+    <include file="db/changelog/notifications/001-create-schema.sql"                 relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/002-create-notification-policies.sql"  relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/003-create-notification-templates.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/004-create-notification-preferences.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/005-create-notification-records.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/006-create-contact-readmodels.sql"     relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/007-create-credit-account-progress.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/008-create-event-publication.sql"      relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/009-seed-notification-policies.sql"    relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/010-seed-notification-templates.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/011-add-read-state.sql"                relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/012-abstract-recipient.sql"    relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/013-seed-backoffice-policies.sql"  relativeToChangelogFile="false"/>
+</databaseChangeLog>

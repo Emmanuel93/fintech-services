@@ -1,0 +1,1274 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Presupuesto de memoria (T7 Observability, 2026-07-18)
+# Host de referencia: 24 GB. Docker Desktop → Settings → Resources → Memory
+# se recomienda fijar en 16 GB (deja 8 GB de reserva para el host/OS, tal como
+# se pidió explícitamente) — hoy Docker Desktop tiene 7.65 GB asignados, que
+# alcanza para el stack de negocio solo pero NO alcanza si además se prende
+# el perfil `observability` simultáneamente (ver cálculo abajo). Este archivo
+# no puede cambiar la asignación de RAM del propio Docker Desktop (es config
+# de la app, no del repo) — sí fija un límite duro por contenedor para que la
+# suma total, aun en el peor caso (todo prendido a la vez), quede acotada:
+#
+#   19 servicios Java × 512M          ≈  9.50 GB
+#   gateway (nginx, liviano)          ≈  0.06 GB
+#   postgres + kafka + zookeeper + redis ≈ 2.38 GB
+#   perfil observability (6 contenedores, opt-in) ≈ 3.13 GB (elasticsearch subido a 1536M
+#                                                             tras un OOM-kill real en verificación)
+#   ─────────────────────────────────────────────
+#   TOTAL peor caso                   ≈ 15.1 GB   (holgura de ~0.9 GB dentro de 16 GB)
+#
+# `docker compose up` (sin --profile observability) usa ≈ 12 GB peor caso.
+# Nota: estos son LÍMITES (techos), no reservas — el uso real observado en verificación con
+# los 19 servicios + infra + observability corriendo en simultáneo fue de ~5-6 GB reales.
+# ═══════════════════════════════════════════════════════════════════════════
+
+x-otel-agent: &otel-agent
+  JAVA_TOOL_OPTIONS: "-javaagent:/otel/opentelemetry-javaagent.jar"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+  # El collector sólo existe con `--profile observability`. Con el exportador
+  # fijo en otlp, cada request de una corrida normal escupe
+  # `UnknownHostException: otel-collector` — ruido que enmascara los errores
+  # que sí importan. Se apaga por default y se enciende junto con el perfil:
+  #   OTEL_TRACES_EXPORTER=otlp docker compose --profile observability up -d
+  OTEL_TRACES_EXPORTER: "${OTEL_TRACES_EXPORTER:-none}"
+  OTEL_METRICS_EXPORTER: "none"    # métricas van por Micrometer/Prometheus — ver T7_observability.md OBS-01
+  OTEL_LOGS_EXPORTER: "none"       # logs van por Fluent Bit — ver T7_observability.md OBS-01
+  OTEL_RESOURCE_ATTRIBUTES: "service.namespace=fintech,deployment.environment=docker-compose"
+  # Profundidad de traza: el agente desactiva por defecto el span del @Controller y del @KafkaListener.
+  # Los reactivamos para ver la cadena controller → (use-case vía @WithSpan) → repo/JPA/Kafka.
+  OTEL_INSTRUMENTATION_COMMON_EXPERIMENTAL_CONTROLLER_TELEMETRY_ENABLED: "true"
+  OTEL_INSTRUMENTATION_SPRING_KAFKA_EXPERIMENTAL_SPAN_ATTRIBUTES: "true"
+  OTEL_INSTRUMENTATION_KAFKA_EXPERIMENTAL_SPAN_ATTRIBUTES: "true"
+
+x-app-mem: &app-mem
+  deploy:
+    resources:
+      limits:
+        memory: 512M
+      reservations:
+        memory: 256M
+
+services:
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # INFRAESTRUCTURA (siempre activa)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  postgres:
+    image: postgres:16-alpine
+    # max_connections default (100) no alcanza cuando los 19 servicios arrancan a la vez —
+    # cada uno abre su propio pool HikariCP (~10 conexiones) + Liquibase — hallazgo real al
+    # verificar el stack completo en vivo (2026-07-18), no relacionado con T7 en sí.
+    command: ["postgres", "-c", "max_connections=250"]
+    environment:
+      POSTGRES_DB: fintech
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"    # expuesto para herramientas de desarrollo (DBeaver, psql)
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fintech -d fintech"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - fintech-network
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.7.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_log:/var/lib/zookeeper/log
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    restart: unless-stopped
+    networks:
+      - fintech-network
+
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - fintech-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"       # expuesto para herramientas de desarrollo (redis-cli)
+    volumes:
+      - redis_data:/data
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory ${REDIS_MAX_MEMORY:-256mb}
+      --maxmemory-policy allkeys-lru
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+        reservations:
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # GATEWAY — único punto de entrada externo
+  # Puerto host: GATEWAY_PORT (default 8080).
+  # Acceso externo: http://localhost:8080  (o mobile.localhost:8080 con /etc/hosts)
+  # Acceso interno (Docker): http://<service-name>:8080 (sin pasar por gateway)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  gateway-service:
+    build:
+      context: ./services/gateway-service
+      dockerfile: Dockerfile
+    image: fintech/gateway-service:latest
+    ports:
+      - "${GATEWAY_PORT:-8080}:80"
+    volumes:
+      - ./services/gateway-service/nginx.conf:/usr/local/openresty/nginx/conf/nginx.conf:ro
+      # Los límites de tasa por entorno: por default los de producción. En local
+      # se apunta a rate-limits.local.conf desde el .env, porque 3 registros por
+      # minuto hacen fallar la suite E2E por el gateway y no por el producto.
+      - ./services/gateway-service/${GATEWAY_RATE_LIMITS:-rate-limits.conf}:/etc/nginx/rate-limits.conf:ro
+      - ./services/gateway-service/conf.d:/etc/nginx/conf.d:ro
+      - ./services/gateway-service/keys:/etc/nginx/keys:ro
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+        reservations:
+          memory: 32M
+    depends_on:
+      # nginx resuelve los upstreams al cargar la config: si un BFF no existe todavía,
+      # el gateway arranca en bucle de reinicio hasta que aparezca.
+      - identity-service
+      - channel-mobile-service
+      - channel-backoffice-service
+    restart: unless-stopped
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # TRANSVERSALES (T1 Identity, T5 Configuration)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  identity-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: identity-service
+    image: fintech/identity-service:latest
+    # Sin puerto externo — acceso solo a través del gateway
+    volumes:
+      - ./services/identity-service/src/main/resources/keys/private.pem:/etc/identity/keys/private.pem:ro
+      - ./services/gateway-service/keys/public.pem:/etc/identity/keys/public.pem:ro
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "identity-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      AUTH_PRIVATE_KEY_PATH: /etc/identity/keys/private.pem
+      AUTH_PUBLIC_KEY_PATH: /etc/identity/keys/public.pem
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  configuration-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: configuration-service
+    image: fintech/configuration-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "configuration-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      JWT_SECRET: ${JWT_SECRET:-QGISPRfzivPfc8A8cil1RIpRDWl0zsrGuHdPBT0NkxWOYWhJb0bPQRN6yQOFU}
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CONFIG_CACHE_TTL_SECONDS: ${CONFIG_CACHE_TTL_SECONDS:-300}
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # CORE — Party, Scoring, Credit Product
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  party-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: party-service
+    image: fintech/party-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "party-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  scoring-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: scoring-service
+    image: fintech/scoring-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "scoring-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CIRCULO_CREDITO_API_KEY: ${CIRCULO_CREDITO_API_KEY:-YfuKKDGcx8DBFLny8gWJVaBcx0xUc5oT}
+      # Dev/local: usa el mock de buró (reporte determinista por CURP) para correr el journey
+      # sin depender del sandbox externo. Poner en false para pegar al buró real.
+      SCORING_CIRCULO_MOCK_ENABLED: ${SCORING_CIRCULO_MOCK_ENABLED:-true}
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  credit-product-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: credit-product-service
+    image: fintech/credit-product-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "credit-product-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # CORE — Origination (D3) + Credit Portfolio ★ (D4)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  origination-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: origination-service
+    image: fintech/origination-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "origination-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      CREDIT_PRODUCT_SERVICE_URL: http://credit-product-service:8080
+      PARTY_SERVICE_URL: http://party-service:8080
+      SALES_ORG_SERVICE_URL: http://sales-org-service:8080
+      # Habilita /internal/test-support/* (llevar una solicitud a revisión sin
+      # depender del score). Apagado fuera de local.
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      identity-service:
+        condition: service_started
+      credit-product-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  credit-portfolio-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: credit-portfolio-service
+    image: fintech/credit-portfolio-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "credit-portfolio-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  charges-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: charges-service
+    image: fintech/charges-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "charges-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      credit-portfolio-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  payments-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: payments-service
+    image: fintech/payments-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "payments-service"
+      SPRING_APPLICATION_NAME: "payments-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      credit-portfolio-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # CHANNEL — Mobile BFF
+  # Nota: corre en puerto 8085 internamente (SERVER_PORT: 8085)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  channel-mobile-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: channel-mobile-service
+    image: fintech/channel-mobile-service:latest
+    # Sin puerto externo — acceso solo a través del gateway en /mobile/*
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "channel-mobile-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8085
+      IDENTITY_SERVICE_URL: http://identity-service:8080
+      ORIGINATION_SERVICE_URL: http://origination-service:8080
+      PARTY_SERVICE_URL: http://party-service:8080
+      CREDIT_PORTFOLIO_SERVICE_URL: http://credit-portfolio-service:8080
+      WALLET_SERVICE_URL: http://wallet-service:8080
+      NOTIFICATIONS_SERVICE_URL: http://notifications-service:8080
+      PAYMENTS_SERVICE_URL: http://payments-service:8080
+      CHARGES_SERVICE_URL: http://charges-service:8080
+      SCORING_SERVICE_URL: http://scoring-service:8080
+      BENEFICIARY_SERVICE_URL: http://beneficiary-service:8080
+      # Sustituye la web pública de KYC de la beneficiaria mientras no exista. Sólo local.
+      BENEFICIARY_KYC_SIMULATION_ENABLED: "true"
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      OTP_EXPIRY_MINUTES: ${OTP_EXPIRY_MINUTES:-5}
+      OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS:-3}
+      OTP_MAX_SENDS_PER_WINDOW: ${OTP_MAX_SENDS_PER_WINDOW:-5}
+      OTP_SEND_WINDOW_MINUTES: ${OTP_SEND_WINDOW_MINUTES:-60}
+      KYC_SESSION_EXPIRY_MINUTES: ${KYC_SESSION_EXPIRY_MINUTES:-30}
+      OTP_CODE_VALIDATION: ${OTP_CODE_VALIDATION:-true}
+      OTP_DEV_CODE: ${OTP_DEV_CODE:-}
+    <<: *app-mem
+    depends_on:
+      identity-service:
+        condition: service_started
+      origination-service:
+        condition: service_started
+      wallet-service:
+        condition: service_started
+      notifications-service:
+        condition: service_started
+      payments-service:
+        condition: service_started
+      scoring-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # BFF BACKOFFICE — consola operativa de crédito
+  # Sin puerto externo: solo se llega por el gateway en backoffice.localhost, que
+  # exige el claim channel=BACKOFFICE. Stateless, sin base de datos propia.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  channel-backoffice-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: channel-backoffice-service
+    image: fintech/channel-backoffice-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "channel-backoffice-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8099
+      IDENTITY_SERVICE_URL: http://identity-service:8080
+      PARTY_SERVICE_URL: http://party-service:8080
+      CREDIT_PORTFOLIO_SERVICE_URL: http://credit-portfolio-service:8080
+      CREDIT_PRODUCT_SERVICE_URL: http://credit-product-service:8080
+      ORIGINATION_SERVICE_URL: http://origination-service:8080
+      SCORING_SERVICE_URL: http://scoring-service:8080
+      RISK_SERVICE_URL: http://risk-service:8080
+      COLLECTIONS_SERVICE_URL: http://collections-service:8080
+      COMMISSION_SERVICE_URL: http://commission-service:8080
+      CONFIGURATION_SERVICE_URL: http://configuration-service:8080
+      PAYMENTS_SERVICE_URL: http://payments-service:8080
+      CHARGES_SERVICE_URL: http://charges-service:8080
+      WALLET_SERVICE_URL: http://wallet-service:8080
+      NOTIFICATIONS_SERVICE_URL: http://notifications-service:8080
+      ACCOUNTING_SERVICE_URL: http://accounting-service:8080
+      INVOICING_SERVICE_URL: http://invoicing-service:8080
+      AUDIT_SERVICE_URL: http://audit-service:8080
+      SALES_ORG_SERVICE_URL: http://sales-org-service:8080
+      # La bandeja de colocaciones del backoffice vive en beneficiary-service. Sin esta línea
+      # el cliente cae a su default de bootRun (localhost:8102), que dentro del contenedor es
+      # el propio backoffice: la bandeja respondería 404 sin decir por qué.
+      BENEFICIARY_SERVICE_URL: http://beneficiary-service:8080
+      # Credencial propia del canal contra identity, para que la bitácora resuelva quién actuó sin
+      # depender de los permisos del que actúa. Sembrada en identity:013 — rotar antes de exponer.
+      IDENTITY_SERVICE_CLIENT_ID: channel-backoffice-service
+      IDENTITY_SERVICE_CLIENT_SECRET: ${IDENTITY_SERVICE_CLIENT_SECRET:-Backoffice-Audit#2026}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    <<: *app-mem
+    depends_on:
+      identity-service:
+        condition: service_started
+      party-service:
+        condition: service_started
+      credit-portfolio-service:
+        condition: service_started
+      credit-product-service:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # T3: Audit & Compliance — suscriptor global Kafka, append-only regulatorio
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  audit-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: audit-service
+    image: fintech/audit-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "audit-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  channels-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: channels-service
+    image: fintech/channels-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "channels-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      PARTY_SERVICE_URL: http://party-service:8080
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # D7: Wallet — balance projection + payment/disposition orchestration
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  wallet-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: wallet-service
+    image: fintech/wallet-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "wallet-service"
+      SPRING_APPLICATION_NAME: "wallet-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      credit-portfolio-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # D8: Collections — cobranza temprana, mora, acuerdos, quebranto, reporte a buró
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  collections-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: collections-service
+    image: fintech/collections-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "collections-service"
+      SPRING_APPLICATION_NAME: "collections-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      credit-portfolio-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  risk-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: risk-service
+    image: fintech/risk-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "risk-service"
+      SPRING_APPLICATION_NAME: "risk-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Habilita /internal/test-support/run-risk-assessment, que es lo que hace que la siembra
+      # constituya estimación preventiva en vez de esperar al cron de la 01:00.
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      credit-portfolio-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  accounting-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: accounting-service
+    image: fintech/accounting-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "accounting-service"
+      SPRING_APPLICATION_NAME: "accounting-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      credit-portfolio-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  invoicing-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: invoicing-service
+    image: fintech/invoicing-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "invoicing-service"
+      SPRING_APPLICATION_NAME: "invoicing-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      accounting-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  commission-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: commission-service
+    image: fintech/commission-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "commission-service"
+      SPRING_APPLICATION_NAME: "commission-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      credit-portfolio-service:
+        condition: service_started
+      accounting-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  beneficiary-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: beneficiary-service
+    image: fintech/beneficiary-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "beneficiary-service"
+      SPRING_APPLICATION_NAME: "beneficiary-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      REDIS_HOST: redis
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Los servicios que compone. La colocación no reinventa dominio: la línea la lleva
+      # credit-portfolio, el buró scoring, la disposición wallet y el expediente origination.
+      CREDIT_PORTFOLIO_SERVICE_URL: http://credit-portfolio-service:8080
+      CREDIT_PRODUCT_SERVICE_URL: http://credit-product-service:8080
+      SCORING_SERVICE_URL: http://scoring-service:8080
+      WALLET_SERVICE_URL: http://wallet-service:8080
+      ORIGINATION_SERVICE_URL: http://origination-service:8080
+      PARTY_SERVICE_URL: http://party-service:8080
+      # Sustituye la web pública de KYC de la beneficiaria mientras no exista. Es un bypass de
+      # identidad: encendido sólo en este compose local, nunca en un ambiente con datos reales.
+      BENEFICIARY_KYC_SIMULATION_ENABLED: "true"
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  sales-org-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: sales-org-service
+    image: fintech/sales-org-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "sales-org-service"
+      SPRING_APPLICATION_NAME: "sales-org-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  notifications-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: notifications-service
+    image: fintech/notifications-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "notifications-service"
+      SPRING_APPLICATION_NAME: "notifications-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # NOTIFICATIONS_SMTP_ENABLED: "true" — activar junto con SMTP_HOST/PORT/USERNAME/PASSWORD
+      # reales (Brevo/Resend/SES) para envío de email real; deshabilitado por default (NoopEmailAdapter).
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      origination-service:
+        condition: service_started
+      credit-portfolio-service:
+        condition: service_started
+      collections-service:
+        condition: service_started
+      payments-service:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Pagos salientes — servicios internos, sin exposición a internet.
+  # Ninguno de los dos está publicado en el gateway: no reciben tráfico externo.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  disbursement-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: disbursement-service
+    image: fintech/disbursement-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "disbursement-service"
+      SPRING_APPLICATION_NAME: "disbursement-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      DISBURSEMENT_DISPATCH_ENABLED: ${DISBURSEMENT_DISPATCH_ENABLED:-true}
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # Sin depends_on de disbursement-service: se hablan por topic, no por arranque.
+  # Levantar uno solo tiene que funcionar — es parte de la prueba de desacople (DC-5).
+  stp-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: stp-service
+    image: fintech/stp-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "stp-service"
+      SPRING_APPLICATION_NAME: "stp-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # stub en todo ambiente que no sea producción. Con perfil prod el stub NO arranca.
+      STP_GATEWAY_MODE: ${STP_GATEWAY_MODE:-stub}
+      STP_INBOUND_TOPIC: ${STP_INBOUND_TOPIC:-disbursement.stp-requested}
+      STP_POLLING_ENABLED: ${STP_POLLING_ENABLED:-true}
+      # ENFORCE | WARN | OFF — ver .env.example.
+      STP_SIGNATURE_POLICY: ${STP_SIGNATURE_POLICY:-WARN}
+      STP_CURRENT_KEK_ID: ${STP_CURRENT_KEK_ID:-local}
+      # Material de la KEK. NUNCA se commitea: va en .env, y en producción en el gestor de secretos.
+      STP_KEK_LOCAL: ${STP_KEK_LOCAL:-}
+      STP_ACCOUNT_HASH_SALT: ${STP_ACCOUNT_HASH_SALT:-cambiar-en-cada-ambiente}
+      STP_BASE_URL: ${STP_BASE_URL:-https://demo.stpmex.com:7024/speiws/rest/}
+      STP_CONSULTA_BASE_URL: ${STP_CONSULTA_BASE_URL:-https://efws-dev.stpmex.com/efws/API/}
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # T7: Observability — agente OTel compartido (siempre activo, liviano)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  otel-agent-init:
+    image: curlimages/curl:8.10.1
+    user: "0:0"    # el volumen recién creado queda root-owned; el usuario default de esta imagen no puede escribir en él
+    command: >
+      -fsSL -o /otel/opentelemetry-javaagent.jar
+      https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar
+    volumes:
+      - otel-agent-vol:/otel
+    deploy:
+      resources:
+        limits:
+          memory: 32M
+    networks:
+      - fintech-network
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # T7: Observability — stack completo (opt-in: docker compose --profile observability up)
+  # Ver docs/dominios/T7_observability.md para el diseño completo.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./services/observability-service/otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    depends_on:
+      - tempo
+    profiles: ["observability"]
+    networks:
+      - fintech-network
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./services/observability-service/tempo/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+    deploy:
+      resources:
+        limits:
+          memory: 768M   # +256M sobre el base por el metrics_generator (service graph) — ver T7_observability.md
+        reservations:
+          memory: 384M
+    profiles: ["observability"]
+    networks:
+      - fintech-network
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+      - "--web.enable-remote-write-receiver"      # recibe las métricas del service graph que genera Tempo
+      - "--enable-feature=exemplar-storage"       # exemplars: salto métrica→traza (estilo Datadog)
+    volumes:
+      - ./services/observability-service/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+    profiles: ["observability"]
+    networks:
+      - fintech-network
+
+  fluent-bit:
+    image: fluent/fluent-bit:3.2.2
+    volumes:
+      - ./services/observability-service/fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+      - ./services/observability-service/fluent-bit/parsers.conf:/fluent-bit/etc/parsers.conf:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+    depends_on:
+      - elasticsearch
+    profiles: ["observability"]
+    networks:
+      - fintech-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    deploy:
+      resources:
+        limits:
+          memory: 1536M   # 512m de heap (ES_JAVA_OPTS) + margen para Lucene/off-heap — 1024M se quedó
+                           # corto y ES murió por OOM (exit 137) al verificar el stack en vivo.
+        reservations:
+          memory: 1024M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    profiles: ["observability"]
+    networks:
+      - fintech-network
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Permite HTML/SVG en paneles Text (mapa de dependencias con logos). Solo dev/localhost.
+      GF_PANELS_DISABLE_SANITIZE_HTML: "true"
+      # Layout por capas (DAG) para el panel Node Graph en vez del layout de fuerzas por defecto —
+      # con 20+ nodos (gateway -> BFF -> 19 servicios -> postgres/kafka/redis) el de fuerzas se
+      # enreda; el de capas respeta la dirección real de las llamadas.
+      GF_FEATURE_TOGGLES_ENABLE: "nodeGraphDotLayout"
+    volumes:
+      - ./services/observability-service/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./services/observability-service/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+    depends_on:
+      - prometheus
+      - tempo
+      - elasticsearch
+    profiles: ["observability"]
+    networks:
+      - fintech-network
+
+volumes:
+  pgdata:
+  zookeeper_data:
+  zookeeper_log:
+  kafka_data:
+  redis_data:
+  otel-agent-vol:
+  esdata:
+  prometheus_data:
+  tempo_data:
+  grafana_data:
+
+networks:
+  fintech-network:
+    driver: bridge

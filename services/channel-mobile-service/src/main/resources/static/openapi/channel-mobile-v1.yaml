@@ -1,0 +1,612 @@
+openapi: 3.1.0
+info:
+  title: Channel Mobile API — BFF
+  description: |
+    Backend-For-Frontend para la app móvil fintech.
+    Actúa como proxy inteligente entre la app y los microservicios internos:
+    identity-service, origination-service.
+
+    ## Flujo de onboarding
+    1. `POST /otp/send` — solicitar OTP al teléfono
+    2. `POST /otp/verify` — verificar OTP
+    3. `POST /ocr/extract` — extraer datos del INE
+    4. `POST /kyc/submit` — enviar datos KYC completos, obtener folioKyc
+    5. `POST /auth/register` — crear credenciales con folioKyc + password
+    6. `POST /auth/login` — iniciar sesión
+  version: "1.0"
+  contact:
+    name: Fintech Platform Team
+
+servers:
+  - url: http://localhost:8085
+    description: Local development
+  - url: https://api-qa.fintech.mx/mobile/v1
+    description: QA
+
+tags:
+  - name: Auth
+    description: Autenticación y sesión
+  - name: Onboarding
+    description: Registro de prospecto y KYC
+  - name: OTP
+    description: Verificación por código SMS
+
+paths:
+
+  # ── Auth ──────────────────────────────────────────────────────────────────
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Iniciar sesión
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              phone: "6673038098"
+              password: "Emmanuel12*"
+      responses:
+        "200":
+          description: Autenticación exitosa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "423":
+          description: Cuenta bloqueada por intentos fallidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Cerrar sesión — revoca todos los tokens del usuario
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Sesión cerrada
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Renovar access token usando refresh token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        "200":
+          description: Tokens renovados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/register:
+    post:
+      tags: [Auth, Onboarding]
+      summary: Crear credenciales de acceso para el prospecto registrado
+      description: |
+        Requiere un `folioKyc` válido previamente emitido por `POST /kyc/submit`.
+        Internamente llama a origination-service con todos los datos KYC almacenados
+        más el password proporcionado.
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        "201":
+          description: Prospecto registrado y credenciales creadas
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "404":
+          description: folioKyc no encontrado o expirado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        "409":
+          description: Ya existe un prospecto con ese CURP o teléfono
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ── OTP ───────────────────────────────────────────────────────────────────
+
+  /otp/send:
+    post:
+      tags: [OTP]
+      summary: Enviar OTP al teléfono
+      operationId: sendOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpSendRequest'
+      responses:
+        "200":
+          description: OTP enviado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtpSendResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "429":
+          description: Demasiados intentos — espera antes de reintentar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /otp/verify:
+    post:
+      tags: [OTP]
+      summary: Verificar código OTP
+      operationId: verifyOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpVerifyRequest'
+      responses:
+        "200":
+          description: Resultado de la verificación
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtpVerifyResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+
+  /otp/resend:
+    post:
+      tags: [OTP]
+      summary: Reenviar OTP
+      operationId: resendOtp
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OtpSendRequest'
+      responses:
+        "200":
+          description: OTP reenviado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OtpSendResponse'
+        "429":
+          description: Límite de reenvíos alcanzado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ── KYC / Onboarding ──────────────────────────────────────────────────────
+
+  /ocr/extract:
+    post:
+      tags: [Onboarding]
+      summary: Extraer datos del INE mediante OCR
+      description: Recibe referencias de archivos del INE (frente y reverso) y retorna los datos extraídos.
+      operationId: ocrExtract
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OcrExtractRequest'
+      responses:
+        "200":
+          description: Datos extraídos del INE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OcrExtractResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "422":
+          description: No se pudo procesar la imagen
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /kyc/submit:
+    post:
+      tags: [Onboarding]
+      summary: Enviar datos KYC completos del prospecto
+      description: |
+        Recibe todos los datos personales, domicilio y consentimientos recopilados
+        durante el onboarding. Almacena la sesión KYC y emite un `folioKyc` para
+        continuar con `POST /auth/register`.
+
+        El `folioKyc` tiene una vigencia de 30 minutos.
+      operationId: submitKyc
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KycSubmitRequest'
+      responses:
+        "200":
+          description: KYC recibido — continúa con /auth/register
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KycSubmitResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "409":
+          description: Ya existe un prospecto con ese CURP o teléfono
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+# ── Components ──────────────────────────────────────────────────────────────
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    Unauthorized:
+      description: Token ausente, inválido o expirado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    BadRequest:
+      description: Error de validación en el cuerpo de la petición
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+
+    # ── Auth ────────────────────────────────────────────────────────────────
+
+    LoginRequest:
+      type: object
+      required: [phone, password]
+      properties:
+        phone:
+          type: string
+          pattern: '^\d{10}$'
+          description: Número de teléfono de 10 dígitos (México)
+          example: "6673038098"
+        password:
+          type: string
+          minLength: 6
+          example: "Emmanuel12*"
+        deviceId:
+          type: string
+          description: Identificador opcional del dispositivo
+          example: "iphone-uuid-abc123"
+
+    LoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        token:
+          type: string
+          description: JWT access token
+        refreshToken:
+          type: string
+        userId:
+          type: string
+          description: Identificador del party (UUID)
+        expiresIn:
+          type: integer
+          description: Segundos de vigencia del access token
+          example: 3600
+
+    RefreshTokenRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+
+    RegisterRequest:
+      type: object
+      required: [phone, password, folioKyc]
+      properties:
+        phone:
+          type: string
+          pattern: '^\d{10}$'
+          example: "6673038098"
+        password:
+          type: string
+          minLength: 8
+          description: |
+            Mínimo 8 caracteres. Debe incluir mayúscula, número y símbolo especial.
+          example: "Emmanuel12*"
+        folioKyc:
+          type: string
+          description: Folio emitido por POST /kyc/submit
+          example: "KYC-202605-A3F9"
+
+    RegisterResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        userId:
+          type: string
+          description: Identificador del prospecto creado (UUID)
+        message:
+          type: string
+          example: "Prospect registered successfully. KYC flow will be initiated."
+
+    # ── OTP ─────────────────────────────────────────────────────────────────
+
+    OtpSendRequest:
+      type: object
+      required: [phone]
+      properties:
+        phone:
+          type: string
+          pattern: '^\d{10}$'
+          example: "6673038098"
+
+    OtpSendResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: "OTP enviado al número registrado"
+
+    OtpVerifyRequest:
+      type: object
+      required: [phone, code]
+      properties:
+        phone:
+          type: string
+          pattern: '^\d{10}$'
+          example: "6673038098"
+        code:
+          type: string
+          pattern: '^\d{6}$'
+          example: "123456"
+
+    OtpVerifyResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        verified:
+          type: boolean
+          example: true
+
+    # ── KYC / OCR ───────────────────────────────────────────────────────────
+
+    OcrExtractRequest:
+      type: object
+      required: [frente, reverso]
+      properties:
+        frente:
+          type: string
+          description: Referencia del archivo (nombre o URL) del frente del INE
+          example: "ine_frente_6673038098.jpg"
+        reverso:
+          type: string
+          description: Referencia del archivo del reverso del INE
+          example: "ine_reverso_6673038098.jpg"
+
+    OcrExtractResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        nombres:
+          type: string
+          example: "EMMANUEL FRANCISCO"
+        apellidoPaterno:
+          type: string
+          example: "RAMÍREZ"
+        apellidoMaterno:
+          type: string
+          example: "HERNÁNDEZ"
+        curp:
+          type: string
+          example: "RAHE930326HSMLRM09"
+        fechaNacimiento:
+          type: string
+          description: Fecha en formato DD/MM/YYYY
+          example: "26/03/1993"
+        domicilio:
+          type: string
+          example: "COL. VILLA UNIVERSIDAD, CULIACÁN, SINALOA 80060"
+        clave:
+          type: string
+          example: "9300326SL0001234"
+        vigencia:
+          type: string
+          example: "2031"
+        genero:
+          type: string
+          enum: [H, M]
+          example: "H"
+        estadoNacimiento:
+          type: string
+          example: "Sinaloa"
+        folio:
+          type: string
+          example: "INE20250520001"
+
+    KycSubmitRequest:
+      type: object
+      required:
+        - phone
+        - nombres
+        - apellidoPaterno
+        - curp
+        - fechaNacimiento
+        - genero
+        - estadoNacimiento
+        - aceptaAvisoPrivacidad
+      properties:
+        phone:
+          type: string
+          pattern: '^\d{10}$'
+          example: "6673038098"
+        nombres:
+          type: string
+          maxLength: 100
+          example: "EMMANUEL FRANCISCO"
+        apellidoPaterno:
+          type: string
+          maxLength: 100
+          example: "RAMÍREZ"
+        apellidoMaterno:
+          type: string
+          maxLength: 100
+          example: "HERNÁNDEZ"
+        curp:
+          type: string
+          pattern: '^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$'
+          example: "RAHE930326HSMLRM09"
+        rfc:
+          type: string
+          pattern: '^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$'
+          example: "RAHE930326JH8"
+        fechaNacimiento:
+          type: string
+          format: date
+          description: Fecha de nacimiento en formato ISO 8601 (YYYY-MM-DD)
+          example: "1993-03-26"
+        genero:
+          type: string
+          enum: [H, M, X]
+          description: H=Hombre, M=Mujer, X=No especifica
+          example: "H"
+        estadoNacimiento:
+          type: string
+          maxLength: 100
+          example: "Sinaloa"
+        email:
+          type: string
+          format: email
+          example: "usuario@ejemplo.com"
+        # Domicilio — al menos domicilio (string del OCR) o campos estructurados
+        domicilio:
+          type: string
+          description: Domicilio como cadena del OCR (fallback si no hay campos estructurados)
+          example: "COL. VILLA UNIVERSIDAD, CULIACÁN, SINALOA 80060"
+        calle:
+          type: string
+          maxLength: 200
+          example: "VILLA UNIVERSIDAD"
+        numeroExterior:
+          type: string
+          maxLength: 20
+          example: "SN"
+        numeroInterior:
+          type: string
+          maxLength: 20
+        colonia:
+          type: string
+          maxLength: 100
+          example: "VILLA UNIVERSIDAD"
+        municipio:
+          type: string
+          maxLength: 100
+          example: "CULIACÁN"
+        ciudad:
+          type: string
+          maxLength: 100
+          example: "CULIACÁN"
+        estado:
+          type: string
+          maxLength: 100
+          example: "SINALOA"
+        codigoPostal:
+          type: string
+          pattern: '^\d{5}$'
+          example: "80060"
+        aceptaAvisoPrivacidad:
+          type: boolean
+          description: Aceptación del aviso de privacidad (LFPDPPP Art. 9 — obligatorio)
+          example: true
+        aceptaCirculo:
+          type: boolean
+          description: Consentimiento para consulta de Buró de Crédito
+          default: false
+          example: true
+
+    KycSubmitResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        folioKyc:
+          type: string
+          description: Folio de sesión KYC — usar en POST /auth/register (vigencia 30 min)
+          example: "KYC-202605-A3F9"
+
+    ErrorResponse:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://fintech.com/errors/validation-error"
+        title:
+          type: string
+          example: "Validation Error"
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "El campo 'curp' no tiene el formato correcto"
+        instance:
+          type: string
+          format: uri
+          example: "/kyc/submit"

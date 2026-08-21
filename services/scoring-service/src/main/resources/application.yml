@@ -1,0 +1,86 @@
+spring:
+  application:
+    name: scoring-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fintech}
+    username: ${SPRING_DATASOURCE_USERNAME:fintech}
+    password: ${SPRING_DATASOURCE_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        jdbc:
+          time_zone: UTC
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: scoring-service
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      properties:
+        spring.json.trusted.packages: "com.fintech.*"
+        spring.json.use.type.headers: false
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        spring.json.add.type.headers: false
+
+  liquibase:
+    change-log: classpath:db/changelog/scoring/db.changelog-scoring.yaml
+    enabled: true
+
+server:
+  port: ${SERVER_PORT:8082}
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+
+fintech:
+  scoring:
+    circulo-query-timeout-ms: ${SCORING_CIRCULO_TIMEOUT_MS:5000}
+    score-validity-days: ${SCORING_VALIDITY_DAYS:90}
+    # Reintentos de evaluación cuando el score-requested llega antes de que el prefetch
+    # del buró haya persistido el reporte (ver ScoreRequestedEventListener).
+    evaluation-retry-attempts: ${SCORING_EVAL_RETRY_ATTEMPTS:5}
+    evaluation-retry-backoff-ms: ${SCORING_EVAL_RETRY_BACKOFF_MS:600}
+    # Vigencia del snapshot de precalificación (home "créditos disponibles") antes de recalcular.
+    prequalification-ttl-hours: ${PREQUALIFICATION_TTL_HOURS:24}
+  circulo:
+    url: ${CIRCULO_CREDITO_BASE_URL:https://services.circulodecredito.com.mx/sandbox}
+    api-key: ${CIRCULO_CREDITO_API_KEY:YfuKKDGcx8DBFLny8gWJVaBcx0xUc5oT}
+    timeout-seconds: ${CIRCULO_CREDITO_TIMEOUT_SECONDS:30}
+    # SOLO dev/local: usa MockCirculoAdapter (reporte determinista por CURP) en vez del buró real.
+    mock-enabled: ${SCORING_CIRCULO_MOCK_ENABLED:false}

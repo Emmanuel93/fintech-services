@@ -1,0 +1,63 @@
+spring:
+  application:
+    name: commission-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: commission
+    open-in-view: false
+
+  liquibase:
+    change-log: classpath:db/changelog/commission/db.changelog-commission.xml
+    default-schema: commission
+    liquibase-schema: public
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: commission
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+server:
+  port: 8097
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+fintech:
+  commission:
+    # Día del mes en que corre la liquidación mensual (batch) por defecto.
+    liquidation-day-of-month: ${COMMISSION_LIQUIDATION_DAY:5}
+    # Monto mínimo (MXN) para que un LiquidationBatch se procese (LB-03).
+    min-liquidation-amount: ${COMMISSION_MIN_LIQUIDATION_AMOUNT:500}

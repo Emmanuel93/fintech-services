@@ -1,0 +1,16 @@
+# public.pem debe colocarse aquí ANTES de levantar el gateway.
+#
+# Generar el par de llaves (ejecutar UNA SOLA VEZ):
+#
+#   # 1. Llave privada RSA 2048-bit (para identity-service)
+#   openssl genrsa -out identity-service/src/main/resources/keys/private.pem 2048
+#
+#   # 2. Llave pública derivada (para gateway-service)
+#   openssl rsa -in identity-service/src/main/resources/keys/private.pem \
+#               -pubout \
+#               -out gateway-service/keys/public.pem
+#
+# NUNCA commitear private.pem. Añadir al .gitignore:
+#   **/keys/private.pem
+#
+# public.pem SÍ puede ir en el repo (es pública por diseño).

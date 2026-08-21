@@ -1,0 +1,112 @@
+spring:
+  application:
+    name: beneficiary-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: beneficiary
+    open-in-view: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+
+  liquibase:
+    change-log: classpath:db/changelog/beneficiary/db.changelog-beneficiary.xml
+    default-schema: beneficiary
+    liquibase-schema: public
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: beneficiary
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+server:
+  port: 8102
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+fintech:
+  beneficiary:
+    # Vigencia de la liga de invitación. El diseño la fija en 7 días (L2066) y la promesa está
+    # escrita en la pantalla 23, así que no es un parámetro que se toque a la ligera.
+    invite-ttl-days: ${BENEFICIARY_INVITE_TTL_DAYS:7}
+    # Sesión de invitado de la beneficiaria. Es la única credencial que llega a tener y sólo abre
+    # este servicio.
+    guest-session-ttl-minutes: ${BENEFICIARY_GUEST_SESSION_TTL_MINUTES:15}
+    # Reenvíos de liga permitidos por colocación. Reenviar revoca la anterior y NO extiende la
+    # ventana de 7 días: si extendiera, la vigencia sería infinita a punta de reenvíos.
+    max-invite-resends: ${BENEFICIARY_MAX_INVITE_RESENDS:3}
+    # Monto mínimo de una colocación — arranque del slider de la pantalla 22.
+    min-placement-amount: ${BENEFICIARY_MIN_PLACEMENT_AMOUNT:5000}
+    # Tope por beneficiario. No es el tamaño de la línea: acota cuánto puede darle a UNA persona,
+    # para que quien tenga $500,000 no se los coloque completos a un solo cliente.
+    max-placement-amount: ${BENEFICIARY_MAX_PLACEMENT_AMOUNT:60000}
+    amount-step: ${BENEFICIARY_AMOUNT_STEP:1000}
+    default-annual-rate: ${BENEFICIARY_ANNUAL_RATE:0.289}
+    periods-per-year: 24
+    commission-on-time-rate: ${BENEFICIARY_COMMISSION_RATE:0.20}
+    # ── Verificación de identidad ────────────────────────────────────────────
+    # false = TODO lo revisa una persona. Es el estado vigente: no hay contrato con proveedor.
+    # true  = el proveedor resuelve lo que cae dentro de sus umbrales y el analista sólo ve las
+    #         excepciones. Encenderla sin adaptador **impide arrancar el servicio** a propósito:
+    #         caer a manual en silencio escondería que la automatización que se cree tener no existe.
+    identity-verification:
+      # MANUAL    = todo lo revisa un analista de crédito. Es el modo vigente: sin contrato de KYC.
+      # AUTOMATIC = el proveedor evalúa y el analista recibe SÓLO las excepciones — umbral no
+      #             alcanzado, documento que no pudo validar, o el proveedor caído.
+      #
+      # Cambiar de modo NO requiere tocar código ni redesplegar nada más: es esta línea.
+      mode: ${BENEFICIARY_IDENTITY_VERIFICATION_MODE:MANUAL}
+      # Mínimos para dar por buena una identidad sin intervención humana. Una métrica declarada
+      # aquí que el proveedor no reporte cuenta como NO alcanzada: no saber no es aprobar.
+      thresholds:
+        facialMatch: ${BENEFICIARY_THRESHOLD_FACIAL:0.90}
+        liveness: ${BENEFICIARY_THRESHOLD_LIVENESS:0.90}
+        documentAuthenticity: ${BENEFICIARY_THRESHOLD_DOC:0.85}
+
+    # Sustituye la web pública de KYC mientras no exista. Apagado fuera de local.
+    kyc-simulation-enabled: ${BENEFICIARY_KYC_SIMULATION_ENABLED:false}
+
+    # Servicios que compone. Son URLs internas: la composición no sale a internet.
+    credit-portfolio-service-url: ${CREDIT_PORTFOLIO_SERVICE_URL:http://localhost:8087}
+    credit-product-service-url: ${CREDIT_PRODUCT_SERVICE_URL:http://localhost:8084}
+    scoring-service-url: ${SCORING_SERVICE_URL:http://localhost:8082}
+    wallet-service-url: ${WALLET_SERVICE_URL:http://localhost:8092}
+    origination-service-url: ${ORIGINATION_SERVICE_URL:http://localhost:8081}
+    party-service-url: ${PARTY_SERVICE_URL:http://localhost:8083}

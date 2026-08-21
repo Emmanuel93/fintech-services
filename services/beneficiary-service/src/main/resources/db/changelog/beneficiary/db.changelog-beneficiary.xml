@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+    <include file="db/changelog/beneficiary/001-create-schema.sql"                relativeToChangelogFile="false"/>
+    <include file="db/changelog/beneficiary/002-create-placements.sql"            relativeToChangelogFile="false"/>
+    <include file="db/changelog/beneficiary/003-create-placement-transitions.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/beneficiary/004-create-event-publication.sql"     relativeToChangelogFile="false"/>
+    <include file="db/changelog/beneficiary/005-align-with-app-contract.sql"      relativeToChangelogFile="false"/>
+    <include file="db/changelog/beneficiary/006-identity-review.sql"           relativeToChangelogFile="false"/>
+</databaseChangeLog>

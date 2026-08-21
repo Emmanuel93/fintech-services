@@ -1,0 +1,21 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+
+fintech:
+  # Endpoints dev-only para llevar una solicitud a revisión sin depender del
+  # score. Apagado salvo que el entorno lo encienda explícitamente.
+  test-support:
+    enabled: ${TEST_SUPPORT_ENABLED:false}
+  origination:
+    credit-product-service-url: ${CREDIT_PRODUCT_SERVICE_URL:http://credit-product-service:8080}
+    party-service-url: ${PARTY_SERVICE_URL:http://party-service:8080}
+    sales-org-service-url: ${SALES_ORG_SERVICE_URL:http://sales-org-service:8080}
+
+logging:
+  level:
+    com.fintech: INFO

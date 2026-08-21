@@ -1,0 +1,90 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-party-schema
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/001-create-schema.sql
+            relativeToChangelogFile: false
+            splitStatements: false
+
+  - changeSet:
+      id: 002-create-parties-table
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/002-create-parties.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 003-party-prospect-status
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/003-party-prospect-status.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 004-create-kyc-verifications
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/004-create-kyc-verifications.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 005-create-consent-records
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/005-create-consent-records.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 006-create-party-relationships
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/006-create-party-relationships.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 007-add-fiscal-profile
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/007-add-fiscal-profile.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 008-add-party-search-indexes
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/008-add-party-search-indexes.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 009-add-executive-assignment
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/009-add-executive-assignment.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 010-create-party-roles
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/010-create-party-roles.sql
+            relativeToChangelogFile: false
+            splitStatements: true

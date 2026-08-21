@@ -1,0 +1,3 @@
+fintech:
+  accounting:
+    reconciliation-job-cron: ${ACCOUNTING_RECONCILIATION_JOB_CRON:"0 0 2 * * *"}

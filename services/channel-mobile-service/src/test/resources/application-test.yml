@@ -1,0 +1,11 @@
+fintech:
+  channel-mobile:
+    identity-service-url: "http://localhost:9999"
+    origination-service-url: "http://localhost:9998"
+    otp-code-validation: false
+    otp-dev-code: "123456"
+    otp-expiry-minutes: 5
+    otp-max-attempts: 3
+    otp-max-sends-per-window: 3
+    otp-send-window-minutes: 1
+    kyc-session-expiry-minutes: 30

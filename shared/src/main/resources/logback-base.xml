@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Base de logging compartida (T7 Observability) — cada servicio la incluye desde su propio
+  logback-spring.xml: <include resource="logback-base.xml"/>. JSON estructurado (no texto
+  plano) para que Fluent Bit lo parsee sin heurística — LogstashEncoder incluye automáticamente
+  todo el MDC como campos de primer nivel, lo que trae trace_id/span_id gratis (inyectados por
+  el agente de OTel) y corrId donde exista (MdcCorrelationFilter en los 3 servicios que lo tienen).
+
+  Los overrides de framework (Kafka/Hibernate/Liquibase/Hikari/Security/Netty a WARN) venían
+  duplicados en 3 logback-spring.xml distintos (identity-service, origination-service,
+  channel-mobile-service) — se centralizan acá para que los 19 servicios se beneficien por igual,
+  no solo los 3 que ya los tenían.
+-->
+<included>
+    <springProperty scope="context" name="APP_NAME" source="spring.application.name"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service_name":"${APP_NAME}"}</customFields>
+        </encoder>
+    </appender>
+
+    <logger name="org.springframework.kafka" level="WARN"/>
+    <logger name="org.apache.kafka" level="WARN"/>
+    <logger name="org.hibernate" level="WARN"/>
+    <logger name="liquibase" level="WARN"/>
+    <logger name="com.zaxxer.hikari" level="WARN"/>
+    <logger name="org.springframework.security" level="WARN"/>
+    <logger name="org.springframework.data.redis" level="WARN"/>
+    <logger name="io.lettuce" level="WARN"/>
+    <logger name="io.netty" level="WARN"/>
+    <logger name="org.springframework.web.reactive.function.client" level="WARN"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</included>

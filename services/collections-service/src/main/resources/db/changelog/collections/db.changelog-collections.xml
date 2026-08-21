@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <include file="db/changelog/collections/001-create-schema.sql"              relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/002-create-collection-cases.sql"    relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/003-create-payment-promises.sql"    relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/004-create-contact-attempts.sql"    relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/005-create-write-off-records.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/006-create-collection-agreements.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/007-create-bureau-reports.sql"      relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/008-create-event-publication.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/009-create-account-balance-snapshots.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/010-instrument-communications.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/011-queue-indexes.sql"             relativeToChangelogFile="false"/>
+</databaseChangeLog>

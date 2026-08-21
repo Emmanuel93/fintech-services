@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <include file="db/changelog/wallet/001-create-schema.sql"             relativeToChangelogFile="false"/>
+    <include file="db/changelog/wallet/002-create-wallet-views.sql"       relativeToChangelogFile="false"/>
+    <include file="db/changelog/wallet/003-create-payment-instructions.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/wallet/004-create-event-publication.sql"  relativeToChangelogFile="false"/>
+    <include file="db/changelog/wallet/005-add-wallet-balance.sql"        relativeToChangelogFile="false"/>
+    <include file="db/changelog/wallet/006-create-wallet-withdrawals.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/wallet/007-create-wallet-movements.sql"   relativeToChangelogFile="false"/>
+</databaseChangeLog>

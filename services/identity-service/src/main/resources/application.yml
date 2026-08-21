@@ -1,0 +1,134 @@
+spring:
+  application:
+    name: identity-service
+
+  # ── Database ────────────────────────────────────────────────────────────
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fintech}
+    username: ${SPRING_DATASOURCE_USERNAME:fintech}
+    password: ${SPRING_DATASOURCE_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  # ── JPA / Hibernate ─────────────────────────────────────────────────────
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        jdbc:
+          time_zone: UTC
+
+  # ── Redis ────────────────────────────────────────────────────────────────
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 4
+          min-idle: 1
+
+  # ── Cache ─────────────────────────────────────────────────────────────────
+  cache:
+    type: redis
+    redis:
+      key-prefix: "identity:"
+      use-key-prefix: true
+      cache-null-values: false
+
+  # ── Kafka ────────────────────────────────────────────────────────────────
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 1
+        delivery.timeout.ms: 30000
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP_ID:identity-service}
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+
+  # ── Liquibase ────────────────────────────────────────────────────────────
+  liquibase:
+    change-log: classpath:db/changelog/identity/db.changelog-identity.yaml
+    enabled: true
+
+  # ── Security ─────────────────────────────────────────────────────────────
+  security:
+    filter:
+      order: 10
+
+# ── Server ───────────────────────────────────────────────────────────────────
+server:
+  port: ${SERVER_PORT:8080}
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+
+# ── Actuator ─────────────────────────────────────────────────────────────────
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: ${spring.application.name}
+    version: '@project.version@'
+    java: '@java.version@'
+
+# ── OpenAPI / Swagger ─────────────────────────────────────────────────────────
+springdoc:
+  api-docs:
+    path: /v3/api-docs          # JSON  → GET /v3/api-docs
+    # YAML disponible en       → GET /v3/api-docs.yaml
+  swagger-ui:
+    path: /swagger-ui.html
+    display-request-duration: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+    try-it-out-enabled: true
+    persist-authorization: true
+    filter: true
+  show-actuator: false
+
+# ── Identity / Auth ───────────────────────────────────────────────────────────
+fintech:
+  auth:
+    private-key-path: ${AUTH_PRIVATE_KEY_PATH:/etc/identity/keys/private.pem}
+    public-key-path: ${AUTH_PUBLIC_KEY_PATH:/etc/identity/keys/public.pem}
+    access-token-expiry-minutes: ${AUTH_ACCESS_TOKEN_EXPIRY_MINUTES:15}
+    refresh-token-expiry-days: ${AUTH_REFRESH_TOKEN_EXPIRY_DAYS:7}
+    max-failed-attempts: ${AUTH_MAX_FAILED_ATTEMPTS:5}
+    lockout-duration-minutes: ${AUTH_LOCKOUT_DURATION_MINUTES:30}
+    mfa-threshold-amount: ${AUTH_MFA_THRESHOLD_AMOUNT:10000}
+    validation-cache-ttl-seconds: ${AUTH_VALIDATION_CACHE_TTL_SECONDS:60}
+    mfa-code-window-size: ${AUTH_MFA_CODE_WINDOW_SIZE:1}
+    mfa-pending-ttl-seconds: ${AUTH_MFA_PENDING_TTL_SECONDS:300}

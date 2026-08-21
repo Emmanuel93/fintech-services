@@ -1,0 +1,125 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-schema
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/001-create-schema.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 002-create-credit-accounts
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/002-create-credit-accounts.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 003-create-dispositions
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/003-create-dispositions.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 004-create-installments
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/004-create-installments.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 005-create-event-publication
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/005-create-event-publication.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 006-create-product-config-versions
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/006-create-product-config-versions.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 007-create-balance-events
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/007-create-balance-events.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 008-add-balance-version
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/008-add-balance-version.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 009-add-delinquency-indexes
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/009-add-delinquency-indexes.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 010-add-disposition-source-event-id
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/010-add-disposition-source-event-id.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 011-add-portfolio-search-indexes
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/011-add-portfolio-search-indexes.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 012-add-beneficiary-identity
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/012-add-beneficiary-identity.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 013-add-origin-unit
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/013-add-origin-unit.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 018-iva-en-cuenta-y-calendario
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/018-iva-en-cuenta-y-calendario.sql
+            relativeToChangelogFile: false
+            splitStatements: true

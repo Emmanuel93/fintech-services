@@ -1,0 +1,50 @@
+# ── Build outputs ────────────────────────────────────────────────────────────
+build/
+# Anchored to the repo root: un-anchored `out/` also matched the hexagonal
+# `application/port/out/` and `infrastructure/adapter/out/` packages, silently
+# excluding the entire outbound layer (repositories, adapters, clients) from git.
+/out/
+target/
+
+# ── Gradle cache (keep wrapper files) ────────────────────────────────────────
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.properties
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+.vscode/
+*.class
+
+# ── OS ───────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Secrets ───────────────────────────────────────────────────────────────────
+.env
+!.env.example
+**/keys/private.pem
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+docker-compose.override.yml
+
+# ── Evidencia de la regresión E2E ────────────────────────────────────────────
+# Cada corrida deja ~150 MB de mp4 del simulador, webm y trace.zip de Playwright:
+# 1.4 GB acumulados. Es salida reproducible (`tools/regresion-e2e/run.sh`), no fuente.
+tools/regresion-e2e/evidencia/
+tools/regresion-e2e/.evidencia/
+
+# ── Respaldos de base y material desechado ───────────────────────────────────
+# Volcados .sql.gz de 23 MB y zips de descarte: no son historia del proyecto.
+respaldos/
+_to_delete/
+
+# ── Configuración local de Claude Code ───────────────────────────────────────
+# Permisos y ajustes de la máquina de cada quien; no es del proyecto.
+.claude/

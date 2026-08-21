@@ -1,0 +1,117 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-scoring-schema
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/001-create-scoring-schema.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 002-create-bureau-prefetch
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/002-create-bureau-prefetch.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 003-create-circulo-reports
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/003-create-circulo-reports.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 004-add-prospect-type-to-prefetch
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/004-add-prospect-type-to-prefetch.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 005-create-scoring-policies
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/005-create-scoring-policies.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 006-create-score-evaluations
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/006-create-score-evaluations.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 007-seed-initial-scoring-policy
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/007-seed-initial-scoring-policy.sql
+            relativeToChangelogFile: false
+            splitStatements: false
+
+  - changeSet:
+      id: 008-seed-multi-segment-scoring-policies
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/008-seed-multi-segment-scoring-policies.sql
+            relativeToChangelogFile: false
+            splitStatements: false
+
+  - changeSet:
+      id: 009-create-prequalification-snapshots
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/009-create-prequalification-snapshots.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 010-seed-remaining-b2c-scoring-policies
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/010-seed-remaining-b2c-scoring-policies.sql
+            relativeToChangelogFile: false
+            splitStatements: false
+
+  - changeSet:
+      id: 011-require-bureau-score
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/011-require-bureau-score.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 012-rescale-risk-bands
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/012-rescale-risk-bands.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 013-rekey-scoring-policies-by-product
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/013-rekey-scoring-policies-by-product.sql
+            relativeToChangelogFile: false
+            splitStatements: false

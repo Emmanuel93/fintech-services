@@ -1,0 +1,95 @@
+spring:
+  application:
+    name: stp-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: stp
+    open-in-view: false
+
+  liquibase:
+    change-log: classpath:db/changelog/stp/db.changelog-stp.xml
+    default-schema: stp
+    # Crítico: la tabla de control va en public. Sin esto, el primer arranque falla porque
+    # Liquibase intenta crear DATABASECHANGELOG en un schema que aún no existe.
+    liquibase-schema: public
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: stp-service
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+server:
+  port: ${SERVER_PORT:8101}
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+fintech:
+  stp:
+    # Topic de entrada. Configurable para que un comprador lo apunte a su nomenclatura.
+    inbound-topic: ${STP_INBOUND_TOPIC:disbursement.stp-requested}
+    base-url: ${STP_BASE_URL:https://demo.stpmex.com:7024/speiws/rest/}
+    consulta-base-url: ${STP_CONSULTA_BASE_URL:https://efws-dev.stpmex.com/efws/API/}
+    account-hash-salt: ${STP_ACCOUNT_HASH_SALT:cambiar-en-cada-ambiente}
+    crypto:
+      # KY-02: la KEK nunca vive aquí. Esto es sólo el id; el material va en STP_KEK_<ID>.
+      current-kek-id: ${STP_CURRENT_KEK_ID:local}
+    gateway:
+      # stub | real. En prod DEBE ser real: el stub se niega a arrancar con perfil prod.
+      mode: ${STP_GATEWAY_MODE:stub}
+      stub:
+        settle-after: 30s
+        latency: 200ms
+    settlement:
+      # ENFORCE | WARN | OFF. Objetivo en producción: ENFORCE, una vez confirmada contra la
+      # especificación de STP la cadena exacta que firma en la respuesta de conciliación.
+      signature-policy: ${STP_SIGNATURE_POLICY:WARN}
+    polling:
+      enabled: ${STP_POLLING_ENABLED:true}
+      # ISO-8601 obligatorio: lo lee @Scheduled, que no entiende "3m".
+      interval: ${STP_POLLING_INTERVAL:PT3M}
+      grace: 30s
+      settlement-timeout: 24h
+      page-size: 1000
+      max-pages-per-run: 20
+    outbox:
+      # ISO-8601 obligatorio: lo lee @Scheduled.
+      relay-interval: PT5S
+      batch-size: 50
+      max-attempts: 6
+    http:
+      connect-timeout: 5s
+      read-timeout: 30s

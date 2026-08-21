@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+
+    <include file="db/changelog/risk/001-create-schema.sql"                    relativeToChangelogFile="false"/>
+    <include file="db/changelog/risk/002-create-risk-profiles.sql"             relativeToChangelogFile="false"/>
+    <include file="db/changelog/risk/003-create-provision-policies.sql"        relativeToChangelogFile="false"/>
+    <include file="db/changelog/risk/004-create-provision-rate-bands.sql"      relativeToChangelogFile="false"/>
+    <include file="db/changelog/risk/005-create-event-publication.sql"         relativeToChangelogFile="false"/>
+    <include file="db/changelog/risk/006-seed-initial-provision-policies.sql"  relativeToChangelogFile="false"/>
+    <include file="db/changelog/risk/007-seed-distributor-line-provision-policy.sql" relativeToChangelogFile="false"/>
+</databaseChangeLog>

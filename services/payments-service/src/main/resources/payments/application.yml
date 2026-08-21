@@ -1,0 +1,5 @@
+fintech:
+  payments:
+    return-window-hours: ${PAYMENTS_RETURN_WINDOW_HOURS:72}
+    spei-operating-hours-start: "08:00"
+    spei-operating-hours-end: "22:00"

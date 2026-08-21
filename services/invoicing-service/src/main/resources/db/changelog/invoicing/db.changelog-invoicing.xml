@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+        https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.20.xsd">
+    <include file="db/changelog/invoicing/001-create-schema.sql"            relativeToChangelogFile="false"/>
+    <include file="db/changelog/invoicing/002-create-fiscal-profiles.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/invoicing/003-create-invoices.sql"          relativeToChangelogFile="false"/>
+    <include file="db/changelog/invoicing/004-create-event-publication.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/invoicing/005-invoice-line-account-index.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/invoicing/006-fiscal-profile-prospect-id.sql" relativeToChangelogFile="false"/>
+</databaseChangeLog>

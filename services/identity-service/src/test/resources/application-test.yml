@@ -1,0 +1,24 @@
+spring:
+  datasource:
+    url: jdbc:tc:postgresql:16-alpine:///fintech
+    driver-class-name: org.testcontainers.jdbc.ContainerDatabaseDriver
+  jpa:
+    hibernate:
+      ddl-auto: none
+  liquibase:
+    enabled: true
+    change-log: classpath:db/changelog/identity/db.changelog-identity.yaml
+
+logging:
+  level:
+    com.fintech: DEBUG
+
+fintech:
+  auth:
+    private-key-path: src/test/resources/keys/test-private.pem
+    public-key-path: src/test/resources/keys/test-public.pem
+    access-token-expiry-minutes: 15
+    refresh-token-expiry-days: 7
+    max-failed-attempts: 5
+    lockout-duration-minutes: 30
+    validation-cache-ttl-seconds: 60

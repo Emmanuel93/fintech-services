@@ -1,0 +1,67 @@
+spring:
+  application:
+    name: collections-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        default_schema: collections
+    open-in-view: false
+
+  liquibase:
+    change-log: classpath:db/changelog/collections/db.changelog-collections.xml
+    default-schema: collections
+    liquibase-schema: public
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: collections
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+
+server:
+  port: 8093
+  error:
+    include-message: always
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+fintech:
+  collections:
+    write-off-threshold-days: ${COLLECTIONS_WRITEOFF_THRESHOLD_DAYS:181}
+    max-contact-attempts-per-day: ${COLLECTIONS_MAX_CONTACT_ATTEMPTS:3}
+    contact-allowed-hours-start: 8
+    contact-allowed-hours-end: 20
+    reminder-lead-days: ${COLLECTIONS_REMINDER_LEAD_DAYS:3}
+    agreement-response-days: ${COLLECTIONS_AGREEMENT_RESPONSE_DAYS:5}
+    max-forgiveness-pct: ${COLLECTIONS_MAX_FORGIVENESS_PCT:0.30}
+    max-term-extension-months: ${COLLECTIONS_MAX_TERM_EXTENSION_MONTHS:12}

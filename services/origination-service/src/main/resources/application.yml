@@ -1,0 +1,104 @@
+spring:
+  application:
+    name: origination-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fintech}
+    username: ${SPRING_DATASOURCE_USERNAME:fintech}
+    password: ${SPRING_DATASOURCE_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:5}
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        jdbc:
+          time_zone: UTC
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 1
+        delivery.timeout.ms: 30000
+        spring.json.add.type.headers: false
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:origination-service}
+      auto-offset-reset: earliest
+
+  liquibase:
+    change-log: classpath:db/changelog/origination/db.changelog-origination.yaml
+    enabled: true
+
+  security:
+    filter:
+      order: 10
+
+server:
+  port: ${SERVER_PORT:8081}
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: when-authorized
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: ${spring.application.name}
+    version: '@project.version@'
+    java: '@java.version@'
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    display-request-duration: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+    try-it-out-enabled: true
+    persist-authorization: true
+    filter: true
+  show-actuator: false
+
+fintech:
+  origination:
+    prospect-expiry-days: ${ORIGINATION_PROSPECT_EXPIRY_DAYS:30}
+    credit-product-service-url: ${CREDIT_PRODUCT_SERVICE_URL:http://localhost:8084}
+    party-service-url: ${PARTY_SERVICE_URL:http://localhost:8083}
+    sales-org-service-url: ${SALES_ORG_SERVICE_URL:http://localhost:8100}
+    # MXN threshold above which MANUAL_REVIEW is escalated to COMMITTEE_REVIEW
+    committee-amount-threshold: ${ORIGINATION_COMMITTEE_THRESHOLD:500000}
+    # Days after rejection before a prospect can re-apply for the same product (UW-06)
+    cooldown-days: ${ORIGINATION_COOLDOWN_DAYS:90}

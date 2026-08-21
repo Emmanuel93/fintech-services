@@ -1,0 +1,818 @@
+{
+  "info": {
+    "_postman_id": "a1b2c3d4-0000-0000-0000-fintech000001",
+    "name": "identity-service",
+    "description": "Colección completa para identity-service.\n\n**Variables de colección a configurar:**\n- `base_url` — por defecto `http://localhost:8080`\n- `party_id` — UUID del party a usar en pruebas\n\nLas demás variables (`access_token`, `refresh_token`, `mfa_token`, `client_secret`, `whitelist_entry_id`) se auto-asignan mediante scripts de test en los requests correspondientes.\n\n**Flujos documentados:**\n1. Login sin 2FA → obtiene tokens directo\n2. Login con 2FA → paso 1 (202) + `/mfa/verify` (200)\n3. Enrolamiento TOTP → `/mfa/enroll` + `/mfa/enroll/confirm`\n4. Client Auth M2M → registrar cliente + `/clients/token`",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string",
+      "description": "Auto-asignado tras login exitoso o mfa/verify"
+    },
+    {
+      "key": "refresh_token",
+      "value": "",
+      "type": "string",
+      "description": "Auto-asignado tras login exitoso o mfa/verify"
+    },
+    {
+      "key": "mfa_token",
+      "value": "",
+      "type": "string",
+      "description": "Auto-asignado cuando login retorna 202 (2FA requerido)"
+    },
+    {
+      "key": "party_id",
+      "value": "00000000-0000-0000-0000-000000000001",
+      "type": "string",
+      "description": "UUID del party a usar en pruebas"
+    },
+    {
+      "key": "client_id",
+      "value": "scoring-service",
+      "type": "string",
+      "description": "clientId del sistema externo M2M"
+    },
+    {
+      "key": "client_secret",
+      "value": "",
+      "type": "string",
+      "description": "Auto-asignado tras registrar cliente"
+    },
+    {
+      "key": "whitelist_entry_id",
+      "value": "",
+      "type": "string",
+      "description": "Auto-asignado tras agregar entrada a whitelist"
+    }
+  ],
+  "item": [
+    {
+      "name": "Party Auth",
+      "description": "Autenticación de usuarios finales (parties) con NIP. Soporta login directo (200) y login con 2FA activo (202 + verify).",
+      "item": [
+        {
+          "name": "Login sin 2FA",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', body.accessToken);",
+                  "    pm.collectionVariables.set('refresh_token', body.refreshToken);",
+                  "    pm.test('200 con tokens', () => pm.response.to.have.status(200));",
+                  "    pm.test('accessToken presente', () => pm.expect(body.accessToken).to.be.a('string').and.not.empty);",
+                  "    pm.test('tokenType es Bearer', () => pm.expect(body.tokenType).to.eql('Bearer'));",
+                  "} else if (pm.response.code === 202) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('mfa_token', body.mfaToken);",
+                  "    pm.test('202 — 2FA requerido', () => pm.response.to.have.status(202));",
+                  "    pm.test('mfaToken presente', () => pm.expect(body.mfaToken).to.be.a('string').and.not.empty);",
+                  "    console.log('2FA activo. Usar el request \"Verificar TOTP (paso 2)\" con el mfaToken guardado.');",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"juan@email.com\",\n  \"password\": \"1234\",\n  \"deviceId\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Login con NIP del party.\n\n- **200** → tokens emitidos directamente (2FA no activo)\n- **202** → 2FA activo, `mfaToken` retornado. Continuar con `POST /mfa/verify`.\n\nLos tokens o el mfaToken se auto-asignan en variables de colección.\n\n`deviceId` es opcional — la app móvil lo envía para vincular el token al dispositivo y habilitar el tracking en `identity.devices`."
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', body.accessToken);",
+                  "    pm.collectionVariables.set('refresh_token', body.refreshToken);",
+                  "    pm.test('200 con nuevos tokens', () => pm.response.to.have.status(200));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshToken\": \"{{refresh_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/refresh",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "refresh"
+              ]
+            },
+            "description": "Rota el refresh token. El refresh token anterior queda revocado. Los nuevos tokens se auto-asignan en variables de colección."
+          }
+        },
+        {
+          "name": "Logout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Revoca todas las sesiones activas del party autenticado. Elimina JTI + refresh tokens de Redis."
+          }
+        },
+        {
+          "name": "Validar Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 con claims', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('partyId presente', () => pm.expect(body.partyId).to.be.a('string'));",
+                  "pm.test('roles es array', () => pm.expect(body.roles).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/validate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "validate"
+              ]
+            },
+            "description": "Valida el JWT y retorna `{ partyId, roles, deviceId }`. Este endpoint es consumido síncronamente por todos los demás servicios de la plataforma. Resultado cacheado en Redis por `AUTH_VALIDATION_CACHE_TTL_SECONDS`."
+          }
+        },
+        {
+          "name": "Crear Credencial NIP (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "description": "Requiere rol ADMIN"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"partyId\": \"{{party_id}}\",\n  \"username\": \"juan@email.com\",\n  \"password\": \"1234\",\n  \"credentialType\": \"NIP\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/credentials",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "credentials"
+              ]
+            },
+            "description": "Crea credencial NIP para un party. Solo accesible con rol ADMIN. Usado en bootstrap de party o delegación D0."
+          }
+        }
+      ]
+    },
+    {
+      "name": "2FA / TOTP",
+      "description": "Flujo completo de Two-Factor Authentication via TOTP (compatible con Google Authenticator y Authy).\n\n**Secuencia de enrolamiento:**\n1. POST /enroll → escanear QR\n2. POST /enroll/confirm → activar 2FA\n\n**Secuencia de login con 2FA:**\n1. POST /login → 202 + mfaToken\n2. POST /mfa/verify → 200 + tokens",
+      "item": [
+        {
+          "name": "Iniciar Enrolamiento TOTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 con secret y qrUri', () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test('totpSecret presente', () => pm.expect(body.totpSecret).to.be.a('string').and.not.empty);",
+                  "pm.test('qrUri presente', () => pm.expect(body.qrUri).to.include('otpauth://totp/'));",
+                  "console.log('Escanear este QR URI con Google Authenticator o Authy:');",
+                  "console.log(body.qrUri);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/mfa/enroll",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "mfa",
+                "enroll"
+              ]
+            },
+            "description": "Inicia el enrolamiento TOTP.\n\nRetorna `totpSecret` y `qrUri`. Escanear el `qrUri` con Google Authenticator o Authy. El 2FA **no queda activo** hasta confirmar con un código válido."
+          }
+        },
+        {
+          "name": "Confirmar Enrolamiento TOTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 — 2FA activado', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/mfa/enroll/confirm",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "mfa",
+                "enroll",
+                "confirm"
+              ]
+            },
+            "description": "Confirma el enrolamiento con el primer código válido del autenticador.\n\nReemplazar `code` con el código de 6 dígitos que muestra Google Authenticator / Authy. A partir de este momento el login retornará 202."
+          }
+        },
+        {
+          "name": "Verificar TOTP (paso 2 del login)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 con tokens', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', body.accessToken);",
+                  "    pm.collectionVariables.set('refresh_token', body.refreshToken);",
+                  "    pm.test('accessToken presente', () => pm.expect(body.accessToken).to.be.a('string').and.not.empty);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mfaToken\": \"{{mfa_token}}\",\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/mfa/verify",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "mfa",
+                "verify"
+              ]
+            },
+            "description": "Segundo paso del login cuando el party tiene 2FA activo.\n\nUsar el `mfaToken` recibido en el 202 del login (variable auto-asignada). El `mfaToken` se consume en un solo uso y expira en 5 minutos.\n\nReemplazar `code` con el código actual del autenticador."
+          }
+        },
+        {
+          "name": "Deshabilitar 2FA",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 — 2FA deshabilitado', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"123456\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/mfa",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "mfa"
+              ]
+            },
+            "description": "Deshabilita el 2FA del party autenticado. Requiere el código TOTP vigente para confirmar la operación."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Client Auth (M2M)",
+      "description": "Autenticación de sistemas externos (scoring, origination, etc.) con client_id + secret.\n\nCaracterísticas:\n- Whitelist de IPs por CIDR opcional (sin entradas = cualquier IP válida)\n- Secret se entrega en texto plano solo al registrar\n- Roles propios para control de acceso granular",
+      "item": [
+        {
+          "name": "Registrar Cliente (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('client_secret', body.clientSecret);",
+                  "    pm.test('clientSecret presente (guardar ahora)', () => pm.expect(body.clientSecret).to.be.a('string').and.not.empty);",
+                  "    console.log('GUARDAR ESTE SECRET, no se vuelve a mostrar:', body.clientSecret);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}",
+                "description": "Requiere rol ADMIN"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{client_id}}\",\n  \"clientName\": \"Scoring Service\",\n  \"roles\": [\"SYSTEM_SCORING\"],\n  \"expiresAt\": null\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/clients",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "clients"
+              ]
+            },
+            "description": "Registra un nuevo cliente M2M. El `clientSecret` en texto plano se entrega **una sola vez** en la respuesta — guardarlo de inmediato. El script de test lo auto-asigna en `client_secret`."
+          }
+        },
+        {
+          "name": "Client Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 con tokens', () => pm.response.to.have.status(200));",
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', body.accessToken);",
+                  "    pm.collectionVariables.set('refresh_token', body.refreshToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clientId\": \"{{client_id}}\",\n  \"clientSecret\": \"{{client_secret}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/clients/token",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "clients",
+                "token"
+              ]
+            },
+            "description": "Autentica un cliente M2M con su `clientId` + `clientSecret`. Si el cliente tiene whitelist de IPs configurada, la IP del request debe estar dentro de algún CIDR permitido (usa `X-Forwarded-For` si está presente)."
+          }
+        },
+        {
+          "name": "Info Cliente (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 con info del cliente', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/clients/{{client_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "clients",
+                "{{client_id}}"
+              ]
+            },
+            "description": "Obtiene información de un cliente externo. No incluye el secret (solo el hash)."
+          }
+        },
+        {
+          "name": "Deshabilitar Cliente (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/clients/{{client_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "clients",
+                "{{client_id}}"
+              ]
+            },
+            "description": "Deshabilita el cliente. Los tokens emitidos previamente siguen válidos hasta su expiración natural (o hasta que Redis los limpie)."
+          }
+        },
+        {
+          "name": "Agregar IP a Whitelist (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('whitelist_entry_id', body.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cidr\": \"10.0.0.0/8\",\n  \"label\": \"prod-internal\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/clients/{{client_id}}/whitelist",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "clients",
+                "{{client_id}}",
+                "whitelist"
+              ]
+            },
+            "description": "Agrega un CIDR a la whitelist de IPs del cliente. El `id` de la entrada se auto-asigna en `whitelist_entry_id` para usarlo en el DELETE."
+          }
+        },
+        {
+          "name": "Listar Whitelist (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200 con lista', () => pm.response.to.have.status(200));",
+                  "pm.test('respuesta es array', () => pm.expect(pm.response.json()).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/clients/{{client_id}}/whitelist",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "clients",
+                "{{client_id}}",
+                "whitelist"
+              ]
+            },
+            "description": "Lista todas las entradas de la whitelist del cliente."
+          }
+        },
+        {
+          "name": "Eliminar de Whitelist (ADMIN)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('204 No Content', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/clients/{{client_id}}/whitelist/{{whitelist_entry_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "clients",
+                "{{client_id}}",
+                "whitelist",
+                "{{whitelist_entry_id}}"
+              ]
+            },
+            "description": "Elimina una entrada de la whitelist por su UUID. El `whitelist_entry_id` se auto-asigna tras \"Agregar IP a Whitelist\"."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+.git
+.gitignore
+*.md
+build/
+.gradle/
+infra/
+docs/
+docker-compose*.yml
+.env
+.env.*
+*.log
+*.tmp

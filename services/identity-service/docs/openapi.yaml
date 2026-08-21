@@ -1,0 +1,778 @@
+openapi: 3.0.3
+
+info:
+  title: identity-service
+  version: "1.0"
+  description: |
+    Servicio de autenticación y gestión de tokens JWT.
+
+    **Prerrequisito síncrono** para todos los servicios de la plataforma:
+    ningún request pasa a otro servicio sin pasar antes por `GET /api/v1/auth/validate`.
+
+    **Flujos soportados:**
+    - Party auth — `username` + `password`, con 2FA TOTP opcional
+    - Client auth (M2M) — `client_id` + `secret` con whitelist de IPs por CIDR
+
+    **Eventos Kafka:** cada intento de login emite a `identity.login-attempted`
+    con metadata de red, geolocalización y dispositivo para cumplimiento regulatorio
+    (CNBV, PCI-DSS, SOC2, GDPR).
+  contact:
+    name: Fintech Platform Team
+
+servers:
+  - url: http://localhost:8080
+    description: Local
+  - url: http://identity-service:8080
+    description: Docker Compose
+
+tags:
+  - name: T1 — Identity & Auth
+    description: Autenticación de parties y gestión de tokens JWT
+  - name: T1 — MFA
+    description: Two-Factor Authentication via TOTP (Google Authenticator / Authy)
+  - name: T1 — Client Auth
+    description: Autenticación client/secret para sistemas externos (M2M) con whitelist de IPs
+
+# ── Security ──────────────────────────────────────────────────────────────────
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT obtenido de POST /api/v1/auth/login o POST /api/v1/auth/clients/token
+
+  # ── Schemas ────────────────────────────────────────────────────────────────
+
+  schemas:
+
+    # ── Requests ─────────────────────────────────────────────────────────────
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: juan@email.com
+          description: Identificador de login (email, teléfono, alias o cualquier string único)
+        password:
+          type: string
+          example: "1234"
+          description: NIP numérico o contraseña alfanumérica
+        deviceId:
+          type: string
+          nullable: true
+          example: device-abc-123
+          description: ID opaco del dispositivo generado por la app cliente (UUID de instalación, fingerprint, etc.)
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          example: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+
+    MfaVerifyRequest:
+      type: object
+      required: [mfaToken, code]
+      properties:
+        mfaToken:
+          type: string
+          example: f47ac10b58cc4372a5670e02b2c3d479
+          description: Token recibido en el 202 del login
+        code:
+          type: string
+          pattern: '^\d{6}$'
+          example: "123456"
+          description: Código TOTP de 6 dígitos del autenticador
+
+    MfaEnrollConfirmRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          pattern: '^\d{6}$'
+          example: "123456"
+
+    MfaDisableRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          pattern: '^\d{6}$'
+          example: "123456"
+
+    CredentialCreateRequest:
+      type: object
+      required: [partyId, username, password, credentialType]
+      properties:
+        partyId:
+          type: string
+          format: uuid
+          example: 00000000-0000-0000-0000-000000000001
+        username:
+          type: string
+          example: juan@email.com
+        password:
+          type: string
+          example: "1234"
+        credentialType:
+          type: string
+          enum: [NIP, PASSWORD]
+          example: NIP
+          description: NIP = numérico (apps móviles) | PASSWORD = alfanumérico (web)
+
+    ClientTokenRequest:
+      type: object
+      required: [clientId, clientSecret]
+      properties:
+        clientId:
+          type: string
+          example: scoring-service
+        clientSecret:
+          type: string
+          example: s3cr3t
+
+    RegisterClientRequest:
+      type: object
+      required: [clientId, clientName, roles]
+      properties:
+        clientId:
+          type: string
+          example: scoring-service
+        clientName:
+          type: string
+          example: Scoring Service
+        roles:
+          type: array
+          items:
+            type: string
+          example: [SYSTEM_SCORING]
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          example: null
+          description: null = sin expiración
+
+    WhitelistEntryRequest:
+      type: object
+      required: [cidr]
+      properties:
+        cidr:
+          type: string
+          example: "10.0.0.0/8"
+          description: Rango de IPs en notación CIDR
+        label:
+          type: string
+          nullable: true
+          example: prod-internal
+
+    # ── Responses ────────────────────────────────────────────────────────────
+
+    TokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          example: eyJhbGciOiJIUzI1NiJ9...
+        refreshToken:
+          type: string
+          example: a1b2c3d4e5f6...
+        expiresIn:
+          type: integer
+          format: int64
+          example: 900
+          description: Segundos hasta la expiración del access token
+        tokenType:
+          type: string
+          example: Bearer
+
+    MfaPendingResponse:
+      type: object
+      properties:
+        mfaRequired:
+          type: boolean
+          example: true
+        mfaToken:
+          type: string
+          example: f47ac10b58cc4372a5670e02b2c3d479
+          description: Token de un solo uso válido por 5 minutos — usar en POST /mfa/verify
+
+    TokenValidationResponse:
+      type: object
+      properties:
+        partyId:
+          type: string
+          format: uuid
+          example: 00000000-0000-0000-0000-000000000001
+        roles:
+          type: array
+          items:
+            type: string
+          example: [CUSTOMER]
+        deviceId:
+          type: string
+          nullable: true
+          example: device-abc-123
+
+    MfaEnrollResponse:
+      type: object
+      properties:
+        totpSecret:
+          type: string
+          example: JBSWY3DPEHPK3PXP
+          description: Secret Base32 para configurar manualmente el autenticador
+        qrUri:
+          type: string
+          example: "otpauth://totp/fintech:00000000-0000-0000-0000-000000000001?secret=JBSWY3DPEHPK3PXP&issuer=fintech&algorithm=SHA1&digits=6&period=30"
+          description: URI para generar el QR — escanear con Google Authenticator o Authy
+
+    ClientRegistrationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+          example: scoring-service
+        clientSecret:
+          type: string
+          example: s3cr3t-plain-text
+          description: "GUARDAR AHORA: texto plano del secret, no se vuelve a mostrar"
+        clientName:
+          type: string
+          example: Scoring Service
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+          example: ACTIVE
+        roles:
+          type: array
+          items:
+            type: string
+          example: [SYSTEM_SCORING]
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    ClientInfoResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        clientId:
+          type: string
+          example: scoring-service
+        clientName:
+          type: string
+          example: Scoring Service
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+          example: ACTIVE
+        roles:
+          type: array
+          items:
+            type: string
+          example: [SYSTEM_SCORING]
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    WhitelistEntryResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        cidr:
+          type: string
+          example: "10.0.0.0/8"
+        label:
+          type: string
+          nullable: true
+          example: prod-internal
+        createdAt:
+          type: string
+          format: date-time
+
+    ProblemDetail:
+      type: object
+      description: Error en formato RFC 9457 Problem Details
+      properties:
+        type:
+          type: string
+          example: "https://fintech.com/errors/AUTH_INVALID_CREDENTIALS"
+        title:
+          type: string
+          example: Unauthorized
+        status:
+          type: integer
+          example: 401
+        detail:
+          type: string
+          example: PIN incorrecto o credencial no encontrada
+
+  # ── Reusable responses ────────────────────────────────────────────────────
+
+  responses:
+    Unauthorized:
+      description: Token inválido, expirado o revocado
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    AccountLocked:
+      description: Cuenta bloqueada por exceder intentos fallidos
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    NotFound:
+      description: Recurso no encontrado
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    Conflict:
+      description: Conflicto — recurso ya existe
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+
+paths:
+
+  # ── Party Auth ──────────────────────────────────────────────────────────────
+
+  /api/v1/auth/login:
+    post:
+      tags: [T1 — Identity & Auth]
+      summary: Login con NIP/PASSWORD
+      description: |
+        Autentica al party con `username` + `password`.
+
+        - **200** — sin 2FA: tokens emitidos directamente
+        - **202** — con 2FA activo: retorna `mfaToken` para continuar en `POST /api/v1/auth/mfa/verify`
+
+        **Headers capturados automáticamente** (no van en el body):
+        - `User-Agent` — tipo de cliente
+        - `X-Forwarded-For` / `X-Real-IP` — IP real detrás de proxy
+        - `X-Request-ID` — correlación de trazas distribuidas
+
+        Emite evento Kafka `identity.login-attempted` con outcome `SUCCESS` o `SUCCESS_MFA_REQUIRED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        "200":
+          description: Tokens emitidos (party sin 2FA)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        "202":
+          description: 2FA activo — usar mfaToken en POST /api/v1/auth/mfa/verify
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaPendingResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "423":
+          $ref: '#/components/responses/AccountLocked'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [T1 — Identity & Auth]
+      summary: Rotar refresh token
+      description: |
+        Rota el refresh token. El token anterior queda **revocado inmediatamente**.
+        Los nuevos tokens se emiten con el mismo `partyId`, `deviceId`, `ipAddress` y `userAgent`
+        que tenía la sesión original.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        "200":
+          description: Nuevos tokens emitidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [T1 — Identity & Auth]
+      summary: Logout — revoca todas las sesiones del party
+      description: |
+        Revoca todos los tokens activos del party (JTI + refresh tokens eliminados de Redis).
+        Requiere JWT válido en el header `Authorization: Bearer {token}`.
+      security:
+        - bearerAuth: []
+      responses:
+        "204":
+          description: Sesiones revocadas
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/validate:
+    get:
+      tags: [T1 — Identity & Auth]
+      summary: Validar JWT — consumido síncronamente por otros servicios
+      description: |
+        Valida la firma del JWT, verifica que el JTI no esté revocado en Redis,
+        y retorna los claims del token.
+
+        El resultado se cachea en Redis por `AUTH_VALIDATION_CACHE_TTL_SECONDS` (default 60s)
+        para reducir la carga en validaciones de alta frecuencia.
+
+        **Uso interno:** todos los demás servicios de la plataforma llaman a este endpoint
+        en cada request protegido antes de procesar la petición.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Token válido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenValidationResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/credentials:
+    post:
+      tags: [T1 — Identity & Auth]
+      summary: Crear credencial NIP — solo ADMIN
+      description: |
+        Crea una credencial (NIP numérico o PASSWORD alfanumérico) para un party.
+        Solo accesible con rol **ADMIN**. Usado en bootstrap de party o delegación D0.
+
+        Un party puede tener a lo sumo **una** credencial por tipo.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialCreateRequest'
+      responses:
+        "201":
+          description: Credencial creada
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  # ── 2FA / TOTP ──────────────────────────────────────────────────────────────
+
+  /api/v1/auth/mfa/enroll:
+    post:
+      tags: [T1 — MFA]
+      summary: Iniciar enrolamiento TOTP
+      description: |
+        Genera un secret TOTP y retorna el `qrUri` para escanear con
+        **Google Authenticator** o **Authy**.
+
+        El 2FA **no queda activo** hasta confirmar con un código válido en
+        `POST /api/v1/auth/mfa/enroll/confirm`.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Secret y QR URI generados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaEnrollResponse'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/auth/mfa/enroll/confirm:
+    post:
+      tags: [T1 — MFA]
+      summary: Confirmar enrolamiento — activa el 2FA
+      description: |
+        Valida el primer código TOTP del autenticador y activa el 2FA.
+        A partir de este momento el login retorna **202** en lugar de **200**.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaEnrollConfirmRequest'
+      responses:
+        "204":
+          description: 2FA activado
+        "400":
+          description: Código TOTP inválido o expirado
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/auth/mfa/verify:
+    post:
+      tags: [T1 — MFA]
+      summary: Verificar TOTP — paso 2 del login con 2FA
+      description: |
+        Completa el login cuando el party tiene 2FA activo.
+
+        Usar el `mfaToken` recibido en el **202** del login (variable auto-asignada en la colección).
+        El `mfaToken` se consume en un **único uso** y expira en **5 minutos**.
+
+        Emite evento Kafka con outcome `SUCCESS_MFA_VERIFIED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaVerifyRequest'
+      responses:
+        "200":
+          description: Autenticación completa — tokens emitidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        "400":
+          description: Código TOTP inválido o mfaToken expirado / ya consumido
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /api/v1/auth/mfa:
+    delete:
+      tags: [T1 — MFA]
+      summary: Deshabilitar 2FA
+      description: |
+        Deshabilita el 2FA del party autenticado.
+        Requiere el **código TOTP vigente** para confirmar la operación.
+        A partir de este momento el login retorna **200** directamente.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaDisableRequest'
+      responses:
+        "204":
+          description: 2FA deshabilitado
+        "400":
+          description: Código TOTP inválido
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  # ── Client Auth (M2M) ───────────────────────────────────────────────────────
+
+  /api/v1/auth/clients/token:
+    post:
+      tags: [T1 — Client Auth]
+      summary: Autenticación client/secret — obtener tokens M2M
+      description: |
+        Autentica un sistema externo con `clientId` + `clientSecret`.
+
+        Si el cliente tiene whitelist de IPs configurada, la IP del request debe estar
+        dentro de algún CIDR permitido (resuelve `X-Forwarded-For` si está presente).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClientTokenRequest'
+      responses:
+        "200":
+          description: Tokens emitidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "403":
+          description: IP fuera de la whitelist del cliente
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetail'
+
+  /api/v1/auth/clients:
+    post:
+      tags: [T1 — Client Auth]
+      summary: Registrar cliente externo — solo ADMIN
+      description: |
+        Registra un nuevo cliente M2M.
+
+        El `clientSecret` en **texto plano** se entrega **una sola vez** en la respuesta.
+        Guardarlo de inmediato — el sistema solo almacena el hash bcrypt.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterClientRequest'
+      responses:
+        "201":
+          description: Cliente registrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientRegistrationResponse'
+        "409":
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/auth/clients/{clientId}:
+    get:
+      tags: [T1 — Client Auth]
+      summary: Info de un cliente — solo ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: scoring-service
+      responses:
+        "200":
+          description: Info del cliente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientInfoResponse'
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      tags: [T1 — Client Auth]
+      summary: Deshabilitar cliente — solo ADMIN
+      description: |
+        Deshabilita el cliente. Los tokens ya emitidos siguen válidos hasta su expiración natural.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: scoring-service
+      responses:
+        "204":
+          description: Cliente deshabilitado
+        "404":
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/auth/clients/{clientId}/whitelist:
+    post:
+      tags: [T1 — Client Auth]
+      summary: Agregar CIDR a whitelist — solo ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: scoring-service
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WhitelistEntryRequest'
+      responses:
+        "201":
+          description: Entrada agregada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WhitelistEntryResponse'
+
+    get:
+      tags: [T1 — Client Auth]
+      summary: Listar whitelist de IPs — solo ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: scoring-service
+      responses:
+        "200":
+          description: Lista de entradas CIDR
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WhitelistEntryResponse'
+
+  /api/v1/auth/clients/{clientId}/whitelist/{entryId}:
+    delete:
+      tags: [T1 — Client Auth]
+      summary: Eliminar entrada de whitelist — solo ADMIN
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+          example: scoring-service
+        - name: entryId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Entrada eliminada
+        "404":
+          $ref: '#/components/responses/NotFound'

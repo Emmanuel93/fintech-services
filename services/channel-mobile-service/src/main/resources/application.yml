@@ -1,0 +1,85 @@
+spring:
+  application:
+    name: channel-mobile-service
+
+  # Sin base de datos — el BFF es stateless (sesiones en memoria)
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.liquibase.LiquibaseAutoConfiguration
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2000
+
+server:
+  port: ${SERVER_PORT:8085}
+  error:
+    include-message: always
+    include-binding-errors: always
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+  endpoint:
+    health:
+      show-details: never
+  info:
+    env:
+      enabled: true
+
+info:
+  app:
+    name: ${spring.application.name}
+    description: "BFF — Backend For Frontend para canal móvil"
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    display-request-duration: true
+    operations-sorter: alpha
+    tags-sorter: alpha
+    try-it-out-enabled: true
+    persist-authorization: true
+  show-actuator: false
+
+fintech:
+  channel-mobile:
+    identity-service-url: ${IDENTITY_SERVICE_URL:http://localhost:8080}
+    origination-service-url: ${ORIGINATION_SERVICE_URL:http://localhost:8081}
+    credit-product-service-url: ${CREDIT_PRODUCT_SERVICE_URL:http://localhost:8084}
+    party-service-url: ${PARTY_SERVICE_URL:http://localhost:8083}
+    credit-portfolio-service-url: ${CREDIT_PORTFOLIO_SERVICE_URL:http://localhost:8087}
+    wallet-service-url: ${WALLET_SERVICE_URL:http://localhost:8092}
+    notifications-service-url: ${NOTIFICATIONS_SERVICE_URL:http://localhost:8098}
+    payments-service-url: ${PAYMENTS_SERVICE_URL:http://localhost:8089}
+    charges-service-url: ${CHARGES_SERVICE_URL:http://localhost:8088}
+    scoring-service-url: ${SCORING_SERVICE_URL:http://localhost:8082}
+    audit-service-url: ${AUDIT_SERVICE_URL:http://localhost:8099}
+    beneficiary-service-url: ${BENEFICIARY_SERVICE_URL:http://localhost:8102}
+    # Sustituye la web pública de KYC de la beneficiaria mientras no exista.
+    kyc-simulation-enabled: ${BENEFICIARY_KYC_SIMULATION_ENABLED:false}
+    # Endpoints /internal/test-support/* — solo para pruebas E2E, deshabilitados por default.
+    test-support-enabled: ${TEST_SUPPORT_ENABLED:false}
+    otp-expiry-minutes: ${OTP_EXPIRY_MINUTES:5}
+    otp-max-attempts: ${OTP_MAX_ATTEMPTS:3}
+    otp-max-sends-per-window: ${OTP_MAX_SENDS_PER_WINDOW:5}
+    otp-send-window-minutes: ${OTP_SEND_WINDOW_MINUTES:60}
+    kyc-session-expiry-minutes: ${KYC_SESSION_EXPIRY_MINUTES:30}
+    # true = valida OTP real; false = valida contra otp-dev-code (ambientes bajos)
+    otp-code-validation: ${OTP_CODE_VALIDATION:true}
+    # Código OTP fijo para ambientes bajos. Solo aplica cuando otp-code-validation=false.
+    otp-dev-code: ${OTP_DEV_CODE:}

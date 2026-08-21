@@ -1,0 +1,5 @@
+# Perfil de producción. Activa con: --spring.profiles.active=prod
+fintech:
+  channel-mobile:
+    otp-code-validation: true
+    otp-dev-code: ""
