@@ -823,21 +823,25 @@ Cerrarlo es sembrar filas, no escribir código. Detalle por tópico y por clave 
 3. ~~**`scoring-service:compileTestJava` está roto**~~ — **ya no.** Compila y sus 53 pruebas pasan.
    La deuda se quedó escrita después de arreglarse, que es la forma más barata de que una lista de
    pendientes deje de merecer confianza.
-4. **`NotificationFlowIT` era sensible a la carga** — **corregido**, y la descripción de esta
-   deuda estaba mal. Decía que las dos pruebas esperaban con `await().atMost(20s)` sobre Kafka;
-   `CollectionsQueueIT` **no tiene un solo `await`**, así que la explicación era de una sola y se
-   extendió a las dos sin comprobarlo.
+4. ~~**Dos pruebas sensibles a la carga**~~ — **cerradas, y la deuda estaba mal escrita las dos
+   veces.** Decía que ambas esperaban con `await().atMost(20s)` sobre Kafka; `CollectionsQueueIT`
+   no tiene un solo `await`. Y cuando por fin falló acompañada, la causa **tampoco era la carga**.
 
-   Lo que pasaba de verdad en `NotificationFlowIT`: publicaba recién arrancado el contexto, cuando
-   los consumidores todavía no se habían unido al grupo, y los veinte segundos contaban desde ahí.
-   No se perdía ningún mensaje —el servicio lee `earliest`— pero el presupuesto se lo comía el
-   rebalanceo. Ahora espera la asignación de particiones **antes** de publicar: subir el número
-   habría tapado el síntoma con otro número arbitrario, y lo que hacía falta era sacar de la
-   medición lo que no se está midiendo. Corre en ~1 s.
+   `NotificationFlowIT` publicaba recién arrancado el contexto, cuando los consumidores todavía no
+   se habían unido al grupo, y los veinte segundos contaban desde ahí. Ahora espera la asignación
+   de particiones **antes** de publicar; corre en ~1 s.
 
-   `CollectionsQueueIT` pasa aislada (8/8) y ya está diseñada contra la interferencia: filtra por
-   gestores únicos por corrida y no afirma sobre totales globales. Si vuelve a fallar acompañada,
-   la causa es otra y hay que verla con el fallo delante, no suponerla.
+   `CollectionsQueueIT` fallaba por la **hora del día**. `attemptsToday` cuenta desde el inicio del
+   día en hora de **México** —y con razón: el tope de intentos diarios es una regla de trato al
+   cliente, y su día es el de la persona a la que se le llama—, pero el fixture sembraba con
+   «hace una y tres horas» sobre el reloj de la máquina, que va en MST. Entre la medianoche
+   mexicana y la de la máquina hay una hora en la que los dos intentos caen en el día anterior y
+   la cuenta sale en cero. Se reproduce puntualmente **una hora cada día**, y ninguna cantidad de
+   carga la provoca ni la evita.
+
+   Ahora el fixture se ancla al **mismo comienzo de día que usa la consulta**. Verificado dentro de
+   la ventana: con el fixture viejo falla, con el nuevo pasa.
+
 5. ~~**Los $8 250 de interés duplicado siguen en el mayor**~~ — **ya no existen.** La base se
    recreó desde cero y los cargos duplicados eran datos, no código. Lo que impedía que volvieran
    —el índice único de idempotencia del devengo— sí es código y sigue puesto: sobre base limpia

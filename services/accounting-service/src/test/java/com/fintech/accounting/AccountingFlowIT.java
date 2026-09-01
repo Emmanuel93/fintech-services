@@ -58,11 +58,24 @@ class AccountingFlowIT {
     @Autowired InvoiceableItemRepository invoiceableItemRepository;
     @Autowired KafkaTemplate<String, Object> kafkaTemplate;
 
+    /** La misma que `fintech.accounting.zone`. Si una cambia, la otra tiene que cambiar. */
+    private static final java.time.ZoneId ZONA_CONTABLE = java.time.ZoneId.of("America/Mexico_City");
+
     @Test
     void flow1_charge_postsIncomeEntry_andAccruesInvoiceable() {
         UUID ca = UUID.randomUUID();
         UUID party = UUID.randomUUID();
-        String period = YearMonth.now().toString().replace("-", "");
+        // El período, en la MISMA zona en la que contabilidad lo deriva.
+        //
+        // `YearMonth.now()` usa la zona de la máquina, y contabilidad opera en hora de México
+        // (`fintech.accounting.zone`). En la ventana entre el cambio de mes mexicano y el de la
+        // máquina, la prueba pedía las partidas de un mes y contabilidad las había archivado en el
+        // siguiente: `Expecting actual not to be empty`.
+        //
+        // Es el mismo error del que el código de producción ya se corrigió, y que su propio javadoc
+        // advierte: «el devengo del 31 procesado a las 00:03 del día 1 caía en el mes siguiente».
+        // La prueba lo repetía desde fuera.
+        String period = YearMonth.now(ZONA_CONTABLE).toString().replace("-", "");
 
         // La secuencia real de un crédito: primero se dispone el dinero, después devenga.
         //
