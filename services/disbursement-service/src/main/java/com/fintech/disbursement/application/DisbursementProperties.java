@@ -27,8 +27,28 @@ public class DisbursementProperties {
 
     private final Dispatch dispatch = new Dispatch();
 
+    /** Dónde vive tesorería, que es quien decide por dónde sale cada pago. */
+    private final Banking banking = new Banking();
+
     /** Configuración por rail: ventana operativa y si está habilitado. Clave = nombre del rail. */
     private Map<String, RailConfig> rails = new LinkedHashMap<>();
+
+    public static class Banking {
+        /**
+         * Sin valor por defecto útil a propósito: si nadie configura tesorería, el servicio
+         * arranca igual y el fallo aparece en el primer despacho como «no responde», no como un
+         * pago que salió por una cuenta que nadie eligió.
+         */
+        private String baseUrl = "http://localhost:8104";
+        /** Cuánto espera una orden cuando tesorería no responde, sin gastar intento. */
+        @NotNull
+        private Duration unavailableBackoff = Duration.ofSeconds(30);
+
+        public String getBaseUrl() { return baseUrl; }
+        public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+        public Duration getUnavailableBackoff() { return unavailableBackoff; }
+        public void setUnavailableBackoff(Duration d) { this.unavailableBackoff = d; }
+    }
 
     public static class Dispatch {
         private boolean enabled = true;
@@ -90,6 +110,8 @@ public class DisbursementProperties {
     }
 
     public Dispatch getDispatch() { return dispatch; }
+    public Banking getBanking() { return banking; }
+
     public Map<String, RailConfig> getRails() { return rails; }
     public void setRails(Map<String, RailConfig> rails) { this.rails = rails; }
 }

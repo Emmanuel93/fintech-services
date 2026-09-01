@@ -40,14 +40,33 @@ import static org.assertj.core.api.Assertions.assertThat;
 })
 class AccountingAcceptanceTest {
 
+    /**
+     * La misma zona que `fintech.accounting.zone`. Contabilidad deriva el período en hora de
+     * México; calcularlo aquí con el reloj de la máquina hace que en la ventana entre un cambio de
+     * mes y el otro la prueba pida las partidas de un mes que contabilidad archivó en el siguiente.
+     */
+    private static final java.time.ZoneId ZONA_CONTABLE = java.time.ZoneId.of("America/Mexico_City");
+
     @Autowired TestRestTemplate restTemplate;
     @Autowired JournalEntryRepository journalRepository;
 
+    /**
+     * Siembra en el período <b>vigente</b>, no en uno a fuego.
+     *
+     * <p>Decía {@code "202608"}. Las consultas de abajo piden el período actual, así que la prueba
+     * sólo funcionaba durante agosto de 2026: el 1 de septiembre iba a romperse para todo el mundo,
+     * sin que nadie tocara nada. Un literal de fecha en un fixture es una bomba con temporizador.
+     */
     private JournalEntry seedEntry(UUID creditAccountId, UUID partyId) {
         return journalRepository.save(JournalEntry.post(
                 "seed-" + UUID.randomUUID(), "CHARGE_ORDINARY_INTEREST", creditAccountId, partyId,
                 "1203", "4101", new BigDecimal("100"), "MXN", "Interés seed",
-                null, "S_SEED", "202608", java.time.Instant.now(), (short) 1));
+                null, "S_SEED", periodoVigente(), java.time.Instant.now(), (short) 1));
+    }
+
+    /** El período tal como lo deriva contabilidad: en su zona, no en la de la máquina. */
+    private static String periodoVigente() {
+        return YearMonth.now(ZONA_CONTABLE).toString().replace("-", "");
     }
 
     @Test
@@ -78,7 +97,7 @@ class AccountingAcceptanceTest {
     @Test
     void ac4_trialBalance_returns200() {
         seedEntry(UUID.randomUUID(), UUID.randomUUID());
-        String period = YearMonth.now().toString().replace("-", "");
+        String period = periodoVigente();
         var resp = getList("/api/v1/accounting/trial-balance?period=" + period);
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(resp.getBody()).isNotEmpty();
@@ -86,7 +105,7 @@ class AccountingAcceptanceTest {
 
     @Test
     void ac5_billingRun_returns200() {
-        String period = YearMonth.now().toString().replace("-", "");
+        String period = periodoVigente();
         var resp = restTemplate.exchange("/api/v1/accounting/billing-runs?period=" + period,
                 HttpMethod.POST, new HttpEntity<>(userHeaders()),
                 new ParameterizedTypeReference<Map<String, Object>>() {});

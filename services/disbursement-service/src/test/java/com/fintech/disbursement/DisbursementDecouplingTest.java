@@ -35,7 +35,12 @@ class DisbursementDecouplingTest {
             noClasses().that().resideInAPackage("com.fintech.disbursement..")
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "com.fintech.creditportfolio..", "com.fintech.wallet..",
-                            "com.fintech.payments..", "com.fintech.stp..", "com.fintech.origination..")
+                            "com.fintech.payments..", "com.fintech.stp..", "com.fintech.origination..",
+                            // BK-10: tesorería decide por dónde sale el dinero, y este servicio se
+                            // lo pregunta por su puerto ACL. Que la respuesta llegue por HTTP y no
+                            // por un import es lo que permite cambiar quién decide sin recompilar
+                            // el orquestador.
+                            "com.fintech.banking..")
                     .because("la única dependencia permitida es 'shared' (@ApplicationModule)");
 
     /** El vocabulario de crédito sólo puede aparecer en los adaptadores de entrada (ACL). */

@@ -1,10 +1,5 @@
 package com.fintech.creditproduct.infrastructure.adapter.in.api;
 
-import com.fintech.creditproduct.infrastructure.config.CreditProductProperties;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.JwtException;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,64 +8,50 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
-import javax.crypto.SecretKey;
 import java.io.IOException;
-import java.util.Base64;
+import java.util.Arrays;
 import java.util.List;
 
+/**
+ * Popula el SecurityContext desde los headers que inyecta el gateway.
+ *
+ * <p>credit-product es un servicio de dominio interno: la identidad le llega ya validada por
+ * {@code X-User-Id} y {@code X-Roles} en la cadena gateway (valida RS256) → BFF → dominio. El
+ * gateway <b>limpia</b> esos headers si vienen del cliente y los reescribe desde el token, así que
+ * dentro de la red no son falsificables.
+ *
+ * <p>Antes este filtro validaba un JWT propio contra un secreto configurable. La configuración
+ * nunca le llegaba en el despliegue, de modo que <b>ninguna</b> escritura del catálogo era posible:
+ * todo token —válido o no— caía en 401. Un producto no se podía crear, activar ni retirar desde el
+ * backoffice. La prueba de integración no lo veía porque ella misma inyectaba el secreto.
+ */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
-
-    private final CreditProductProperties properties;
-
-    public JwtAuthenticationFilter(CreditProductProperties properties) {
-        this.properties = properties;
-    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        String header = request.getHeader("Authorization");
-        if (header == null || !header.startsWith("Bearer ")) {
-            chain.doFilter(request, response);
-            return;
-        }
+        String userId = request.getHeader("X-User-Id");
 
-        String jwtSecret = properties.getJwtSecret();
-        if (jwtSecret == null || jwtSecret.isBlank()) {
-            chain.doFilter(request, response);
-            return;
-        }
-
-        String token = header.substring(7);
-        try {
-            SecretKey key = Keys.hmacShaKeyFor(Base64.getDecoder().decode(jwtSecret));
-
-            Claims claims = Jwts.parser()
-                    .verifyWith(key)
-                    .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
-
-            String subject = claims.getSubject();
-
-            @SuppressWarnings("unchecked")
-            List<String> roles = claims.get("roles", List.class);
-            List<SimpleGrantedAuthority> authorities = (roles != null)
-                    ? roles.stream().map(r -> new SimpleGrantedAuthority("ROLE_" + r)).toList()
-                    : List.of();
-
-            UsernamePasswordAuthenticationToken auth =
-                    new UsernamePasswordAuthenticationToken(subject, null, authorities);
-            SecurityContextHolder.getContext().setAuthentication(auth);
-
-        } catch (JwtException | IllegalArgumentException ignored) {
-            // Invalid token — SecurityContext remains empty → 401 on protected routes
+        if (StringUtils.hasText(userId)) {
+            SecurityContextHolder.getContext().setAuthentication(
+                    new UsernamePasswordAuthenticationToken(
+                            userId, null, parseRoles(request.getHeader("X-Roles"))));
         }
 
         chain.doFilter(request, response);
+    }
+
+    private static List<SimpleGrantedAuthority> parseRoles(String roles) {
+        if (!StringUtils.hasText(roles)) return List.of();
+        return Arrays.stream(roles.split(","))
+                .map(String::trim)
+                .filter(r -> !r.isEmpty())
+                .map(r -> new SimpleGrantedAuthority("ROLE_" + r))
+                .toList();
     }
 }

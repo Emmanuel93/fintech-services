@@ -2,6 +2,8 @@ package com.fintech.charges.infrastructure.config;
 
 import com.fintech.charges.infrastructure.adapter.in.messaging.BalanceUpdatedPayload;
 import com.fintech.charges.infrastructure.adapter.in.messaging.ChargeRejectedPayload;
+import com.fintech.charges.infrastructure.adapter.in.messaging.DelinquencyStatusUpdatedPayload;
+import com.fintech.charges.infrastructure.adapter.in.messaging.DispositionDeferredPayload;
 import com.fintech.charges.infrastructure.adapter.in.messaging.CreditAccountActivatedPayload;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -42,6 +44,22 @@ public class KafkaConfig {
     balanceUpdatedListenerContainerFactory(KafkaProperties properties) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, BalanceUpdatedPayload>();
         factory.setConsumerFactory(jsonConsumerFactory(properties, BalanceUpdatedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, DispositionDeferredPayload>
+    dispositionDeferredListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, DispositionDeferredPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, DispositionDeferredPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, DelinquencyStatusUpdatedPayload>
+    delinquencyStatusUpdatedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, DelinquencyStatusUpdatedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, DelinquencyStatusUpdatedPayload.class));
         return factory;
     }
 

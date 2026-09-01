@@ -48,6 +48,29 @@ public class StpPaymentOrder {
     private BigDecimal amount;
 
     /** Completo, para auditoría y para comparar contra el CEP. */
+    /**
+     * La cuenta ordenante <b>congelada</b> en el momento de registrar la orden.
+     *
+     * <p>Antes se releía por id al firmar, que puede ser minutos después: cambiar la cuenta
+     * ordenante de una empresa en esa ventana alteraba la cadena original de una orden ya
+     * registrada. Y desde BK-07 el id viene de {@code banking}, así que releerlo del catálogo local
+     * tampoco sería posible.
+     */
+    @Column(name = "ordering_clabe", length = 18)
+    private String orderingClabe;
+
+    @Column(name = "ordering_holder_name", length = 150)
+    private String orderingHolderName;
+
+    @Column(name = "ordering_tax_id", length = 18)
+    private String orderingTaxId;
+
+    @Column(name = "ordering_account_type", length = 4)
+    private String orderingAccountType;
+
+    @Column(name = "ordering_client_number", length = 20)
+    private String orderingClientNumber;
+
     @Column(name = "beneficiary_name", nullable = false, updatable = false)
     private String beneficiaryName;
 
@@ -134,7 +157,10 @@ public class StpPaymentOrder {
                                          String beneficiaryAccountHash, String beneficiaryAccountType,
                                          String beneficiaryTaxId, Integer beneficiaryInstitution,
                                          String concept, Long numericReference, String paymentType,
-                                         String correlationId) {
+                                         String correlationId,
+                                         String orderingClabe, String orderingHolderName,
+                                         String orderingTaxId, String orderingAccountType,
+                                         String orderingClientNumber) {
         if (amount == null || amount.signum() <= 0) {
             throw new IllegalArgumentException("El monto de la orden debe ser positivo");
         }
@@ -159,6 +185,13 @@ public class StpPaymentOrder {
         order.status = StpPaymentOrderStatus.PENDING.name();
         order.attemptCount = 0;
         order.correlationId = correlationId;
+        // La cuenta con la que se firmará, congelada aquí. Releerla del catálogo al momento de
+        // firmar permitía que un cambio de cuenta ordenante alterara una orden ya registrada.
+        order.orderingClabe = orderingClabe;
+        order.orderingHolderName = orderingHolderName;
+        order.orderingTaxId = orderingTaxId;
+        order.orderingAccountType = orderingAccountType != null ? orderingAccountType : "40";
+        order.orderingClientNumber = orderingClientNumber;
         order.createdAt = Instant.now();
         return order;
     }
@@ -246,6 +279,17 @@ public class StpPaymentOrder {
     public UUID getStpPaymentOrderId() { return stpPaymentOrderId; }
     public UUID getPaymentRequestId() { return paymentRequestId; }
     public UUID getCompanyId() { return companyId; }
+    public String getOrderingClabe()        { return orderingClabe; }
+    public String getOrderingHolderName()   { return orderingHolderName; }
+    public String getOrderingTaxId()        { return orderingTaxId; }
+    public String getOrderingAccountType()  { return orderingAccountType; }
+    public String getOrderingClientNumber() { return orderingClientNumber; }
+
+    /** Las órdenes anteriores a BK-07 no traen fotografía: su relay cae al catálogo local. */
+    public boolean tieneCuentaOrdenanteRegistrada() {
+        return orderingClabe != null && !orderingClabe.isBlank();
+    }
+
     public UUID getOrderingAccountId() { return orderingAccountId; }
     public String getTrackingKey() { return trackingKey; }
     public LocalDate getBusinessDate() { return businessDate; }

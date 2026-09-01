@@ -47,7 +47,7 @@ public class DispositionAuthorizedListener {
                 DisbursementSource.DISPOSITION,
                 String.valueOf(event.dispositionId()),
                 String.valueOf(event.dispositionId()),
-                null,
+                event.sourceCompanyKey(),
                 event.companyId(),
                 metadata,
                 event.beneficiaryName(),

@@ -173,6 +173,27 @@ public class PermissionsService {
         reload();
     }
 
+    /**
+     * Y se vuelve a leer periódicamente, porque una sola lectura al arrancar no basta.
+     *
+     * <p>Arrancar los dos servicios a la vez sobre base limpia dejó al backoffice con <b>media
+     * política</b>: leyó la matriz mientras identity aún aplicaba sus migraciones, se quedó con las
+     * capacidades que existían en ese instante y siguió con ellas. El síntoma es un 403 sobre una
+     * facultad que la base sí concede, y no se parece en nada a «el arranque fue a destiempo».
+     *
+     * <p>El respaldo en código cubre «identity no contesta». No cubría «identity contesta a
+     * medias», que es peor porque una foto parcial se parece a una completa. Releer converge sola:
+     * cualquier desfase se cierra en el siguiente ciclo sin que nadie tenga que reiniciar nada.
+     *
+     * <p>Cada cinco minutos y no cada minuto: la matriz cambia con una edición humana, y esas ya
+     * llaman a {@link #reload()} directamente. Esto es la red de abajo, no el camino principal.
+     */
+    @org.springframework.scheduling.annotation.Scheduled(
+            initialDelayString = "PT30S", fixedDelayString = "${fintech.backoffice.permisos.refresco:PT5M}")
+    void releerPeriodicamente() {
+        reload();
+    }
+
     private static Map<String, Set<String>> invert() {
         Map<String, Set<String>> byRole = new TreeMap<>();
         CAPABILITY_ROLES.forEach((capability, capRoles) ->

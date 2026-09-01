@@ -15,6 +15,13 @@ public record DispositionAuthorizedPayload(
         UUID dispositionId,
         UUID creditAccountId,
         UUID companyId,
+        /**
+         * Con qué clave resolver la empresa cuando {@code companyId} viene nulo (DB-07).
+         *
+         * <p>Cartera manda la unidad de origen de la cuenta. Sin esto, toda disposición moría con
+         * {@code UNRESOLVED_COMPANY} antes de llegar al proveedor.
+         */
+        String sourceCompanyKey,
         String dispositionType,
         BigDecimal amount,
         String currency,

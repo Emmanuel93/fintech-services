@@ -37,6 +37,14 @@ public class KafkaConfig {
     }
 
     @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, ExecutiveAssignedPayload>
+    executiveAssignedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, ExecutiveAssignedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, ExecutiveAssignedPayload.class));
+        return factory;
+    }
+
+    @Bean
     public ConcurrentKafkaListenerContainerFactory<String, InstallmentDuePayload>
     installmentDueListenerContainerFactory(KafkaProperties properties) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, InstallmentDuePayload>();

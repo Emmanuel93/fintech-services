@@ -48,6 +48,9 @@ class CollectionsQueueIT {
      * sobre totales globales haría que estos tests pasaran solos y fallaran acompañados — que es
      * la peor clase de test. Todo se filtra por estos dos gestores, que no existen fuera de aquí.
      */
+    /** La misma zona que ancla el día en la consulta. Si una cambia, la otra tiene que cambiar. */
+    private static final java.time.ZoneId ZONA_OPERATIVA = java.time.ZoneId.of("America/Mexico_City");
+
     private String agentA;
     private String agentB;
     private List<String> agents;
@@ -75,9 +78,22 @@ class CollectionsQueueIT {
         promise(caseB, "2200.00", LocalDate.now().plusDays(4), PromiseStatus.ACTIVE);
 
         // Dos intentos hoy sobre el caso A; uno viejo sobre el B.
-        attempt(caseA, ContactResult.NO_ANSWER, Instant.now().minus(3, ChronoUnit.HOURS));
-        attempt(caseA, ContactResult.ANSWERED,  Instant.now().minus(1, ChronoUnit.HOURS));
-        attempt(caseB, ContactResult.DELIVERED, Instant.now().minus(10, ChronoUnit.DAYS));
+        // Anclados al MISMO comienzo de día que usa la consulta, no a `now()` de la máquina.
+        //
+        // `attemptsToday` cuenta desde el inicio del día en **hora de México**, y con razón: el tope
+        // de intentos diarios es una regla de trato al cliente, y su día es el de la persona a la
+        // que se le llama. Sembrar con «hace tres horas» sobre el reloj de la máquina daba un
+        // fixture que sólo era correcto según la hora a la que corriera la prueba: en la ventana
+        // entre la medianoche mexicana y la de la máquina, los dos intentos caían en el día
+        // anterior y la cuenta salía en cero.
+        //
+        // No era sensibilidad a la carga —así estaba escrito en la deuda del README— sino a la
+        // hora del día, y se reproduce puntualmente una hora cada día.
+        Instant iniciaElDiaEnMexico = LocalDate.now(ZONA_OPERATIVA)
+                .atStartOfDay(ZONA_OPERATIVA).toInstant();
+        attempt(caseA, ContactResult.NO_ANSWER, iniciaElDiaEnMexico);
+        attempt(caseA, ContactResult.ANSWERED,  iniciaElDiaEnMexico.plusSeconds(1));
+        attempt(caseB, ContactResult.DELIVERED, iniciaElDiaEnMexico.minus(10, ChronoUnit.DAYS));
         em.flush();
     }
 

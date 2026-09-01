@@ -134,3 +134,30 @@ databaseChangeLog:
             path: db/changelog/creditproduct/016-distributor-line-biweekly.sql
             relativeToChangelogFile: false
             splitStatements: true
+
+  - changeSet:
+      id: 017-rate-cards-diferimiento
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/017-rate-cards-diferimiento.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 018-opciones-de-pago-por-producto
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/018-opciones-de-pago-por-producto.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 019-opciones-de-pago-coherentes
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/019-opciones-de-pago-coherentes.sql
+            relativeToChangelogFile: false
+            splitStatements: true

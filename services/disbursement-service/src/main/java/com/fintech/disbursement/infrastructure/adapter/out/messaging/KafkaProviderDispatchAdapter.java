@@ -1,8 +1,8 @@
 package com.fintech.disbursement.infrastructure.adapter.out.messaging;
 
+import com.fintech.disbursement.application.port.out.PayoutRouteResolverPort;
 import com.fintech.disbursement.application.port.out.ProviderDispatchPort;
 import com.fintech.disbursement.domain.DisbursementOrder;
-import com.fintech.disbursement.domain.Provider;
 import com.fintech.disbursement.infrastructure.config.DisbursementTopicProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,7 +37,8 @@ public class KafkaProviderDispatchAdapter implements ProviderDispatchPort {
     }
 
     @Override
-    public void dispatch(DisbursementOrder order, Provider provider) {
+    public void dispatch(DisbursementOrder order, PayoutRouteResolverPort.PayoutRoute route) {
+        var provider = route.provider();
         String topic = topics.getProvider().get(provider.name());
         if (topic == null || topic.isBlank()) {
             throw new IllegalStateException("No hay topic configurado para el proveedor " + provider
@@ -49,7 +50,12 @@ public class KafkaProviderDispatchAdapter implements ProviderDispatchPort {
                 order.getBeneficiary().getName(), order.getBeneficiary().getAccount(),
                 order.getBeneficiary().getAccountType(), order.getBeneficiary().getTaxId(),
                 order.getBeneficiary().getInstitution(), order.getConcept(),
-                order.getNumericReference(), null, order.getCorrelationId(), Instant.now());
+                order.getNumericReference(), null, order.getCorrelationId(),
+                // La cuenta de la que sale, decidida por tesorería. Va en el mensaje y no como un
+                // id a resolver: el conector no debe tener catálogo de cuentas propias.
+                route.bankAccountId(), route.orderingClabe(), route.orderingHolderName(), route.orderingTaxId(),
+                route.providerClientRef(),
+                Instant.now());
 
         try {
             kafkaTemplate.send(topic, order.getDisbursementId().toString(), payload)

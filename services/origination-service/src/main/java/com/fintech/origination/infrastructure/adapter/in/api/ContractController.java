@@ -65,6 +65,7 @@ class ContractController {
                         applicationId,
                         request.clabeAccount(),
                         request.signatureProof(),
-                        request.documentRef()))));
+                        request.documentRef(),
+                        request.bnplDeferralDays()))));
     }
 }

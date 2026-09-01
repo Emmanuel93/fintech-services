@@ -123,3 +123,30 @@ databaseChangeLog:
             path: db/changelog/creditportfolio/018-iva-en-cuenta-y-calendario.sql
             relativeToChangelogFile: false
             splitStatements: true
+
+  - changeSet:
+      id: 019-disposicion-revolvente-pura
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/019-disposicion-revolvente-pura.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 020-skip-payment
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/020-skip-payment.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 021-relief-programs
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/021-relief-programs.sql
+            relativeToChangelogFile: false
+            splitStatements: true

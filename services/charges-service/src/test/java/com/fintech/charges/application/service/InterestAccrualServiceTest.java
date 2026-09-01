@@ -88,12 +88,20 @@ class InterestAccrualServiceTest {
         verify(eventPublisher, never()).publishChargeApplied(any(), any(), any(), any(), any());
     }
 
+    /**
+     * BK-19 · el moratorio se cobra sobre el <b>capital vencido</b>.
+     *
+     * <p>La versión anterior de esta prueba usaba el saldo completo —$10 000— como base y afirmaba
+     * $10.00 diarios. Con una sola cuota vencida de $1 000 de capital, lo correcto es $1.00: **diez
+     * veces menos**. Que la prueba pasara era el problema, no la garantía.
+     */
     @Test
-    void accrueMoratorium_calculatesCorrectAmount() {
-        // 10000 * 0.36 / 360 = 10.00
+    void elMoratorioSeCobraSobreElCapitalVencidoNoSobreElSaldo() {
+        // Saldo del crédito: 10 000. Vencido: 1 000. → 1000 * 0.36 / 360 = 1.00
         BigDecimal principal = new BigDecimal("10000.00");
         AccrualSchedule schedule = buildSchedule(principal, new BigDecimal("0.24"), new BigDecimal("0.36"));
-        schedule.activateMoratorium(LocalDate.of(2026, 1, 10));
+        LocalDate vencio = LocalDate.of(2026, 1, 5);
+        schedule.actualizarMora(new BigDecimal("1000.00"), vencio, LocalDate.of(2026, 1, 15), 3);
         LocalDate today = LocalDate.of(2026, 1, 15);
 
         when(scheduleRepo.findById(schedule.getScheduleId())).thenReturn(Optional.of(schedule));
@@ -102,9 +110,9 @@ class InterestAccrualServiceTest {
         service.accrueMoratoriumForSchedule(schedule.getScheduleId(), today);
 
         verify(eventPublisher).publishChargeApplied(any(), any(), eq("MORATORIUM_INTEREST"),
-                eq(new BigDecimal("10.00")), eq(today));
-        // IVA: 10.00 * 0.16 = 1.60
-        verify(eventPublisher).publishChargeApplied(any(), any(), eq("IVA"), eq(new BigDecimal("1.60")), eq(today));
+                eq(new BigDecimal("1.00")), eq(today));
+        // IVA: 1.00 * 0.16 = 0.16
+        verify(eventPublisher).publishChargeApplied(any(), any(), eq("IVA"), eq(new BigDecimal("0.16")), eq(today));
     }
 
     @Test

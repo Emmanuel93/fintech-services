@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -156,17 +157,7 @@ public class CreditProductCatalogService {
         CreditProductDefinition saved = repository.save(definition);
 
         try {
-            eventPublisher.publishProductActivated(new ProductActivatedEvent(
-                    saved.getProductDefinitionId(),
-                    saved.getProductCode(),
-                    saved.getProductVersion(),
-                    saved.getProductType().name(),
-                    saved.getBehavior().name(),
-                    saved.getTargetAudience().name(),
-                    saved.getNominalRateAnnual(),
-                    saved.getMoratoriumRateAnnual(),
-                    saved.getCapabilities(),
-                    saved.getActivatedAt()));
+            eventPublisher.publishProductActivated(toActivatedEvent(saved));
         } catch (Exception e) {
             log.warn("Failed to publish ProductActivatedEvent for code={} — non-fatal", saved.getProductCode(), e);
         }
@@ -174,6 +165,51 @@ public class CreditProductCatalogService {
         log.info("Credit product activated: id={} code={} version={}", saved.getProductDefinitionId(),
                 saved.getProductCode(), saved.getProductVersion());
         return saved;
+    }
+
+    /** La forma del hecho «este producto está activo con esta configuración», en un solo sitio. */
+    /**
+     * Reemite el catálogo entero al arrancar, para que los consumidores converjan solos.
+     *
+     * <p><b>Una instalación desde cero no podía originar ni un crédito.</b> Los productos se siembran
+     * con un {@code INSERT} de Liquibase ya en estado {@code ACTIVE}, y un {@code INSERT} no emite
+     * {@code product-activated}. El catálogo mostraba nueve productos activos y cartera tenía
+     * <b>cero</b> configuraciones, así que toda alta moría con «Sin configuración del producto».
+     * Nada lo decía: el catálogo se veía sano y el fallo aparecía tres servicios más allá.
+     *
+     * <p>Reemitir al arrancar es seguro porque el consumidor hace <em>upsert</em> por
+     * {@code (código, versión)}: republicar lo mismo no cambia nada. Y convierte una clase entera de
+     * problema en autorreparable — un consumidor que perdió su copia, uno nuevo que se suma, o una
+     * configuración cambiada fuera de la API, se arreglan con un reinicio en vez de con una
+     * llamada manual que alguien tiene que recordar.
+     *
+     * <p>No sustituye a {@code republish}: ése sirve cuando no se quiere reiniciar nada.
+     */
+    @org.springframework.context.event.EventListener(
+            org.springframework.boot.context.event.ApplicationReadyEvent.class)
+    public void republicarCatalogoAlArrancar() {
+        List<CreditProductDefinition> activos = repository.findByStatus(ProductStatus.ACTIVE);
+        int publicados = 0;
+        for (CreditProductDefinition d : activos) {
+            try {
+                eventPublisher.publishProductActivated(toActivatedEvent(d));
+                publicados++;
+            } catch (Exception e) {
+                // Uno que falle no debe impedir los demás: el catálogo a medias es peor que
+                // el catálogo con un hueco conocido.
+                log.warn("No se pudo republicar {} v{} al arrancar", d.getProductCode(),
+                        d.getProductVersion(), e);
+            }
+        }
+        log.info("Catálogo republicado al arrancar: {}/{} productos activos", publicados, activos.size());
+    }
+
+    private static ProductActivatedEvent toActivatedEvent(CreditProductDefinition d) {
+        return new ProductActivatedEvent(
+                d.getProductDefinitionId(), d.getProductCode(), d.getProductVersion(),
+                d.getProductType().name(), d.getBehavior().name(), d.getTargetAudience().name(),
+                d.getNominalRateAnnual(), d.getMoratoriumRateAnnual(),
+                d.getCapabilities(), d.getActivatedAt());
     }
 
     @Transactional
@@ -269,6 +305,53 @@ public class CreditProductCatalogService {
     @Transactional(readOnly = true)
     public List<RateCard> findRateCards(UUID productDefinitionId) {
         return rateCardRepository.findByProductDefinitionId(productDefinitionId);
+    }
+
+    /**
+     * BK-25c · la tasa con la que se difiere una compra, por banda de plazo.
+     *
+     * <p>Un producto real ofrece «3 y 6 MSI, 9 al 18 %, 12 al 24 %»: eso es una tabla por banda,
+     * no un valor único, y {@code rate_cards} ya sabe resolver bandas con la regla «gana la
+     * coincidencia más específica». Lo único que faltaba era el propósito.
+     *
+     * <p><b>Vacío significa que el producto no difiere</b>, y quien llama debe rechazar la
+     * operación. No se cae a la tasa de originación: diferir al 36 % una compra que el cliente creía
+     * a meses sin intereses es exactamente el error que este discriminador existe para impedir.
+     */
+    @Transactional(readOnly = true)
+    public Optional<RateCard> resolveDeferralRate(UUID productDefinitionId, String tier,
+                                                  BigDecimal amount, Integer term) {
+        return rateCardRepository.findByProductDefinitionId(productDefinitionId).stream()
+                .filter(rc -> rc.matches(tier, amount, term, RateCard.DIFERIMIENTO))
+                .max(Comparator.comparingInt(RateCard::specificity));
+    }
+
+    /**
+     * Vuelve a publicar la configuración de un producto ya activo.
+     *
+     * <p><b>Por qué hace falta.</b> {@code product-activated} sólo se emite al <em>activar</em>. Una
+     * configuración cambiada por otra vía —un changeset de seed, una corrección directa— actualiza
+     * el catálogo y <b>nadie aguas abajo se entera</b>: cartera conserva la copia con la que se
+     * activó el producto, que puede ser de hace meses.
+     *
+     * <p>Se descubrió del modo más caro posible: la configuración de parcialidades sembrada por
+     * changeset (BK-23) quedó en el catálogo y cartera siguió creyendo que la tarjeta no difería,
+     * así que las compras seguían naciendo amortizadas. Todo el código de BK-24 estaba bien y no
+     * servía de nada, porque la premisa nunca le llegó.
+     *
+     * <p>No cambia nada del producto: reemite lo que ya dice el catálogo. Es idempotente por
+     * construcción — quien lo consume ya trata la activación como tal.
+     */
+    @Transactional
+    public CreditProductDefinition republishConfig(String productCode) {
+        CreditProductDefinition definition = repository.findActiveByProductCode(productCode)
+                .orElseThrow(() -> new CreditProductNotFoundException(
+                        "No hay producto ACTIVE con código " + productCode));
+
+        eventPublisher.publishProductActivated(toActivatedEvent(definition));
+        log.info("Configuración de {} v{} re-publicada", definition.getProductCode(),
+                definition.getProductVersion());
+        return definition;
     }
 
     @Transactional(readOnly = true)

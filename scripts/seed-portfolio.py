@@ -128,6 +128,25 @@ ESTADOS = [
 ]
 
 
+def clabe(rnd=None):
+    """
+    Una CLABE con su dígito verificador **calculado**, no al azar.
+
+    Antes esto era `f"0021801{random.randint(...)}"[:18]`: dieciocho dígitos de los que el último
+    caía donde tocara. Nueve de cada diez salían inválidas, y no lo notaba nadie porque el
+    validador de originación sólo comprobaba que fueran dieciocho dígitos. El crédito se otorgaba
+    y se activaba contra una cuenta que **no puede existir**, y el desembolso moría al final del
+    todo, con el cliente ya debiendo.
+
+    Es el algoritmo de Banxico, el mismo de `shared.banking.ClabeCheckDigit`.
+    """
+    fuente = rnd or random
+    cuerpo = f"0021801{fuente.randint(10**9, 10**10 - 1)}"[:17].ljust(17, "0")
+    pesos = (3, 7, 1)
+    suma = sum((int(d) * pesos[i % 3]) % 10 for i, d in enumerate(cuerpo))
+    return cuerpo + str((10 - suma % 10) % 10)
+
+
 def http(method, url, body=None, token=None, timeout=60, reintentos=6):
     """
     Petición con reintento ante 429.
@@ -375,10 +394,15 @@ def journey(c: Cliente) -> str:
     if c.desenlace == "firmando":
         return c.desenlace
 
-    http("POST", f"{MOBILE}/credit/applications/{c.application_id}/contract/sign", {
-        "clabeAccount": f"0021801{random.randint(10**10, 10**11 - 1)}"[:18].ljust(18, "0"),
+    firma = {
+        "clabeAccount": clabe(),
         "signatureProof": f"OTP-{random.randint(100000, 999999)}",
-        "documentRef": f"contrato-{c.application_id[:8]}.pdf"}, token=c.token)
+        "documentRef": f"contrato-{c.application_id[:8]}.pdf"}
+    # BNPL es una decisión del cliente al FIRMAR, y por eso se pide aquí y no se hereda del
+    # producto. Sólo viaja si el escenario lo pidió: `bnpl_dias` lo pone quien siembra.
+    if getattr(c, "bnpl_dias", None):
+        firma["bnplDeferralDays"] = c.bnpl_dias
+    http("POST", f"{MOBILE}/credit/applications/{c.application_id}/contract/sign", firma, token=c.token)
     return "desembolsado"
 
 

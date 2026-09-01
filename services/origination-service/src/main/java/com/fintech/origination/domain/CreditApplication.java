@@ -363,12 +363,12 @@ public class CreditApplication {
     }
 
     /** PENDING_SIGNATURE → CONTRACT_SIGNED. Completes contract with signature proof (CM-04, CM-06). */
-    public void signContract(String clabeAccount, String documentRef) {
+    public void signContract(String clabeAccount, String documentRef, Integer bnplDeferralDays) {
         if (status != ApplicationStatus.PENDING_SIGNATURE) {
             throw new IllegalStateException(
                     "Cannot sign contract in status " + status + " — expected PENDING_SIGNATURE");
         }
-        this.contract.complete(clabeAccount, documentRef, Instant.now());
+        this.contract.complete(clabeAccount, documentRef, Instant.now(), bnplDeferralDays);
         this.status = ApplicationStatus.CONTRACT_SIGNED;
         touch();
     }

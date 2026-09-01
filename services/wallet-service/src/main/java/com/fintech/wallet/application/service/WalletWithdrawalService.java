@@ -2,7 +2,6 @@ package com.fintech.wallet.application.service;
 
 import com.fintech.wallet.application.WithdrawFromWalletCommand;
 import com.fintech.wallet.application.port.in.WithdrawFromWalletUseCase;
-import com.fintech.wallet.application.port.out.WalletDispatchPort;
 import com.fintech.wallet.application.port.out.WalletEventPublisher;
 import com.fintech.wallet.application.port.out.WalletMovementRepository;
 import com.fintech.wallet.application.port.out.WalletViewRepository;
@@ -26,18 +25,15 @@ public class WalletWithdrawalService implements WithdrawFromWalletUseCase {
     private final WalletViewRepository walletViewRepository;
     private final WalletWithdrawalRepository withdrawalRepository;
     private final WalletMovementRepository movementRepository;
-    private final WalletDispatchPort dispatchPort;
     private final WalletEventPublisher eventPublisher;
 
     public WalletWithdrawalService(WalletViewRepository walletViewRepository,
                                     WalletWithdrawalRepository withdrawalRepository,
                                     WalletMovementRepository movementRepository,
-                                    WalletDispatchPort dispatchPort,
                                     WalletEventPublisher eventPublisher) {
         this.walletViewRepository  = walletViewRepository;
         this.withdrawalRepository  = withdrawalRepository;
         this.movementRepository    = movementRepository;
-        this.dispatchPort          = dispatchPort;
         this.eventPublisher        = eventPublisher;
     }
 
@@ -59,12 +55,13 @@ public class WalletWithdrawalService implements WithdrawFromWalletUseCase {
         movementRepository.save(WalletMovement.withdrawal(cmd.creditAccountId(), cmd.obligorPartyId(),
                 cmd.amount(), cmd.payeeAccount(), withdrawal.getWithdrawalId().toString()));
 
-        String externalRef = dispatchPort.dispatch(
-                withdrawal.getWithdrawalId(), cmd.amount(), cmd.payeeAccount());
-        withdrawal.markSent(externalRef);
-        withdrawalRepository.save(withdrawal);
-
-        log.info("WalletWithdrawal sent withdrawalId={} creditAccountId={} amount={}",
+        // BK-12 · Aquí NO sale dinero. `WalletDispatchPort` era un despachador PARALELO: disparaba
+        // un stub y marcaba el retiro enviado, cuando el camino correcto ya existía y funcionaba —
+        // `wallet.withdrawal-completed` lo consume `disbursement`. Era un duplicado que se
+        // adelantaba al evento, no una integración.
+        //
+        // El retiro queda pendiente hasta que quien paga confirme.
+        log.info("WalletWithdrawal solicitado withdrawalId={} creditAccountId={} monto={}",
                 withdrawal.getWithdrawalId(), cmd.creditAccountId(), cmd.amount());
 
         eventPublisher.publishWithdrawalCompleted(withdrawal);

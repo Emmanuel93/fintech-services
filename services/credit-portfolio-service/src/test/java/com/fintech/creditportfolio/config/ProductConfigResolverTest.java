@@ -38,7 +38,7 @@ class ProductConfigResolverTest {
                 "PL-001", version, "PERSONAL_LOAN", "INSTALLMENT",
                 new BigDecimal("50000"), null, 12,
                 new BigDecimal("0.24"), new BigDecimal("0.36"),
-                "FRENCH", new BigDecimal("0.03"), "032180000118359719", "BAJO", null, null, null, null, null);
+                "FRENCH", new BigDecimal("0.03"), "032180000118359719", "BAJO", null, null, null, null, null, null);
     }
 
     private ProductConfigVersion version(int v, boolean degraded) {

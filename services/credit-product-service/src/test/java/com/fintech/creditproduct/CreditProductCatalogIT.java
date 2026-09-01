@@ -2,8 +2,6 @@ package com.fintech.creditproduct;
 
 import com.fintech.creditproduct.domain.*;
 import com.fintech.creditproduct.infrastructure.adapter.in.api.dto.*;
-import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.security.Keys;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -17,10 +15,8 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-import javax.crypto.SecretKey;
 import java.math.BigDecimal;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -34,11 +30,15 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Infrastructure:
  *   - Testcontainers PostgreSQL 16 (fresh DB, all Liquibase migrations run)
  *   - EmbeddedKafka (brokers injected via bootstrapServersProperty)
- *   - JWT secret injected via DynamicPropertySource
  *
  * Security model:
- *   - GET /api/v1/credit-products/** → public (no token required)
- *   - POST / PUT → requires Bearer JWT (ROLE_ADMIN)
+ *   - GET /api/v1/credit-products/** → público (no requiere identidad)
+ *   - POST / PUT → requieren identidad de empleado
+ *
+ * <p>La identidad llega en {@code X-User-Id}/{@code X-Roles}, igual que a los demás servicios de
+ * dominio: el gateway valida el token y reescribe esos headers. La prueba llama <b>como llama el
+ * BFF</b> — antes minteaba un JWT con un secreto que ella misma inyectaba, y por eso no veía que en
+ * el despliegue ese secreto no existía y toda escritura del catálogo respondía 401.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Testcontainers(disabledWithoutDocker = true)
@@ -51,11 +51,6 @@ import static org.assertj.core.api.Assertions.assertThat;
         })
 class CreditProductCatalogIT {
 
-    // ── Base64-encoded HS256 key used in all tests (>= 256 bits) ────────────
-    private static final String TEST_JWT_SECRET =
-            "dGVzdFNlY3JldEtleUZvckNyZWRpdFByb2R1Y3RJVFRFU1RJTkc=";
-    //  = Base64("testSecretKeyForCreditProductITTESTING") — 40 chars → 320 bits ✓
-
     @Container
     static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
             .withDatabaseName("fintech")
@@ -67,23 +62,17 @@ class CreditProductCatalogIT {
         registry.add("spring.datasource.url", postgres::getJdbcUrl);
         registry.add("spring.datasource.username", postgres::getUsername);
         registry.add("spring.datasource.password", postgres::getPassword);
-        registry.add("fintech.credit-product.jwt-secret", () -> TEST_JWT_SECRET);
     }
 
     @LocalServerPort int port;
     @Autowired TestRestTemplate rest;
 
-    // ── JWT helper ────────────────────────────────────────────────────────────
+    // ── Identidad de empleado, tal como la propaga el BFF ────────────────────
 
     private HttpHeaders authHeaders() {
-        SecretKey key = Keys.hmacShaKeyFor(Base64.getDecoder().decode(TEST_JWT_SECRET));
-        String token = Jwts.builder()
-                .subject(UUID.randomUUID().toString())
-                .claim("roles", List.of("ADMIN"))
-                .signWith(key)
-                .compact();
         HttpHeaders h = new HttpHeaders();
-        h.setBearerAuth(token);
+        h.set("X-User-Id", UUID.randomUUID().toString());
+        h.set("X-Roles", "ADMIN");
         h.setContentType(MediaType.APPLICATION_JSON);
         return h;
     }

@@ -1,49 +1,54 @@
 package com.fintech.disbursement.application.service;
 
 import com.fintech.disbursement.application.DisbursementProperties;
-import com.fintech.disbursement.application.port.out.RoutingRuleRepository;
+import com.fintech.disbursement.application.port.out.PayoutRouteResolverPort;
 import com.fintech.disbursement.domain.OperatingWindow;
-import com.fintech.disbursement.domain.Provider;
 import com.fintech.disbursement.domain.Rail;
-import com.fintech.disbursement.domain.RoutingRule;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZonedDateTime;
-import java.util.Comparator;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Decide proveedor y momento. Las dos decisiones son datos, no código: la primera vive en
- * {@code routing_rules}, la segunda en configuración por rail.
+ * Decide <b>momento</b>, y le pregunta a tesorería por el <b>destino</b>.
+ *
+ * <p>Antes decidía las dos cosas, y la mitad que decidía mal era la del destino: elegía el
+ * <b>proveedor</b> desde {@code routing_rules} y dejaba la <b>cuenta</b> al conector, que la
+ * resolvía con un {@code is_default} por empresa. Media decisión tomada por cada uno y la
+ * responsabilidad entera de ninguno.
+ *
+ * <p>Lo que se queda aquí es la ventana operativa, que sí es de este servicio: cuándo se puede
+ * entregar al conector no depende de qué cuenta se use.
  */
 @Service
 public class RoutingService {
 
-    private final RoutingRuleRepository rules;
+    private final PayoutRouteResolverPort tesoreria;
     private final DisbursementProperties properties;
     private final Clock clock;
 
-    public RoutingService(RoutingRuleRepository rules, DisbursementProperties properties, Clock clock) {
-        this.rules = rules;
+    public RoutingService(PayoutRouteResolverPort tesoreria, DisbursementProperties properties, Clock clock) {
+        this.tesoreria = tesoreria;
         this.properties = properties;
         this.clock = clock;
     }
 
     /**
-     * Gana la regla de menor prioridad numérica; a igual prioridad, la específica de empresa sobre
-     * la genérica. Devuelve vacío si ninguna cubre — el llamador decide qué hacer, porque un hueco
-     * de configuración no debería tirar dinero real al DLT.
+     * La decisión completa: <b>cuenta ordenante, rail y proveedor</b>.
+     *
+     * <p>Vacío si ninguna ruta cubre — el llamador decide qué hacer, porque un hueco de
+     * configuración no debería tirar dinero real al DLT. Si tesorería no responde, propaga
+     * {@link PayoutRouteResolverPort.PayoutRoutingUnavailableException}: es un desenlace distinto y
+     * confundirlo con «no hay ruta» haría que una caída de minutos marcara órdenes válidas como
+     * fallidas.
      */
-    public Optional<Provider> findProvider(UUID companyId, Rail rail, BigDecimal amount) {
-        return rules.findAllEnabled().stream()
-                .filter(rule -> rule.covers(companyId, rail, amount))
-                .min(Comparator.comparingInt(RoutingRule::getPriority)
-                        .thenComparingInt(RoutingRule::specificity))
-                .map(RoutingRule::providerValue);
+    public Optional<PayoutRouteResolverPort.PayoutRoute> findRoute(UUID companyId, Rail rail,
+                                                                   BigDecimal amount) {
+        return tesoreria.resolve(companyId, rail, amount);
     }
 
     public boolean isRailEnabled(Rail rail) {

@@ -8,7 +8,6 @@ import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
 import com.fintech.creditportfolio.application.port.out.DispositionRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
-import com.fintech.creditportfolio.application.port.out.SpeiDispatchPort;
 import com.fintech.creditportfolio.application.service.AmortizationEngine;
 import com.fintech.creditportfolio.application.service.CreditAccountService;
 import com.fintech.creditportfolio.application.service.ProductConfigResolver;
@@ -44,7 +43,6 @@ class CreditAccountServiceTest {
     @Mock DispositionRepository dispositionRepository;
     @Mock InstallmentRepository installmentRepository;
     @Mock BalanceEventRepository balanceEventRepository;
-    @Mock SpeiDispatchPort speiDispatch;
     @Mock CreditPortfolioEventPublisher eventPublisher;
     @Mock ProductConfigResolver configResolver;
 
@@ -53,10 +51,19 @@ class CreditAccountServiceTest {
     @BeforeEach
     void setUp() {
         service = new CreditAccountService(accountRepository, dispositionRepository,
-                installmentRepository, balanceEventRepository, new AmortizationEngine(), speiDispatch,
+                installmentRepository, balanceEventRepository, new AmortizationEngine(),
                 eventPublisher, configResolver, 12);
         // Default: resolver returns an INSTALLMENT/FRENCH/MONTHLY config (lenient — idempotent test returns early)
         lenient().when(configResolver.resolveForActivation(any())).thenReturn(installmentConfig());
+        // BK-13 · el tipo de disposición sale del PRODUCTO. Que las pruebas tengan que declarar la
+        // configuración no es ceremonia: es el punto. Antes bastaba con mandar el tipo en la
+        // petición, y eso era el agujero por el que el dinero salía a la persona equivocada.
+        lenient().when(configResolver.resolveForAccount(eq("RL-001"), any()))
+                .thenReturn(Optional.of(revolvingConfig()));
+        lenient().when(configResolver.resolveForAccount(eq("PL-001"), any()))
+                .thenReturn(Optional.of(installmentConfig()));
+        lenient().when(configResolver.resolveForAccount(eq("DL-001"), any()))
+                .thenReturn(Optional.of(distributorConfig()));
     }
 
     private static ProductConfigVersion installmentConfig() {
@@ -75,7 +82,7 @@ class CreditAccountServiceTest {
                 new BigDecimal("50000"), null, 12,
                 new BigDecimal("0.24"), new BigDecimal("0.36"),
                 "FRENCH", new BigDecimal("0.03"),
-                "032180000118359719", "BAJO", null, null, null, null, null);
+                "032180000118359719", "BAJO", null, null, null, null, null, null);
     }
 
     private static ProductConfigVersion revolvingConfig() {
@@ -94,7 +101,7 @@ class CreditAccountServiceTest {
                 null, new BigDecimal("20000"), null,
                 new BigDecimal("0.36"), new BigDecimal("0.54"),
                 null, new BigDecimal("0.02"),
-                "032180000118359719", "MEDIO", null, null, null, null, null);
+                "032180000118359719", "MEDIO", null, null, null, null, null, null);
     }
 
     @Test
@@ -109,7 +116,6 @@ class CreditAccountServiceTest {
         assertThat(result.getPrincipalBalance()).isEqualByComparingTo("0");
         assertThat(result.getAvailableCredit()).isEqualByComparingTo("20000");
         then(dispositionRepository).shouldHaveNoInteractions();
-        then(speiDispatch).shouldHaveNoInteractions();
     }
 
     // ── A19 · la sucursal no es el promotor ───────────────────────────────────
@@ -154,7 +160,7 @@ class CreditAccountServiceTest {
                 new BigDecimal("50000"), null, 12,
                 new BigDecimal("0.24"), new BigDecimal("0.36"),
                 "FRENCH", new BigDecimal("0.03"),
-                "032180000118359719", "BAJO", promoterCode, originUnitCode, null, null, null);
+                "032180000118359719", "BAJO", promoterCode, originUnitCode, null, null, null, null);
     }
 
     @Test
@@ -169,7 +175,6 @@ class CreditAccountServiceTest {
         assertThat(result.getPrincipalBalance()).isEqualByComparingTo("50000");
         assertThat(result.getActivatedAt()).isNotNull();
         // El dinero ya NO sale aquí: lo desembolsa disbursement-service tras el hecho.
-        then(speiDispatch).shouldHaveNoInteractions();
     }
 
     @Test
@@ -238,7 +243,6 @@ class CreditAccountServiceTest {
 
         service.activate(personalLoanCmd());
 
-        then(speiDispatch).shouldHaveNoInteractions();
         then(eventPublisher).shouldHaveNoInteractions();
     }
 
@@ -257,10 +261,36 @@ class CreditAccountServiceTest {
         assertThat(saved).isNotEmpty();
         assertThat(saved.get(0).getAmount()).isEqualByComparingTo("50000");
         assertThat(saved.get(0).getStatus()).isEqualTo(DispositionStatus.PROCESSING);
-        then(speiDispatch).shouldHaveNoInteractions();
     }
 
     // ── ProcessDispositionUseCase (wallet.disposition-requested) ─────────────
+
+    /**
+     * Una línea de distribuidor: su producto dispone a la <b>beneficiaria</b>.
+     *
+     * <p>Existe porque el tipo ya no viaja en la petición. Antes, una prueba de colocación a
+     * tercero se hacía sobre una línea de uso propio mandando {@code "THIRD_PARTY_CREDIT"} en el
+     * comando — que es justo el agujero: cualquiera podía hacer lo mismo en producción.
+     */
+    private CreditAccount activeDistributorLine() {
+        CreditAccount account = CreditAccount.fromSnapshot(
+                UUID.randomUUID(), "CTR-DL-1", UUID.randomUUID(),
+                "DL-001", 1, "DISTRIBUTOR_LINE", "REVOLVING",
+                null, new BigDecimal("20000"), null,
+                new BigDecimal("0.36"), new BigDecimal("0.54"),
+                null, new BigDecimal("0.02"), "032180000118359719", "MEDIO", null, null);
+        account.activate(BigDecimal.ZERO);
+        return account;
+    }
+
+    private static ProductConfigVersion distributorConfig() {
+        return ProductConfigVersion.of(
+                "DL-001", 1, "DISTRIBUTOR_LINE", "REVOLVING", "B2B2C",
+                new Capabilities(false, true, true, "THIRD_PARTY_CREDIT", true, true, false, false, false),
+                "FRENCH", "MONTHLY", 1000,
+                new BigDecimal("0.36"), new BigDecimal("0.54"), new BigDecimal("2.0"),
+                "ACTIVE", false);
+    }
 
     private CreditAccount activeRevolvingAccount() {
         CreditAccount account = CreditAccount.fromSnapshot(
@@ -276,11 +306,11 @@ class CreditAccountServiceTest {
     private ProcessDispositionCommand selfUseCmd(
             UUID accountId, BigDecimal amount) {
         return new ProcessDispositionCommand(
-                "evt-" + UUID.randomUUID(), accountId, UUID.randomUUID(), amount, "SELF_USE", null, null, null);
+                "evt-" + UUID.randomUUID(), accountId, UUID.randomUUID(), amount, null, null, null);
     }
 
     @Test
-    void process_selfUse_creditsAccountWithoutSpei() {
+    void laDisposicionDeUsoPropioTambienSaleAUnaCuentaBancaria() {
         CreditAccount account = activeRevolvingAccount();
         given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
         given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
@@ -291,30 +321,41 @@ class CreditAccountServiceTest {
 
         assertThat(account.getPrincipalBalance()).isEqualByComparingTo("5000");
         assertThat(account.getAvailableCredit()).isEqualByComparingTo("15000");
-        then(speiDispatch).shouldHaveNoInteractions();
-        then(eventPublisher).should().publishDispositionCompleted(any());
+        then(eventPublisher).should().publishDispositionAuthorized(any());
         then(eventPublisher).should().publishBalanceUpdated(any());
         then(eventPublisher).should(never()).publishDispositionRejected(any());
     }
 
+    /**
+     * La prueba que fijaba el bug, dada la vuelta.
+     *
+     * <p>Se llamaba {@code process_thirdPartyCredit_dispatchesSpei} y afirmaba que la colocación
+     * <b>despachaba SPEI desde cartera</b>, contra un stub que devolvía {@code "SPEI-STUB-…"},
+     * marcaba la disposición completada y hacía que contabilidad asentara {@code 1201 → 1101}
+     * —salida de caja— de dinero que nunca salió.
+     *
+     * <p>Ahora afirma el camino correcto: cartera autoriza y publica el hecho; quien paga es
+     * {@code disbursement}, y la disposición se completa cuando hay evidencia del proveedor.
+     */
     @Test
-    void process_thirdPartyCredit_dispatchesSpei() {
-        CreditAccount account = activeRevolvingAccount();
+    void laColocacionAutorizaYNoDispersa() {
+        CreditAccount account = activeDistributorLine();
         given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
         given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
         given(accountRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
         given(dispositionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
-        given(speiDispatch.dispatch(any(), any(), any())).willReturn("SPEI-REF-XYZ");
 
         var cmd = new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), UUID.randomUUID(),
-                new BigDecimal("3000"), "THIRD_PARTY_CREDIT", UUID.randomUUID(), "032180000118399999", 12);
+                new BigDecimal("3000"), UUID.randomUUID(), "032180000118399999", 12);
 
         service.process(cmd);
 
+        // El compromiso existe desde que se autoriza: el saldo sube aquí.
         assertThat(account.getPrincipalBalance()).isEqualByComparingTo("3000");
-        then(speiDispatch).should().dispatch(any(), eq(new BigDecimal("3000")), eq("032180000118399999"));
-        then(eventPublisher).should().publishDispositionCompleted(any());
+        // Pero el dinero NO ha salido: no se completa nada todavía.
+        then(eventPublisher).should().publishDispositionAuthorized(any());
+        then(eventPublisher).should(never()).publishDispositionCompleted(any());
     }
 
     // ── El calendario de la colocación ────────────────────────────────────────
@@ -331,11 +372,10 @@ class CreditAccountServiceTest {
         given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
         given(accountRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
         given(dispositionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
-        given(speiDispatch.dispatch(any(), any(), any())).willReturn("SPEI-REF");
 
         service.process(new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), UUID.randomUUID(),
-                new BigDecimal("6000"), "THIRD_PARTY_CREDIT", UUID.randomUUID(),
+                new BigDecimal("6000"), UUID.randomUUID(),
                 "032180000118399999", 6));
 
         ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
@@ -353,7 +393,7 @@ class CreditAccountServiceTest {
 
         service.process(new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), UUID.randomUUID(),
-                new BigDecimal("6000"), "SELF_USE", null, null, null));
+                new BigDecimal("6000"), null, null, null));
 
         // Sin piso, una disposición sin plazo generaría cero cuotas: deuda sin nada que vencer.
         ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
@@ -363,7 +403,7 @@ class CreditAccountServiceTest {
 
     @Test
     void beneficiarioNoPuedeSerElAcreditado() {
-        CreditAccount account = activeRevolvingAccount();
+        CreditAccount account = activeDistributorLine();
         given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
         given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
 
@@ -372,7 +412,7 @@ class CreditAccountServiceTest {
         // crédito.
         service.process(new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), account.getObligorPartyId(),
-                new BigDecimal("3000"), "THIRD_PARTY_CREDIT", account.getObligorPartyId(),
+                new BigDecimal("3000"), account.getObligorPartyId(),
                 "032180000118399999", 12));
 
         ArgumentCaptor<com.fintech.creditportfolio.domain.event.DispositionRejectedEvent> captor =
@@ -384,13 +424,13 @@ class CreditAccountServiceTest {
 
     @Test
     void colocacionATerceroSinBeneficiario_seRechaza() {
-        CreditAccount account = activeRevolvingAccount();
+        CreditAccount account = activeDistributorLine();
         given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
         given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
 
         service.process(new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), UUID.randomUUID(),
-                new BigDecimal("3000"), "THIRD_PARTY_CREDIT", null, "032180000118399999", 12));
+                new BigDecimal("3000"), null, "032180000118399999", 12));
 
         then(eventPublisher).should().publishDispositionRejected(any());
         then(dispositionRepository).should(never()).save(any());
@@ -454,7 +494,7 @@ class CreditAccountServiceTest {
         given(balanceEventRepository.existsBySourceEventId("evt-dup")).willReturn(true);
 
         var cmd = new ProcessDispositionCommand(
-                "evt-dup", UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("1000"), "SELF_USE", null, null, null);
+                "evt-dup", UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("1000"), null, null, null);
         service.process(cmd);
 
         then(accountRepository).shouldHaveNoInteractions();

@@ -45,6 +45,18 @@ public class AccrualScheduleService {
                                       String productType, String productBehavior,
                                       BigDecimal nominalRate, BigDecimal moratoriumRate,
                                       BigDecimal principalBalance, BigDecimal openingFeeRate) {
+        createFromActivation(creditAccountId, obligorPartyId, productType, productBehavior,
+                nominalRate, moratoriumRate, principalBalance, openingFeeRate, null);
+    }
+
+    /**
+     * @param accrualStartDate BNPL: desde cuándo devenga. Nulo = desde el alta (BK-28)
+     */
+    public void createFromActivation(UUID creditAccountId, UUID obligorPartyId,
+                                      String productType, String productBehavior,
+                                      BigDecimal nominalRate, BigDecimal moratoriumRate,
+                                      BigDecimal principalBalance, BigDecimal openingFeeRate,
+                                      LocalDate accrualStartDate) {
         if (scheduleRepository.existsByCreditAccountId(creditAccountId)) {
             log.info("AccrualSchedule already exists for creditAccountId={} — skipping (idempotent)",
                     creditAccountId);
@@ -61,9 +73,13 @@ public class AccrualScheduleService {
                 nominalRate, effectiveMoraRate, principalBalance, principalBalance,
                 properties.getGracePeriodDays());
 
+        if (accrualStartDate != null) {
+            schedule.arrancarDevengoEl(accrualStartDate);
+        }
         scheduleRepository.save(schedule);
-        log.info("AccrualSchedule created scheduleId={} creditAccountId={} productType={} nominalRate={}",
-                schedule.getScheduleId(), creditAccountId, productType, nominalRate);
+        log.info("AccrualSchedule created scheduleId={} creditAccountId={} productType={} nominalRate={}{}",
+                schedule.getScheduleId(), creditAccountId, productType, nominalRate,
+                accrualStartDate != null ? " devenga desde " + accrualStartDate : "");
 
         BigDecimal feeRate = (openingFeeRate != null && openingFeeRate.compareTo(BigDecimal.ZERO) > 0)
                 ? openingFeeRate : properties.getOpeningFeeRate();
@@ -80,6 +96,35 @@ public class AccrualScheduleService {
                 log.info("AccrualSchedule CLOSED creditAccountId={} trigger={}", creditAccountId, accountStatus);
             }
             scheduleRepository.save(schedule);
+        });
+    }
+
+    /**
+     * BK-18 · cartera midió la mora; aquí se enciende o se apaga.
+     *
+     * <p><b>El circuito estaba cortado justo aquí.</b> Cartera calculaba el DPD desde las cuotas
+     * vencidas y publicaba {@code delinquency-status-updated}. Nadie lo escuchaba.
+     * {@code activateMoratorium()} tenía cero llamadores de producción —sólo dos pruebas— y la
+     * cuenta contable {@code 4102} (ingreso moratorio) nunca recibió un abono. No es que la mora
+     * fuera difícil de producir: no existía.
+     *
+     * <p>Se conecta <b>después</b> de corregir la base (BK-19). Al revés, la primera corrida habría
+     * encendido el cobro sobre el saldo completo en toda la cartera vencida.
+     */
+    public void actualizarMora(UUID creditAccountId, BigDecimal capitalVencido,
+                               LocalDate vencimientoMasAntiguo) {
+        scheduleRepository.findByCreditAccountId(creditAccountId).ifPresent(schedule -> {
+            boolean estabaActiva = schedule.isMoratoriumActive();
+
+            schedule.actualizarMora(capitalVencido, vencimientoMasAntiguo,
+                    LocalDate.now(), schedule.getGracePeriodDays());
+            scheduleRepository.save(schedule);
+
+            if (estabaActiva != schedule.isMoratoriumActive()) {
+                log.info("Mora {} creditAccountId={} capitalVencido={} desde={}",
+                        schedule.isMoratoriumActive() ? "ENCENDIDA" : "APAGADA (cuenta curada)",
+                        creditAccountId, capitalVencido, vencimientoMasAntiguo);
+            }
         });
     }
 

@@ -22,6 +22,16 @@ public final class AccountCodes {
     public static final String CONTROL_CASTIGADA      = "7301";
     /** Contrapartida del asiento de apertura: incorporar saldo no es ganar dinero. */
     public static final String SALDO_INICIAL          = "3901";
+    /**
+     * Puentes de la conciliación bancaria, una por dirección. Un abono sin dueño se DEBE hasta
+     * demostrar lo contrario (pasivo); un cargo sin aclarar es un derecho por recuperar (activo).
+     * Compensarlos en una sola cuenta escondería el neto, que es lo que la puente existe para
+     * evitar.
+     */
+    public static final String CARGOS_POR_ACLARAR     = "1109";
+    public static final String DEPOSITOS_POR_IDENT    = "2109";
+    public static final String OTROS_INGRESOS         = "4105";
+    public static final String OTROS_GASTOS           = "5105";
 
     private AccountCodes() {}
 }

@@ -6,7 +6,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Stub — confirma envío inmediato, mismo patrón que NoopSpeiDispatchAdapter/NoopPacAdapter en el
+ * Stub de notificación push — confirma el envío de inmediato.
+ *
+ * <p>El comentario anterior lo emparentaba con {@code NoopSpeiDispatchAdapter}, que se eliminó en
+ * BK-11. La diferencia importa: aquél confirmaba <b>un pago</b> que nunca salía y hacía que el mayor
+ * asentara una salida de caja inexistente. Éste confirma un aviso, y el peor caso es que alguien no
+ * reciba una notificación. Cuando este canal se implemente de verdad, el sustituto debe comportarse
+ * como el proveedor —incluido fallar—, no como un no-op.
  * resto del sistema. Integración real (gratuita, sin costo por volumen): Firebase Cloud Messaging
  * (Android/Web) + APNs (iOS).
  */

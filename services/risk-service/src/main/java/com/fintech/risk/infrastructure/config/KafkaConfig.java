@@ -2,6 +2,7 @@ package com.fintech.risk.infrastructure.config;
 
 import com.fintech.risk.infrastructure.adapter.in.messaging.BalanceUpdatedPayload;
 import com.fintech.risk.infrastructure.adapter.in.messaging.CollectionAgreementExecutedPayload;
+import com.fintech.risk.infrastructure.adapter.in.messaging.ReliefGrantedPayload;
 import com.fintech.risk.infrastructure.adapter.in.messaging.CreditAccountActivatedPayload;
 import com.fintech.risk.infrastructure.adapter.in.messaging.DelinquencyStatusUpdatedPayload;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -59,6 +60,14 @@ public class KafkaConfig {
     collectionAgreementExecutedListenerContainerFactory(KafkaProperties properties) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, CollectionAgreementExecutedPayload>();
         factory.setConsumerFactory(jsonConsumerFactory(properties, CollectionAgreementExecutedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, ReliefGrantedPayload>
+    reliefGrantedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, ReliefGrantedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, ReliefGrantedPayload.class));
         return factory;
     }
 }

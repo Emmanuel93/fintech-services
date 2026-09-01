@@ -33,6 +33,30 @@ public class CreditAccountActivatedEvent {
     // actúa sobre él (§8.2). El nombre del campo es literal: el consumidor espera "disbursementInstruction".
     private final DisbursementInstruction disbursementInstruction;
 
+    /**
+     * La cadencia de pago del producto y su plazo. <b>Los necesita el cierre para derivar su propio
+     * calendario de corte</b> sin consultar el calendario de cartera en línea.
+     *
+     * <p>Para un producto no revolvente el corte coincide con el vencimiento de la cuota, así que la
+     * tentación es que el cierre lea {@code installments.due_date}. No se hace: leer cartera durante
+     * la ventana de cierre rompe el aislamiento, el corte es una decisión de política que un plan de
+     * pagos no puede expresar —cortar N días antes, correrse si cae inhábil—, y un corte sellado es
+     * inmutable, así que una reestructura no puede reescribirlo hacia atrás. Con estos dos campos,
+     * el cierre deriva la cadencia y la persiste como suya.
+     *
+     * <p>Nulos para revolventes, que no tienen plan.
+     */
+    private final String paymentFrequency;
+
+    /**
+     * Desde cuándo devenga interés este crédito. Nulo = desde el alta.
+     *
+     * <p>La fija BNPL, y {@code charges} la necesita: sin ella devengaría desde el día uno, que es
+     * lo contrario de lo que un «compra ahora, paga después» promete.
+     */
+    private final java.time.LocalDate accrualStartDate;
+    private final Integer termPeriods;
+
     public CreditAccountActivatedEvent(UUID creditAccountId, UUID contractId, UUID obligorPartyId,
                                         String productType, String productBehavior,
                                         BigDecimal nominalRate, BigDecimal moratoriumRate,
@@ -40,6 +64,37 @@ public class CreditAccountActivatedEvent {
                                         BigDecimal creditLimit, String riskTier, Instant activatedAt,
                                         String promoterCode, String originUnitCode,
                                         DisbursementInstruction disbursementInstruction) {
+        this(creditAccountId, contractId, obligorPartyId, productType, productBehavior, nominalRate,
+                moratoriumRate, openingFeeRate, principalBalance, creditLimit, riskTier, activatedAt,
+                promoterCode, originUnitCode, disbursementInstruction, null, null);
+    }
+
+    public CreditAccountActivatedEvent(UUID creditAccountId, UUID contractId, UUID obligorPartyId,
+                                        String productType, String productBehavior,
+                                        BigDecimal nominalRate, BigDecimal moratoriumRate,
+                                        BigDecimal openingFeeRate, BigDecimal principalBalance,
+                                        BigDecimal creditLimit, String riskTier, Instant activatedAt,
+                                        String promoterCode, String originUnitCode,
+                                        DisbursementInstruction disbursementInstruction,
+                                        String paymentFrequency, Integer termPeriods) {
+        this(creditAccountId, contractId, obligorPartyId, productType, productBehavior, nominalRate,
+                moratoriumRate, openingFeeRate, principalBalance, creditLimit, riskTier, activatedAt,
+                promoterCode, originUnitCode, disbursementInstruction, paymentFrequency, termPeriods,
+                null);
+    }
+
+    public CreditAccountActivatedEvent(UUID creditAccountId, UUID contractId, UUID obligorPartyId,
+                                        String productType, String productBehavior,
+                                        BigDecimal nominalRate, BigDecimal moratoriumRate,
+                                        BigDecimal openingFeeRate, BigDecimal principalBalance,
+                                        BigDecimal creditLimit, String riskTier, Instant activatedAt,
+                                        String promoterCode, String originUnitCode,
+                                        DisbursementInstruction disbursementInstruction,
+                                        String paymentFrequency, Integer termPeriods,
+                                        java.time.LocalDate accrualStartDate) {
+        this.paymentFrequency = paymentFrequency;
+        this.termPeriods      = termPeriods;
+        this.accrualStartDate = accrualStartDate;
         this.eventId         = UUID.randomUUID().toString();
         // El hecho ocurrió cuando se activó la cuenta, no cuando se publicó el evento. Contabilidad
         // deriva de aquí el período del alta, así que fijarlo en `now()` ataba la póliza al reloj del
@@ -70,7 +125,7 @@ public class CreditAccountActivatedEvent {
     public record DisbursementInstruction(
             UUID       dispositionId,          // clave de idempotencia aguas abajo
             UUID       companyId,              // tenant — nullable; disbursement lo resuelve si falta
-            String     dispositionType,        // SELF_USE se ignora aguas abajo (el dinero no sale)
+            String     dispositionType,        // informativo: con el monedero en hold, TODA disposición sale a una cuenta bancaria
             BigDecimal amount,
             String     currency,               // "MXN"
             String     beneficiaryName,
@@ -99,4 +154,21 @@ public class CreditAccountActivatedEvent {
     public String getPromoterCode()         { return promoterCode; }
     public String getOriginUnitCode()       { return originUnitCode; }
     public DisbursementInstruction getDisbursementInstruction() { return disbursementInstruction; }
+
+    /**
+     * Sin estos dos getters los campos <b>no se serializan</b> y el cierre recibe la cadencia nula,
+     * cayendo a MONTHLY para todo producto — un calendario de corte quincenal o semanal quedaría
+     * mal derivado sin que nada fallara.
+     *
+     * <p>Es el mismo defecto que ya documenta {@link #getOriginUnitCode()} unas líneas arriba: el
+     * campo existe, el constructor lo recibe, y sin getter Jackson no lo escribe. Compila, la suite
+     * queda verde, y el dato nunca llega.
+     */
+    public String getPaymentFrequency()     { return paymentFrequency; }
+    public Integer getTermPeriods()         { return termPeriods; }
+    /**
+     * Sin este getter el campo <b>no se serializa</b> y charges devenga desde el día uno. Es
+     * exactamente el defecto que una prueba de contrato cazó con `paymentFrequency` (BK-44).
+     */
+    public java.time.LocalDate getAccrualStartDate() { return accrualStartDate; }
 }

@@ -61,7 +61,7 @@ class ContractControllerTest {
 
     private CreditApplication appContractSigned() {
         CreditApplication app = appPendingSignature();
-        app.signContract("032180000118359719", "DOC-REF-001");
+        app.signContract("032180000118359719", "DOC-REF-001", null);
         return app;
     }
 

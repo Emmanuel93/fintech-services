@@ -361,7 +361,25 @@ el ejecutivo que atiende al cliente).
 | Tópico | Consumidores |
 |---|---|
 | `party.fiscal-profile-updated` | invoicing |
+| `party.executive-assigned` | notifications — le avisa al ejecutivo que el cliente es suyo |
 | `party.party-blacklisted` · `party.role-granted` · `party.role-revoked` | *sin consumidor hoy* — traza |
+
+`party.executive-assigned` es un **hecho**, no una petición de aviso: lleva las dos identidades y
+sus nombres, y no menciona claves de evento, tipos de destinatario ni canales. Ese vocabulario es
+del notificador, y meterlo aquí acoplaría el núcleo del negocio a un canal. Quien quiera reaccionar
+se suscribe — hoy notifications; mañana auditoría, la estructura comercial o comisiones, sin que
+party se entere.
+
+Lleva los **nombres** además de los ids a propósito: quien reaccione necesita decir *quién* y *a
+quién*, y obligarle a consultar party para eso le añadiría una dependencia síncrona a cambio de dos
+cadenas que en el momento de publicar ya están en la mano.
+
+La clave del mensaje es el **ejecutivo**, no el cliente: quien consuma esto agrupa por ejecutivo
+—su cartera, su bandeja, su aviso— y así todo lo suyo cae en la misma partición y en orden.
+
+Se publica **después** de guardar y sin atarlo al resultado: si la publicación falla, el cliente ya
+quedó asignado, que es lo que importa. Un hecho no publicado se nota mucho menos que una asignación
+perdida.
 
 **Reintentos:** régimen por defecto, sin DLT.
 Ver [README raíz §5.4](../../README.md#54-política-de-reintentos-y-dlt-kafka).

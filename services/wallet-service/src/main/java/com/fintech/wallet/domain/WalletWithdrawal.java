@@ -8,7 +8,9 @@ import java.util.UUID;
 /**
  * Money leaving the user's own walletBalance — spend/transfer-out, not a debt repayment
  * (that's PaymentInstruction). Debited from WalletView.walletBalance synchronously on
- * creation; dispatched via SPEI/CoDi (stub, mirrors credit-portfolio's SpeiDispatchPort).
+ * creation. El retiro queda PENDING y lo paga `disbursement` al consumir
+ * `wallet.withdrawal-completed` — el camino que ya existía y que el despachador paralelo de este
+ * servicio se adelantaba a confirmar (BK-12).
  */
 @Entity
 @Table(schema = "wallet", name = "wallet_withdrawals")

@@ -98,6 +98,25 @@ PLAZOS = [6, 9, 12, 18, 24]
 
 # ── Transporte ───────────────────────────────────────────────────────────────
 
+def clabe(rnd=None):
+    """
+    Una CLABE con su dígito verificador **calculado**, no al azar.
+
+    Antes esto era `f"0021801{random.randint(...)}"[:18]`: dieciocho dígitos de los que el último
+    caía donde tocara. Nueve de cada diez salían inválidas, y no lo notaba nadie porque el
+    validador de originación sólo comprobaba que fueran dieciocho dígitos. El crédito se otorgaba
+    y se activaba contra una cuenta que **no puede existir**, y el desembolso moría al final del
+    todo, con el cliente ya debiendo.
+
+    Es el algoritmo de Banxico, el mismo de `shared.banking.ClabeCheckDigit`.
+    """
+    fuente = rnd or random
+    cuerpo = f"0021801{fuente.randint(10**9, 10**10 - 1)}"[:17].ljust(17, "0")
+    pesos = (3, 7, 1)
+    suma = sum((int(d) * pesos[i % 3]) % 10 for i, d in enumerate(cuerpo))
+    return cuerpo + str((10 - suma % 10) % 10)
+
+
 def http(method, url, body=None, token=None, timeout=60, reintentos=6):
     """Petición con reintento ante 429 — el gateway limita alta, OTP y KYC a ráfaga de uno."""
     req = urllib.request.Request(
@@ -401,7 +420,7 @@ def solicita_linea(d: Distribuidora, token_admin) -> bool:
         http("POST", f"{MOBILE}/credit/applications/{d.application_id}/offer/accept", None, token=d.p.token)
         http("POST", f"{MOBILE}/credit/applications/{d.application_id}/contract", None, token=d.p.token)
         http("POST", f"{MOBILE}/credit/applications/{d.application_id}/contract/sign", {
-            "clabeAccount": f"0021801{random.randint(10**10, 10**11 - 1)}"[:18].ljust(18, "0"),
+            "clabeAccount": clabe(),
             "signatureProof": f"OTP-{random.randint(100000, 999999)}",
             "documentRef": f"linea-{d.application_id[:8]}.pdf"}, token=d.p.token)
     except Exception as e:

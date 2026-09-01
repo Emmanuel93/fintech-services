@@ -5,6 +5,7 @@ import com.fintech.disbursement.application.port.in.DispatchDisbursementsUseCase
 import com.fintech.disbursement.application.port.out.DisbursementEventPublisher;
 import com.fintech.disbursement.application.port.out.DisbursementEventRepository;
 import com.fintech.disbursement.application.port.out.DisbursementOrderRepository;
+import com.fintech.disbursement.application.port.out.PayoutRouteResolverPort;
 import com.fintech.disbursement.application.port.out.ProviderDispatchPort;
 import com.fintech.disbursement.domain.DisbursementEvent;
 import com.fintech.disbursement.domain.DisbursementOrder;
@@ -77,7 +78,7 @@ public class DisbursementDispatchService implements DispatchDisbursementsUseCase
     }
 
     /** Orden ya reclamada y comprometida en base, lista para entregar al conector. */
-    private record Claim(DisbursementOrder order, Provider provider) {}
+    private record Claim(DisbursementOrder order, PayoutRouteResolverPort.PayoutRoute route) {}
 
     @Override
     public int dispatchDue() {
@@ -89,11 +90,11 @@ public class DisbursementDispatchService implements DispatchDisbursementsUseCase
         int dispatched = 0;
         for (Claim claim : claims) {
             try {
-                providerDispatch.dispatch(claim.order(), claim.provider());
+                providerDispatch.dispatch(claim.order(), claim.route());
                 dispatched++;
             } catch (RuntimeException e) {
                 log.error("No se pudo despachar disbursementId={} provider={}: {}",
-                        claim.order().getDisbursementId(), claim.provider(), e.getMessage());
+                        claim.order().getDisbursementId(), claim.route().provider(), e.getMessage());
                 UUID id = claim.order().getDisbursementId();
                 String detail = e.getMessage();
                 transactionTemplate.executeWithoutResult(status -> handleDispatchFailure(id, detail));
@@ -121,20 +122,35 @@ public class DisbursementDispatchService implements DispatchDisbursementsUseCase
                 continue;
             }
 
-            Optional<Provider> provider = routing.findProvider(order.getCompanyId(), rail, order.getAmount());
-            if (provider.isEmpty()) {
+            Optional<PayoutRouteResolverPort.PayoutRoute> route;
+            try {
+                route = routing.findRoute(order.getCompanyId(), rail, order.getAmount());
+            } catch (PayoutRouteResolverPort.PayoutRoutingUnavailableException e) {
+                // Tesorería caída NO es configuración incompleta. Si esto gastara intento, una
+                // indisponibilidad de minutos agotaría los seis intentos de órdenes perfectamente
+                // válidas y las dejaría FAILED. Se espera, como fuera de ventana.
+                log.warn("Tesorería no responde; la orden {} espera sin gastar intento: {}",
+                        order.getDisbursementId(), e.getMessage());
+                order.scheduleFor(now.plus(properties.getBanking().getUnavailableBackoff()));
+                orders.save(order);
+                continue;
+            }
+
+            if (route.isEmpty()) {
                 defer(order, FailureCode.NO_ROUTING_RULE,
-                        "Sin regla de routing para companyId=" + order.getCompanyId()
+                        "Tesorería no tiene ruta para companyId=" + order.getCompanyId()
                                 + " rail=" + rail + " monto=" + order.getAmount(), now);
                 continue;
             }
 
+            Provider provider = route.get().provider();
             DisbursementStatus from = order.status();
-            order.dispatch(provider.get());
+            order.dispatch(provider);
             orders.save(order);
             events.save(DisbursementEvent.record(order, from, DisbursementStatus.DISPATCHED,
-                    null, "provider=" + provider.get() + " intento=" + order.getAttemptCount(), "SYSTEM"));
-            claims.add(new Claim(order, provider.get()));
+                    null, "provider=" + provider + " cuenta=" + route.get().bankAccountId()
+                            + " intento=" + order.getAttemptCount(), "SYSTEM"));
+            claims.add(new Claim(order, route.get()));
         }
         return claims;
     }

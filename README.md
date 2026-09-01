@@ -12,7 +12,7 @@ Este README es el **documento único de arquitectura y proceso** (incluye la dec
 
 1. [Decisión de arquitectura](#1-decisión-de-arquitectura)
 2. [API Gateway — capa de entrada](#2-api-gateway--capa-de-entrada)
-3. [Servicios (24 + gateway + observabilidad) — estado](#3-servicios-24--gateway--observabilidad--estado)
+3. [Servicios (26 + gateway + observabilidad) — estado](#3-servicios-26--gateway--observabilidad--estado)
 4. [El proceso de adquisición end-to-end](#4-el-proceso-de-adquisición-end-to-end)
 5. [Comunicación entre servicios](#5-comunicación-entre-servicios)
 6. [Máquina de estados — CreditApplication](#6-máquina-de-estados--creditapplication)
@@ -260,7 +260,7 @@ Doc completa: [services/gateway-service/README.md](services/gateway-service/READ
 
 ---
 
-## 3. Servicios (24 + gateway + observabilidad) — estado
+## 3. Servicios (26 + gateway + observabilidad) — estado
 
 > **Puertos:** en Docker **todos los servicios de dominio corren en `:8080` internos** y se direccionan por nombre (`http://<servicio>:8080`); sólo el gateway (`:8080→host`), `channel-mobile` (`:8085`) y `channel-backoffice` (`:8099`) difieren. Los puertos distintos (8081–8101) de la columna son los **defaults de `bootRun`** para desarrollo local sin Docker.
 
@@ -288,6 +288,8 @@ Doc completa: [services/gateway-service/README.md](services/gateway-service/READ
 | D13 | **beneficiary-service** | 8102 | `beneficiary` | 🔄 | [README](services/beneficiary-service/README.md) — colocación B2B2C: agregado `Placement` (11 estados, 16 aristas), liga de KYC, buró **sin filtrar por score** y disposición THIRD_PARTY_CREDIT. Mesa de KYC con **dictamen manual de identidad** y bandera `MANUAL`/`AUTOMATIC` que degrada a revisión humana si el proveedor falla. **Falta la evidencia que mirar** (OCR, prueba de vida, RENAPO) ([dominio](docs/dominios/13_beneficiary_domain.md) · [plan](docs/BENEFICIARY_SERVICE_PLAN.md)) |
 | D11 | **disbursement-service** | 8080/8100 | `disbursement` | ✅ | [README](services/disbursement-service/README.md) — payouts multi-rail y multi-empresa; **interno, no publicado en el gateway**; backoff+DLT ([dominio](docs/dominios/10_disbursement_domain.md)) |
 | D12 | **stp-service** | 8101 | `stp` | ✅ | [README](services/stp-service/README.md) — conector SPEI: cadena original, firma, poller de conciliación; **sin internet, sin webhooks**; backoff+DLT ([dominio](docs/dominios/11_stp_connector_domain.md)) |
+| D14 | **closing-service** | 8103 | `closing` | ✅ | [README](services/closing-service/README.md) — motor de **cierres y cortes**: seis fases por cuenta, reparto entre pods con candado Redis y **sello** del día. Saca el barrido nocturno del pool de cartera ([dominio](docs/dominios/14_closing_domain.md)) |
+| D15 | **banking-service** | 8104 | `banking` | 🔄 | [README](services/banking-service/README.md) — **tesorería**: cuentas propias, **de cuál sale cada pago**, conciliación bancaria y la cadena del dinero consultable en ambos sentidos. No conoce el dominio de crédito ([dominio](docs/dominios/15_banking_domain.md)) |
 | T2 | notifications-service | 8098 | `notifications` | ✅ | [README](services/notifications-service/README.md) — comunicaciones multicanal disparadas por eventos (sin `@Scheduled` que revise cuentas) |
 | T4 | accounting-service | 8095 | `accounting` | ✅ | [README](services/accounting-service/README.md) — libro mayor / partida doble; consume balance, comisión, riesgo, wallet |
 | T4b | invoicing-service | 8096 | `invoicing` | ✅ | [README](services/invoicing-service/README.md) — facturación (CFDI); consume `accounting.invoice-requested` y `party.fiscal-profile-updated` |
@@ -593,7 +595,7 @@ Consumidores tomados de los `@KafkaListener` reales del código; los tópicos si
 > consume para dejar en el expediente del caso constancia de cada mensaje que se envió. Es lo que
 > hace que la bitácora de gestión incluya lo automático y no sólo lo que un agente capturó a mano.
 
-> **Hecho pendiente de emisor:** `credit-portfolio.disposition-authorized` ya lo **consume** disbursement (camino wallet `THIRD_PARTY`), pero credit-portfolio aún **no lo emite** — es el entregable 2B.2. Hoy el desembolso se dispara sólo desde `credit-account-activated`.
+> **Cerrado (BK-14).** `credit-portfolio.disposition-authorized` ya tiene emisor: cartera lo publica al autorizar la disposición y `disbursement` lo consume. Antes el hecho se escuchaba sin que nadie lo emitiera, y el pago lo simulaba un stub que devolvía `SPEI-STUB-…` — con lo que contabilidad asentaba una salida de caja de dinero que nunca salió.
 
 ### 5.4 Política de reintentos y DLT (Kafka)
 
@@ -775,7 +777,7 @@ código que hablará con el buró, el otro permite correr el journey sin él.
 ### El ciclo completo está implementado
 
 Onboarding → scoring → originación → cuenta viva → devengo / pagos / cobranza → desembolso →
-contabilidad, comisiones y auditoría. Los 24 servicios levantan, la siembra de demo corre de punta
+contabilidad, comisiones y auditoría. Los 26 servicios levantan, la siembra de demo corre de punta
 a punta y el backoffice consume el BFF.
 
 ### Las tres piezas que están a medias, y en qué exactamente
@@ -786,24 +788,89 @@ a punta y el backoffice consume el BFF.
 | **Notificaciones por evento** | El carril genérico existe; faltan los **emisores**. Ningún servicio publica todavía `notifications.notification-requested`, así que la campana del backoffice funciona y está vacía. Y los 13 eventos de la colocación B2B2C no producen ningún aviso. | [plan](docs/NOTIFICATIONS_EVENT_PLAN.md) §3 y §6 |
 | **Backoffice** | Contratos y Configuración se cerraron como **decisión de no hacerse**; Comisiones va por otra vía. | [plan](docs/BACKOFFICE_COMPLETION_PLAN.md) |
 
+### Notificaciones: cuánto de lo construido llega a salir
+
+El carril funciona y el catálogo de eventos está definido. Lo que falta son **emisores y filas**, y
+conviene tenerlo medido en vez de descrito:
+
+| | |
+|---|---|
+| Tópicos que notifications consume | **12** |
+| Emisores del carril genérico | **1** — `party.executive-assigned` |
+| `EventType` que llegan a salir | **4 de 15** |
+| Claves de backoffice con emisor | **1 de 3** |
+| Pruebas de contrato de los pares que consume | **1 de 11** |
+
+Un aviso necesita tres piezas: que alguien consuma el hecho, que haya **política** y que haya
+**plantilla**. Los ocho `COLLECTION_*` no tienen ninguna de las dos, así que la ruta de cobranza
+entera se consume y muere en un `WARN`; y `DISBURSEMENT_COMPLETED`, `INSTALLMENT_PAID` y
+`LOAN_SETTLED` tienen política **sin** plantilla, que es el peor de los tres estados: el aviso llega
+al último paso y se cae al buscar qué decir, en un sitio donde todo lo demás parece bien.
+
+Las dos ausencias son deliberadas —el sistema no inventa canal ni texto— pero el efecto no lo es.
+Cerrarlo es sembrar filas, no escribir código. Detalle por tópico y por clave en el
+[README de notifications](services/notifications-service/README.md).
+
 ### Deuda conocida, con su razón
 
-1. **Camino wallet `THIRD_PARTY` de desembolso (2B.2):** credit-portfolio no emite
-   `credit-portfolio.disposition-authorized` (disbursement ya lo consume). Hoy el desembolso se
-   dispara sólo en la activación.
-2. **Reversa del principal en `disbursement.failed`** para el camino de originación — decisión de
-   dominio pendiente sobre el estado de la cuenta.
-3. **`scoring-service:compileTestJava` está roto** desde antes de los trabajos de backoffice. No
-   bloquea a los demás módulos; se compila y prueba por servicio.
-4. **`origin_unit_code` guarda ejecutivo, no sucursal.** Funciona —el subárbol incluye los códigos
+1. ~~**Camino wallet `THIRD_PARTY` de desembolso (2B.2)**~~ — **cerrada (BK-11…BK-14).** Cartera
+   emite `disposition-authorized`, el `NoopSpeiDispatchAdapter` desapareció y el dinero sale por
+   `banking → disbursement → conector`. Ninguna disposición se marca completada sin evidencia del
+   proveedor.
+2. ~~**Reversa del principal en `disbursement.failed`**~~ — **cerrada (BK-16).** Cartera revierte
+   saldo y cupo al fallar el pago y al recibir `disbursement.returned`, que se publicaba y no
+   escuchaba nadie: el cliente quedaba debiendo un dinero que el banco ya había devuelto.
+3. ~~**`scoring-service:compileTestJava` está roto**~~ — **ya no.** Compila y sus 53 pruebas pasan.
+   La deuda se quedó escrita después de arreglarse, que es la forma más barata de que una lista de
+   pendientes deje de merecer confianza.
+4. ~~**Dos pruebas sensibles a la carga**~~ — **cerradas, y la deuda estaba mal escrita las dos
+   veces.** Decía que ambas esperaban con `await().atMost(20s)` sobre Kafka; `CollectionsQueueIT`
+   no tiene un solo `await`. Y cuando por fin falló acompañada, la causa **tampoco era la carga**.
+
+   `NotificationFlowIT` publicaba recién arrancado el contexto, cuando los consumidores todavía no
+   se habían unido al grupo, y los veinte segundos contaban desde ahí. Ahora espera la asignación
+   de particiones **antes** de publicar; corre en ~1 s.
+
+   `CollectionsQueueIT` fallaba por la **hora del día**. `attemptsToday` cuenta desde el inicio del
+   día en hora de **México** —y con razón: el tope de intentos diarios es una regla de trato al
+   cliente, y su día es el de la persona a la que se le llama—, pero el fixture sembraba con
+   «hace una y tres horas» sobre el reloj de la máquina, que va en MST. Entre la medianoche
+   mexicana y la de la máquina hay una hora en la que los dos intentos caen en el día anterior y
+   la cuenta sale en cero. Se reproduce puntualmente **una hora cada día**, y ninguna cantidad de
+   carga la provoca ni la evita.
+
+   Ahora el fixture se ancla al **mismo comienzo de día que usa la consulta**. Verificado dentro de
+   la ventana: con el fixture viejo falla, con el nuevo pasa.
+
+5. ~~**Los $8 250 de interés duplicado siguen en el mayor**~~ — **ya no existen.** La base se
+   recreó desde cero y los cargos duplicados eran datos, no código. Lo que impedía que volvieran
+   —el índice único de idempotencia del devengo— sí es código y sigue puesto: sobre base limpia
+   nunca llegaron a producirse. Se deja tachado y no borrado porque la lección es del catálogo de
+   defectos, no de esta base: un devengo protegido sólo por `last_accrual_date` —leer, comparar y
+   escribir en pasos separados— cobra dos veces en cuanto dos corridas se cruzan.
+6. **`origin_unit_code` guarda ejecutivo, no sucursal.** Funciona —el subárbol incluye los códigos
    de ejecutivo y suman hacia arriba— pero el nombre de la columna y el comentario del changeset
    013 dicen «sucursal». Renombrar una columna sellada es una migración aparte.
-5. **No hay contrato con proveedor de KYC.** Toda revisión de identidad y de documentos es
+7. **No hay contrato con proveedor de KYC.** Toda revisión de identidad y de documentos es
    manual. El cambio a semiautomático es una línea de configuración
    (`identity-verification.mode: AUTOMATIC`) más registrar el adaptador del proveedor; la ruta de
    degradación ya se ejerce hoy porque el adaptador vigente reporta indisponibilidad.
-6. **Dos caminos de notificación conviven:** los diez `@KafkaListener` de dominio y el carril
+8. **Dos caminos de notificación conviven:** los diez `@KafkaListener` de dominio y el carril
    genérico. Es una migración en curso (fase 5 del plan), no un diseño.
+9. **`republish` sólo se alcanza desde dentro de la red.** `POST /api/v1/credit-products/{code}/republish`
+   reemite la configuración vigente de un producto. Existe porque una configuración cambiada fuera
+   de la API —un `UPDATE` del JSONB en una migración— no emite `product-activated` y los
+   consumidores conservan la copia con la que el producto se activó. Ningún BFF lo expone, y a
+   propósito: darle botón en el backoffice legitima el cambio fuera de la API, que es el problema
+   real. La reparación se hace desde la red interna hasta que la configuración deje de tocarse por
+   fuera.
+
+10. ~~**El backoffice puede arrancar con media política**~~ — **cerrada.** Dejó de ser molestia
+   para ser bloqueo: sobre instalación limpia el analista de riesgo recibía 403 sobre una facultad
+   que la base sí le concede, y con eso no se podía sembrar el programa de apoyo. La matriz ahora
+   se relee cada cinco minutos, así que cualquier desfase se cierra solo. El respaldo en código
+   cubría «identity no contesta»; no cubría «identity contesta a medias», que es peor porque una
+   foto parcial se parece a una completa.
 
 ### Cómo se verifica
 

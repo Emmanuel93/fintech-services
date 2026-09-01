@@ -109,6 +109,14 @@ Puerto **8085**, rutas planas sin prefijo `/api/v1` — el BFF expone lo que la 
 | `GET` | `/credit/account` | Cuenta viva con el avance del plan de pagos |
 | `POST` | `/credit/payment` | Registrar un pago |
 | `POST` | `/credit/dispose` | Disponer de la línea |
+| `GET` | `/credit/dispositions` | Sus compras — cuál puede diferir |
+| `GET` | `/credit/schedule` | Sus pagos — cuál puede saltar |
+| `POST` | `/credit/dispositions/{id}/defer` | Diferir una compra a plazos |
+| `POST` | `/credit/installments/{id}/skip` | Saltar un pago |
+
+Los cuatro últimos son decisiones **del titular**, no del backoffice, y por eso viven aquí. Ninguno
+recibe el id de la cuenta: se resuelve del usuario autenticado, así que no existe la petición capaz
+de diferir la compra de otro ni de saltarle el pago.
 
 ### Monedero, avisos y colocación B2B2C
 

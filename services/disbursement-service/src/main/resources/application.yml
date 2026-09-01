@@ -59,6 +59,11 @@ springdoc:
 
 fintech:
   disbursement:
+    # Tesorería decide por dónde sale cada pago (BK-10). Si no responde, la orden
+    # espera sin gastar intento: una caída de minutos no debe marcar órdenes como fallidas.
+    banking:
+      base-url: ${BANKING_BASE_URL:http://localhost:8104}
+      unavailable-backoff: 30s
     dispatch:
       enabled: ${DISBURSEMENT_DISPATCH_ENABLED:true}
       # ISO-8601 obligatorio: este valor lo lee @Scheduled, que no entiende "5s".

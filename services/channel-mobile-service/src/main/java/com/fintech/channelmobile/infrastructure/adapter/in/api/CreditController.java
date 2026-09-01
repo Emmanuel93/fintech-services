@@ -227,7 +227,8 @@ class CreditController {
                                                      HttpServletRequest httpRequest) {
         return ResponseEntity.ok(originationClient.signContract(
                 httpRequest.getHeader("X-User-Id"), id,
-                request.clabeAccount(), request.signatureProof(), request.documentRef()));
+                request.clabeAccount(), request.signatureProof(), request.documentRef(),
+                request.bnplDeferralDays()));
     }
 
     private String resolveProductCode(String productType) {
@@ -286,16 +287,84 @@ class CreditController {
                                                  HttpServletRequest httpRequest) {
         String userId = httpRequest.getHeader("X-User-Id");
         UUID creditAccountId = resolvePrimaryCreditAccountId(userId);
-        String dispositionType = (request.dispositionType() == null || request.dispositionType().isBlank())
-                ? "SELF_USE" : request.dispositionType();
         UUID beneficiary = (request.beneficiaryPartyId() == null || request.beneficiaryPartyId().isBlank())
                 ? null : UUID.fromString(request.beneficiaryPartyId());
-        log.info("POST /credit/dispose creditAccountId={} amount={} type={}",
-                creditAccountId, request.amount(), dispositionType);
+        // El tipo de disposición NO viaja: lo decide el producto (BK-13). Que la app pudiera
+        // mandarlo era lo que permitía acreditar a la distribuidora un dinero de la beneficiaria.
+        log.info("POST /credit/dispose creditAccountId={} amount={}",
+                creditAccountId, request.amount());
         walletClient.requestDisposition(creditAccountId, userId,
-                BigDecimal.valueOf(request.amount()), dispositionType, beneficiary,
-                request.termPeriods());
+                BigDecimal.valueOf(request.amount()), beneficiary, request.termPeriods());
         return ResponseEntity.ok(Map.of("success", true));
+    }
+
+    // ── Parcialidades y salto de pago · lo decide el cliente, desde su app (BK-25, BK-31) ──────
+    //
+    // Ninguno de los cuatro recibe el id de la cuenta: se resuelve del usuario autenticado. Así no
+    // existe la petición que difiera la compra de otro ni salte el pago de otro — la pertenencia no
+    // se comprueba, se construye.
+
+    @Operation(summary = "Mis compras y disposiciones",
+            description = "Lo que el titular puede llegar a diferir. Una compra revolvente pura "
+                        + "aparece sin calendario hasta que se difiere.")
+    @GetMapping("/credit/dispositions")
+    ResponseEntity<List<Map<String, Object>>> misDisposiciones(HttpServletRequest httpRequest) {
+        String userId = httpRequest.getHeader("X-User-Id");
+        UUID creditAccountId = resolvePrimaryCreditAccountId(userId);
+        log.info("GET /credit/dispositions creditAccountId={}", creditAccountId);
+        return ResponseEntity.ok(creditPortfolioClient.getDispositions(creditAccountId, userId));
+    }
+
+    @Operation(summary = "Mi calendario de pagos",
+            description = "De aquí sale la cuota que el cliente elige saltar.")
+    @GetMapping("/credit/schedule")
+    ResponseEntity<List<Map<String, Object>>> miCalendario(HttpServletRequest httpRequest) {
+        String userId = httpRequest.getHeader("X-User-Id");
+        UUID creditAccountId = resolvePrimaryCreditAccountId(userId);
+        log.info("GET /credit/schedule creditAccountId={}", creditAccountId);
+        return ResponseEntity.ok(creditPortfolioClient.getSchedule(creditAccountId, userId));
+    }
+
+    @Operation(summary = "Diferir una compra a plazos",
+            description = "La saca del exigible del corte y le genera calendario. Sin plazo, cae al "
+                        + "que traiga el producto. El interés que la compra devengó como revolvente "
+                        + "se reversa, así que 202: aquí no ha terminado todo.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "202", description = "Diferimiento aceptado"),
+        @ApiResponse(responseCode = "404", description = "El usuario no tiene cuenta de crédito activa"),
+        @ApiResponse(responseCode = "409", description = "Fuera de ventana, plazo no admitido o producto que no difiere")
+    })
+    @PostMapping("/credit/dispositions/{dispositionId}/defer")
+    ResponseEntity<Void> diferirCompra(@PathVariable UUID dispositionId,
+                                       @RequestBody(required = false) DeferRequest request,
+                                       HttpServletRequest httpRequest) {
+        String userId = httpRequest.getHeader("X-User-Id");
+        UUID creditAccountId = resolvePrimaryCreditAccountId(userId);
+        log.info("POST /credit/dispositions/{}/defer creditAccountId={}", dispositionId, creditAccountId);
+        creditPortfolioClient.deferDisposition(creditAccountId, dispositionId,
+                request != null ? request.termPeriods() : null, userId);
+        return ResponseEntity.accepted().build();
+    }
+
+    /** Sin plazo → el del producto. Que sea opcional es parte del contrato, no una omisión. */
+    record DeferRequest(Integer termPeriods) {}
+
+    @Operation(summary = "Saltar un pago",
+            description = "Corre el compromiso sin generar mora. Si devenga o no durante el salto "
+                        + "lo decide el producto; el tope por ciclo lo aplica cartera.")
+    @ApiResponses({
+        @ApiResponse(responseCode = "202", description = "Salto aceptado"),
+        @ApiResponse(responseCode = "404", description = "El usuario no tiene cuenta de crédito activa"),
+        @ApiResponse(responseCode = "409", description = "Producto sin salto, tope del ciclo agotado o cuota no saltable")
+    })
+    @PostMapping("/credit/installments/{installmentId}/skip")
+    ResponseEntity<Void> saltarPago(@PathVariable UUID installmentId,
+                                    HttpServletRequest httpRequest) {
+        String userId = httpRequest.getHeader("X-User-Id");
+        UUID creditAccountId = resolvePrimaryCreditAccountId(userId);
+        log.info("POST /credit/installments/{}/skip creditAccountId={}", installmentId, creditAccountId);
+        creditPortfolioClient.skipInstallment(creditAccountId, installmentId, userId);
+        return ResponseEntity.accepted().build();
     }
 
     private UUID resolvePrimaryCreditAccountId(String userId) {

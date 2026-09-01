@@ -48,6 +48,10 @@ dependencies {
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")
 
+    // Arnés compartido: ContratoDeEvento (BK-44). Notifications consume hechos de otros dominios
+    // redeclarando sus payloads, así que el esquema es lo único que las ata: sin prueba de
+    // contrato, un renombrado aguas arriba deja de poblar un campo **en silencio**.
+    testImplementation(testFixtures(project(":shared")))
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.modulith:spring-modulith-starter-test")
     testImplementation("org.springframework.security:spring-security-test")

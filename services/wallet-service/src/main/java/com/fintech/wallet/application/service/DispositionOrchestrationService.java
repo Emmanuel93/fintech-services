@@ -62,12 +62,14 @@ public class DispositionOrchestrationService implements RequestDispositionUseCas
                     "El beneficiario no puede ser el mismo acreditado: para uso propio va un crédito SELF_USE");
         }
 
-        log.info("Emitting DispositionRequested creditAccountId={} amount={} type={}",
-                cmd.creditAccountId(), cmd.amount(), cmd.dispositionType());
+        // El tipo NO viaja: lo decide el producto, y cartera lo resuelve de sus `Capabilities`
+        // (BK-13). Publicarlo mantendría vivo el campo que permitía desviar el destino del dinero.
+        log.info("Emitting DispositionRequested creditAccountId={} amount={}",
+                cmd.creditAccountId(), cmd.amount());
 
         eventPublisher.publishDispositionRequested(
                 cmd.creditAccountId(), cmd.obligorPartyId(),
-                cmd.amount(), cmd.dispositionType(),
+                cmd.amount(), null,
                 cmd.beneficiaryPartyId(), cmd.payeeAccount(), cmd.termPeriods());
     }
 }

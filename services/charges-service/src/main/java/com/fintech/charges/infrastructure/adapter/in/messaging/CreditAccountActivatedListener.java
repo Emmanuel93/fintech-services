@@ -37,7 +37,9 @@ public class CreditAccountActivatedListener {
                 event.nominalRate(),
                 event.moratoriumRate(),
                 event.principalBalance(),
-                event.openingFeeRate());
+                event.openingFeeRate(),
+                // BNPL: nulo = devenga desde el alta, que es lo que son todos los créditos hoy.
+                event.accrualStartDate());
 
         snapshotService.initSnapshot(
                 event.creditAccountId(),

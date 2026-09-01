@@ -221,6 +221,7 @@ sequenceDiagram
 | `PUT` | `/{id}/reactivate` | INACTIVE → ACTIVE |
 | `PUT` | `/{id}/deprecate` | INACTIVE/RETIRED → DEPRECATED |
 | `PUT` | `/code/{code}/retire` | Retira la versión ACTIVE del código |
+| `POST` | `/{code}/republish` | Reemite la configuración vigente **sin cambiar nada** |
 
 ### Request — crear producto
 
@@ -268,8 +269,35 @@ Este servicio **sólo produce**; no tiene ningún `@KafkaListener`.
 
 | Tópico | Cuándo | Key | Consumidores verificados |
 |---|---|---|---|
-| `product-catalog.product-activated` | Al activar una versión | `productCode` | credit-portfolio, audit |
+| `product-catalog.product-activated` | Al activar una versión, **y al arrancar el servicio** | `productCode` | credit-portfolio, audit |
 | `product-catalog.product-retired` | Al retirar la versión anterior | `productCode` | credit-portfolio, audit |
+
+### 🔴 Por qué se reemite el catálogo al arrancar
+
+Una instalación desde cero **no podía originar ni un crédito**. Los productos se siembran con un
+`INSERT` de Liquibase ya en `ACTIVE`, y un `INSERT` no emite `product-activated`: sobre base limpia
+el catálogo mostraba **nueve productos activos** y cartera tenía **cero** configuraciones. Toda alta
+moría con «Sin configuración del producto», y nada lo decía — el catálogo se veía sano y el fallo
+aparecía tres servicios más allá.
+
+No es que se perdiera un evento: **nunca hubo ninguno**.
+
+Reemitir al arrancar es seguro porque el consumidor hace *upsert* por `(código, versión)` —
+republicar lo mismo no cambia nada— y convierte una clase entera de problema en autorreparable: un
+consumidor que perdió su copia, uno nuevo que se suma, o una configuración tocada por fuera se
+arreglan con un reinicio. Si uno falla, los demás se publican igual: un catálogo a medias es peor
+que uno con un hueco conocido, porque el hueco al menos queda en el log.
+
+### `POST /{code}/republish` — reparar sin reiniciar
+
+Reemite la configuración vigente sin cambiarla. Existe porque una configuración cambiada **fuera de
+la API** —un `UPDATE` del JSONB en una migración— no emite nada, y los consumidores conservan la
+copia con la que el producto se activó. El síntoma aparece lejos y sin relación aparente: el
+catálogo dice que el producto admite saltar pagos y cartera responde que no, **con el código de las
+dos partes correcto**.
+
+**Ningún BFF lo expone, a propósito:** darle botón en el backoffice legitima el cambio fuera de la
+API, que es el problema del que `republish` es sólo la reparación.
 
 Payload `product-activated`:
 ```json

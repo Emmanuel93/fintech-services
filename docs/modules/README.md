@@ -12,7 +12,7 @@ que es la señal de cuándo se dejó de usar la convención.
 
 | Qué buscas | Dónde |
 |---|---|
-| Estado de cada servicio | [tabla del README raíz](../../README.md#3-servicios-24--gateway--observabilidad--estado) |
+| Estado de cada servicio | [tabla del README raíz](../../README.md#3-servicios-26--gateway--observabilidad--estado) |
 | Especificación por dominio | [`docs/dominios/`](../dominios/) |
 | Avance por entregable | [`docs/IMPLEMENTATION_TRACKER.md`](../IMPLEMENTATION_TRACKER.md) |
 | Contrato de API de un servicio | el `README.md` del servicio |

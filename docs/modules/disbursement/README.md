@@ -23,7 +23,7 @@ y con qué proveedor. **No ejecuta el pago** — eso es de los conectores.
 |---|---|
 | `disbursement_orders` | Raíz de agregado. Sin una sola columna del dominio de crédito |
 | `disbursement_events` | Bitácora inmutable de transiciones (DB-06) |
-| `routing_rules` | (empresa, rail, rango de monto) → proveedor. Cambiar de proveedor es un `INSERT` |
+| ~~`routing_rules`~~ | **Retirada (BK-08).** Decidía el proveedor y nunca la cuenta; ahora `banking.payout_routes` decide las dos |
 | `company_mappings` | Clave de empresa del emisor → `companyId` de este servicio |
 
 ---
@@ -37,8 +37,7 @@ y con qué proveedor. **No ejecuta el pago** — eso es de los conectores.
 | `GET` | `/api/v1/disbursements/{id}/events` | ADMIN · OPS_SUPERVISOR · AUDITOR | Bitácora completa |
 | `GET` | `/api/v1/disbursements?companyId=` | ADMIN · OPS_SUPERVISOR · AUDITOR | |
 | `POST` | `/api/v1/disbursements/{id}/cancel` | ADMIN · OPS_SUPERVISOR | Sólo antes de despachar |
-| `POST` | `/api/v1/disbursements/routing` | ADMIN | Alta de regla |
-| `POST` | `/api/v1/disbursements/routing/{id}/enabled` | ADMIN | Apagar un proveedor en un incidente |
+| — | *(el ruteo se administra en `banking`: `POST /api/v1/payout-routes`)* | | |
 | `POST` | `/api/v1/disbursements/company-mappings` | ADMIN | |
 
 Auth: header-trust (`X-User-Id` / `X-Roles` que inyecta el gateway), igual que el resto del

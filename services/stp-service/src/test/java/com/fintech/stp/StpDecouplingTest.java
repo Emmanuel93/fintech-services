@@ -32,7 +32,10 @@ class StpDecouplingTest {
             noClasses().that().resideInAPackage("com.fintech.stp..")
                     .should().dependOnClassesThat().resideInAnyPackage(
                             "com.fintech.disbursement..", "com.fintech.creditportfolio..",
-                            "com.fintech.wallet..", "com.fintech.payments..", "com.fintech.origination..")
+                            "com.fintech.wallet..", "com.fintech.payments..", "com.fintech.origination..",
+                            // BK-07: la cuenta ordenante llega en el mensaje. Este conector no
+                            // consulta a tesorería ni la conoce — sólo usa lo que le mandaron.
+                            "com.fintech.banking..")
                     .because("la única dependencia permitida es 'shared' (@ApplicationModule)");
 
     @ArchTest

@@ -43,6 +43,8 @@ dependencies {
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${property("springdocVersion")}")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    // Arnés compartido: AbstractIntegrationTest + contenedores reutilizados (BK-43).
+    testImplementation(testFixtures(project(":shared")))
     testImplementation("org.springframework.kafka:spring-kafka-test")
     testImplementation("org.testcontainers:postgresql")
     testImplementation("org.testcontainers:kafka")

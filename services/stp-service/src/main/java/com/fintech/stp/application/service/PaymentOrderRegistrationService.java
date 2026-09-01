@@ -2,7 +2,6 @@ package com.fintech.stp.application.service;
 
 import com.fintech.stp.application.RegisterPaymentOrderCommand;
 import com.fintech.stp.application.port.in.RegisterPaymentOrderUseCase;
-import com.fintech.stp.application.port.out.OrderingAccountRepository;
 import com.fintech.stp.application.port.out.OutboxMessageRepository;
 import com.fintech.stp.application.port.out.StpCompanyRepository;
 import com.fintech.stp.application.port.out.StpPaymentOrderEventRepository;
@@ -11,7 +10,6 @@ import com.fintech.stp.application.port.out.TrackingKeySequencePort;
 import com.fintech.stp.domain.ClabeValidator;
 import com.fintech.stp.domain.CompanyNotFoundException;
 import com.fintech.stp.domain.InvalidBeneficiaryAccountException;
-import com.fintech.stp.domain.OrderingAccount;
 import com.fintech.stp.domain.OrderingAccountNotFoundException;
 import com.fintech.stp.domain.OutboxMessage;
 import com.fintech.stp.domain.StpCompany;
@@ -44,7 +42,6 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
     private final StpPaymentOrderRepository orderRepository;
     private final StpPaymentOrderEventRepository eventRepository;
     private final StpCompanyRepository companyRepository;
-    private final OrderingAccountRepository orderingAccountRepository;
     private final TrackingKeySequencePort trackingKeySequence;
     private final OutboxMessageRepository outboxRepository;
     private final AccountHasher accountHasher;
@@ -53,7 +50,6 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
     public PaymentOrderRegistrationService(StpPaymentOrderRepository orderRepository,
                                            StpPaymentOrderEventRepository eventRepository,
                                            StpCompanyRepository companyRepository,
-                                           OrderingAccountRepository orderingAccountRepository,
                                            TrackingKeySequencePort trackingKeySequence,
                                            OutboxMessageRepository outboxRepository,
                                            AccountHasher accountHasher,
@@ -61,7 +57,6 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
         this.orderRepository = orderRepository;
         this.eventRepository = eventRepository;
         this.companyRepository = companyRepository;
-        this.orderingAccountRepository = orderingAccountRepository;
         this.trackingKeySequence = trackingKeySequence;
         this.outboxRepository = outboxRepository;
         this.accountHasher = accountHasher;
@@ -82,9 +77,19 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
                 .orElseThrow(() -> new CompanyNotFoundException(
                         "No hay empresa activa con companyId=" + cmd.companyId()));
 
-        OrderingAccount orderingAccount = orderingAccountRepository.findDefaultByCompanyId(company.getCompanyId())
-                .orElseThrow(() -> new OrderingAccountNotFoundException(
-                        "La empresa " + company.getCode() + " no tiene cuenta ordenante activa por default"));
+        // BK-07b · quien decide por dónde sale el dinero es TESORERÍA, y lo manda en la orden.
+        //
+        // La caída al catálogo local se retiró junto con la tabla. Existía para cubrir la ventana
+        // de la migración; mantenerla más allá habría dejado en pie exactamente lo que este trabajo
+        // vino a quitar: un conector capaz de elegir por su cuenta la cuenta de la que sale el
+        // dinero, con un `is_default` ciego al saldo y al costo.
+        if (!cmd.traeCuentaOrdenante()) {
+            throw new OrderingAccountNotFoundException(
+                    "La orden no trae cuenta ordenante. Este conector ya no elige: la decide "
+                            + "tesorería y viaja en el mensaje (paymentRequestId="
+                            + cmd.paymentRequestId() + ")");
+        }
+        CuentaOrdenante ordenante = CuentaOrdenante.deLaOrden(cmd);
 
         // Validación local: una CLABE con dígito verificador malo no merece un viaje a STP.
         if (isClabe(accountTypeOf(cmd)) && !ClabeValidator.isValid(cmd.beneficiaryAccount())) {
@@ -100,12 +105,14 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
                 trackingKeySequence.next(company.getCompanyId(), businessDate));
 
         StpPaymentOrder order = StpPaymentOrder.create(
-                cmd.paymentRequestId(), company.getCompanyId(), orderingAccount.getOrderingAccountId(),
+                cmd.paymentRequestId(), company.getCompanyId(), ordenante.id(),
                 trackingKey, businessDate, cmd.amount(),
                 cmd.beneficiaryName(), cmd.beneficiaryAccount(),
                 accountHasher.hash(cmd.beneficiaryAccount()), accountTypeOf(cmd),
                 cmd.beneficiaryTaxId(), resolveInstitution(cmd),
-                cmd.concept(), cmd.numericReference(), cmd.paymentType(), cmd.correlationId());
+                cmd.concept(), cmd.numericReference(), cmd.paymentType(), cmd.correlationId(),
+                ordenante.clabe(), ordenante.holderName(), ordenante.taxId(),
+                ordenante.accountType(), ordenante.clientNumber());
 
         orderRepository.save(order);
         eventRepository.save(StpPaymentOrderEvent.of(order.getStpPaymentOrderId(), null,

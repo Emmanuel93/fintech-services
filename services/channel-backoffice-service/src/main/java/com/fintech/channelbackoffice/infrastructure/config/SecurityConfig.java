@@ -110,6 +110,15 @@ public class SecurityConfig {
                         // ── Cartera ───────────────────────────────────────────────────────
                         .requestMatchers("/portfolio/**").access(requires("portfolio.view"))
 
+                        // ── Programas de apoyo por contingencia ───────────────────────────
+                        // Simular el padrón no es otorgarlo: ver a cuántas cuentas alcanzaría el
+                        // apoyo lo puede hacer quien vigila, sin poder mover un vencimiento.
+                        // Otorgarlo corre los vencimientos de un segmento entero y sube la reserva
+                        // por el paso a STAGE_2 — es una decisión con costo, no una consulta.
+                        .requestMatchers(HttpMethod.GET, "/relief-programs/**")
+                                .access(requires("portfolio.relief-view"))
+                        .requestMatchers("/relief-programs/**").access(requires("portfolio.relief-grant"))
+
                         // ── Clientes ──────────────────────────────────────────────────────
                         .requestMatchers(HttpMethod.POST, "/clients/*/assign-executive")
                                 .access(requires("clients.assign-executive"))

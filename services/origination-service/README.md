@@ -201,7 +201,7 @@ Terminales (`ApplicationStatus.isTerminal()`): `DISBURSED`, `REJECTED`, `OFFER_R
 | **OM-02** | `offeredAmount ≤ maxAmount` del catálogo |
 | **OM-04** | La oferta expira al pasar `validUntil` |
 | **CM-04** | El contrato es inmutable después de la firma |
-| **CM-06** | La CLABE se valida antes de firmar |
+| **CM-06** | La CLABE se valida antes de firmar — **con su dígito verificador**, no sólo el formato |
 
 ---
 
@@ -244,7 +244,7 @@ Base común: `/api/v1/origination` · Swagger local: `http://localhost:8081/swag
 | `POST` | `/applications/{id}/offer` | Presentar oferta (CAT calculado) → `OFFER_PRESENTED` |
 | `POST` | `/applications/{id}/offer/accept` · `/reject` | Aceptar (valida TTL) · rechazar |
 | `POST` | `/applications/{id}/contract/generate` | → `PENDING_SIGNATURE`, folio `CTR-YYYYMM-XXXXXXXX` |
-| `POST` | `/applications/{id}/contract/sign` | → `CONTRACT_SIGNED` + snapshot a credit-portfolio |
+| `POST` | `/applications/{id}/contract/sign` | → `CONTRACT_SIGNED` + snapshot a credit-portfolio. Admite `bnplDeferralDays` |
 
 ### Soporte (dev-only, `TEST_SUPPORT_ENABLED=true`)
 
@@ -282,6 +282,42 @@ al catálogo en runtime** — es lo que hace auditable un contrato años despué
 
 ---
 
+## 5b. La CLABE, y el BNPL que se decide al firmar
+
+### 🔴 La CLABE se validaba donde se paga, no donde entra
+
+`ContractService` invocaba `clabeValidator` y lanzaba con su código —`CM-06`— desde el principio.
+Detrás había un stub que comprobaba **dieciocho dígitos y nada más**: no verificaba lo único que un
+dígito verificador sirve para verificar.
+
+Ocho de diecinueve cuentas de la cartera sembrada tenían el verificador equivocado. Sus créditos
+estaban otorgados, activos y devengando contra cuentas bancarias que **no pueden existir**, y el
+error salía a la luz en `disbursement`, al ir a mandar el dinero. Ahí es tarde y de la peor manera:
+la cuenta existe, debe, devenga, el desembolso muere en la cola, y quien atiende no tiene de dónde
+saberlo.
+
+El dígito verificador es **local y determinista** —el algoritmo de Banxico, el mismo que ya usan
+tesorería y el conector—. No hacía falta contrato con nadie para dejar de aceptar una CLABE
+imposible. Lo que sí exige integración —que la cuenta esté abierta y admita abonos— sigue
+pendiente, y esto no lo suple.
+
+### BNPL: la decisión vive en el contrato
+
+`bnplDeferralDays` es opcional en la firma y se guarda **en el contrato**, no en la solicitud: es
+parte de lo que se firma, y quien reclame «yo no pedí empezar a pagar en noviembre» tiene la
+respuesta ahí, con la fecha de firma al lado. Viaja en el snapshot a cartera, que es quien corre el
+plan entero —devengo y primer vencimiento a la vez—.
+
+**El tope no se valida aquí.** Quien conoce `bnplMaxDeferralDays` es el producto, y cartera recorta
+lo pedido. Negar la firma entera por pedir de más convertiría un límite en un obstáculo justo en el
+último paso del alta, y la misma regla en tres sitios es la forma habitual de que se separen.
+
+Cero y nulo significan lo mismo —nadie lo pidió— y se guarda nulo: una columna que distingue dos
+formas de «no pidió» invita a leer el cero como «BNPL de cero días», que no es una decisión.
+
+Mientras esto no existió, cartera aplicaba el tope del producto a **toda** cuenta suya. Como el
+préstamo personal trae BNPL habilitado, ninguno empezaba a pagar cuando debía.
+
 ## 6. Dependencias externas y sus simuladores locales
 
 | Dependencia | Puerto de salida | Adaptador | Comportamiento |
@@ -290,7 +326,7 @@ al catálogo en runtime** — es lo que hace auditable un contrato años despué
 | party-service | `PartyReader` | `RestClientPartyAdapter` | **Real** — resuelve `partyId → prospectId` en el camino por canal |
 | sales-org-service | `PromoterResolver` | `RestClientPromoterResolverAdapter` | **Real** — resuelve el código de promotor a unidad comercial |
 | Proveedor de firma (NIP / biometría / e.firma) | `SignatureValidator` | `NoopSignatureValidator` 🧪 | Aprueba siempre |
-| Validación de CLABE (SPEI / BANXICO) | `ClabeValidator` | `NoopClabeValidator` 🧪 | Sólo valida el formato (18 dígitos) |
+| Validación de CLABE (SPEI / BANXICO) | `ClabeValidator` | `ClabeConDigitoVerificador` | Algoritmo de Banxico, local y determinista. Falta la parte que sí exige integración: que la cuenta esté abierta y admita abonos |
 
 Las tres primeras son las **únicas** llamadas REST salientes del servicio, y las tres son ACL:
 traducen el modelo ajeno al propio en el borde. Nada de dominio se lee por REST — eso llega por evento.

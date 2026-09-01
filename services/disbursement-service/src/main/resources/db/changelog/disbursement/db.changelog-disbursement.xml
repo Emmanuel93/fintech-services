@@ -7,9 +7,10 @@
 
     <include file="db/changelog/disbursement/001-create-schema.sql"              relativeToChangelogFile="false"/>
     <include file="db/changelog/disbursement/002-create-company-mappings.sql"    relativeToChangelogFile="false"/>
-    <include file="db/changelog/disbursement/003-create-routing-rules.sql"       relativeToChangelogFile="false"/>
     <include file="db/changelog/disbursement/004-create-disbursement-orders.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/disbursement/005-create-disbursement-events.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/disbursement/006-create-event-publication.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/disbursement/007-drop-routing-rules.sql"         relativeToChangelogFile="false"/>
+    <include file="db/changelog/disbursement/008-seed-company-mapping.sql"       relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

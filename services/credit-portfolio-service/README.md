@@ -420,6 +420,54 @@ corrige, uno repartido con una heurística no se detecta.
 
 ---
 
+## 11b. Las tres reglas que se corrigieron al verificar contra el stack
+
+### BNPL es una solicitud, no una propiedad del producto
+
+`bnplMaxDeferralDays` es un **tope** —el nombre lo dice— y se usaba como la cifra a aplicar, sin
+mirar si alguien lo había pedido. Como `PL-IND-STD-V1` trae BNPL habilitado, **ningún préstamo
+personal empezaba a pagar cuando debía**: el plan entero nacía corrido el máximo, para todos.
+
+La regla vive ahora en `OpcionesDePago`, con la configuración: es la configuración quien sabe qué
+significa cada uno de sus campos, y tenerla suelta en el servicio fue lo que permitió confundir un
+límite con un valor.
+
+- Sin solicitud, no hay BNPL. Nulo y cero significan lo mismo: nadie lo pidió.
+- Un producto que no lo admite **ignora** la solicitud, no la aplica a la fuerza.
+- Pedir de más se **recorta** al tope: el producto ya declaró hasta dónde espera, y negar el alta
+  entera por pedir de más convierte un límite en un obstáculo.
+
+Verificado vivo: el que no pide paga a **30 días**; el que pide 30 paga a **61** —treinta más un
+período—, que es la regla del plan escrita tal cual.
+
+### 🔴 Un crédito no puede estar bajo dos apoyos a la vez
+
+La guarda que existía era **por programa**: impedía reotorgar el mismo lote dos veces. No impedía lo
+que pasó de verdad — dos programas **distintos**, cada uno autorizado a diferir tres períodos,
+alcanzando la misma cartera. Cuarenta y dos cuentas recibieron los dos y se les corrió el
+vencimiento **seis meses**: el doble de lo que nadie autorizó, sin más rastro que dos filas de
+inscripción.
+
+Ninguno de los dos programas era incorrecto por separado. **El invariante no es de programa sino de
+cuenta.** Si hace falta extender el apoyo se otorga un programa con más períodos, no uno encima de
+otro.
+
+El padrón declara ahora `yaApoyadas` junto a `cuentasElegibles`: con sólo «0 elegibles» no se
+distingue «el criterio no alcanza a nadie» de «toda esa cartera ya viene de otro programa», y quien
+firma necesita esa diferencia **antes** de firmar.
+
+### Las configuraciones de producto se contradicen entre sí, y ahora se dice
+
+Un producto no se configura campo a campo: los campos **se condicionan entre sí**, y una combinación
+puede ser inválida sin que ninguno de sus valores lo sea. `OpcionesDePago.incoherencias()` devuelve
+cada contradicción con su frase — plazos de diferimiento en un producto que no difiere, huecos o
+solapes entre bandas de tasa, un modo de salto declarado sobre un salto apagado, BNPL de cero días.
+
+Cartera **avisa y guarda igual**. Rechazar aquí dejaría al catálogo y a la cartera discrepando, que
+es el problema que esto viene a evitar. Con el `WARN`, el día que alguien pregunte «por qué este
+producto no deja saltar pagos si el catálogo dice que sí», la respuesta está en el log del arranque
+y no en una tarde de bisección.
+
 ## 12. Configuración
 
 | Variable | Default | En producción |

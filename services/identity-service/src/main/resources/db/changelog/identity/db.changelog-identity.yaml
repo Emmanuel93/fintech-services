@@ -58,3 +58,11 @@ databaseChangeLog:
   - include:
       file: db/changelog/identity/015-seed-beneficiaries-capabilities.sql
       relativeToChangelogFile: false
+
+  - include:
+      file: db/changelog/identity/016-seed-relief-program-capabilities.sql
+      relativeToChangelogFile: false
+
+  - include:
+      file: db/changelog/identity/017-seed-review-capabilities.sql
+      relativeToChangelogFile: false

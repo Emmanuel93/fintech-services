@@ -5,7 +5,10 @@ import com.fintech.creditportfolio.domain.event.BalanceUpdatedEvent;
 import com.fintech.creditportfolio.domain.event.CreditAccountActivatedEvent;
 import com.fintech.creditportfolio.domain.event.ChargeRejectedEvent;
 import com.fintech.creditportfolio.domain.event.DelinquencyStatusUpdatedEvent;
+import com.fintech.creditportfolio.domain.event.DispositionAuthorizedEvent;
 import com.fintech.creditportfolio.domain.event.DispositionCompletedEvent;
+import com.fintech.creditportfolio.domain.event.DispositionDeferredEvent;
+import com.fintech.creditportfolio.domain.event.ReliefGrantedEvent;
 import com.fintech.creditportfolio.domain.event.DispositionRejectedEvent;
 import com.fintech.creditportfolio.domain.event.InstallmentDueEvent;
 import com.fintech.creditportfolio.domain.event.InstallmentUpcomingEvent;
@@ -28,7 +31,11 @@ public class KafkaCreditPortfolioPublisher implements CreditPortfolioEventPublis
     static final String TOPIC_DELINQUENCY_UPDATED     = "credit-portfolio.delinquency-status-updated";
     static final String TOPIC_INSTALLMENT_DUE         = "credit-portfolio.installment-due";
     static final String TOPIC_INSTALLMENT_UPCOMING    = "credit-portfolio.installment-upcoming";
+    /** El topic que `disbursement` escuchaba desde el principio y que nadie publicaba (BK-14). */
+    static final String TOPIC_DISPOSITION_AUTHORIZED  = "credit-portfolio.disposition-authorized";
     static final String TOPIC_DISPOSITION_COMPLETED   = "credit-portfolio.disposition-completed";
+    static final String TOPIC_DISPOSITION_DEFERRED    = "credit-portfolio.disposition-deferred";
+    static final String TOPIC_RELIEF_GRANTED          = "credit-portfolio.relief-granted";
     static final String TOPIC_DISPOSITION_REJECTED    = "credit-portfolio.disposition-rejected";
     private static final Logger log = LoggerFactory.getLogger(KafkaCreditPortfolioPublisher.class);
 
@@ -134,6 +141,54 @@ public class KafkaCreditPortfolioPublisher implements CreditPortfolioEventPublis
                     } else {
                         log.info("InstallmentUpcoming published installmentId={} creditAccountId={} dueDate={}",
                                 event.getInstallmentId(), event.getCreditAccountId(), event.getDueDate());
+                    }
+                });
+    }
+
+    @Override
+    public void publishDispositionAuthorized(DispositionAuthorizedEvent event) {
+        kafkaTemplate.send(TOPIC_DISPOSITION_AUTHORIZED, event.creditAccountId().toString(), event)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        // Si esto falla, la disposición se queda PROCESSING y nadie la paga. Es el
+                        // desenlace correcto: preferible una disposición visiblemente detenida a
+                        // una marcada como pagada sin que saliera un peso.
+                        log.error("DispositionAuthorized publish failed dispositionId={}: {}",
+                                event.dispositionId(), ex.getMessage());
+                    } else {
+                        log.info("DispositionAuthorized publicado dispositionId={} creditAccountId={} monto={}",
+                                event.dispositionId(), event.creditAccountId(), event.amount());
+                    }
+                });
+    }
+
+    @Override
+    public void publishReliefGranted(ReliefGrantedEvent event) {
+        kafkaTemplate.send(TOPIC_RELIEF_GRANTED, event.creditAccountId().toString(), event)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        // Si esto se pierde, la cuenta queda con los vencimientos corridos pero SIN
+                        // marcar forborne: reserva de menos y una cuenta apoyada que cobranza puede
+                        // seguir persiguiendo.
+                        log.error("ReliefGranted publish failed cuenta={} programa={}: {}",
+                                event.creditAccountId(), event.reliefProgramId(), ex.getMessage());
+                    }
+                });
+    }
+
+    @Override
+    public void publishDispositionDeferred(DispositionDeferredEvent event) {
+        kafkaTemplate.send(TOPIC_DISPOSITION_DEFERRED, event.creditAccountId().toString(), event)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        // Si esto se pierde, el plan existe pero el interés devengado como
+                        // revolvente NO se reversa: el cliente paga su MSI y además el interés de
+                        // los días previos. Es un cobro de más, y por eso se registra como error.
+                        log.error("DispositionDeferred publish failed dispositionId={}: {}",
+                                event.dispositionId(), ex.getMessage());
+                    } else {
+                        log.info("DispositionDeferred publicado dispositionId={} plazo={} tasa={}",
+                                event.dispositionId(), event.termPeriods(), event.nominalRate());
                     }
                 });
     }

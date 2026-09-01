@@ -24,6 +24,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -127,6 +128,38 @@ class PartyServiceTest {
 
         assertThat(result.getAssignedExecutiveId()).isEqualTo(executiveId);
         assertThat(result.getAssignedExecutiveName()).isEqualTo("Ana Torres");
+        then(partyRepository).should().save(party);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("Asignar publica el HECHO, con los nombres de las dos partes")
+    void asignar_publica_el_hecho() {
+        // Un hecho de dominio, no una petición de aviso: party no menciona claves de evento, tipos
+        // de destinatario ni canales. Ese vocabulario es del notificador, y meterlo aquí acoplaría
+        // el núcleo del negocio a un canal. Quien quiera reaccionar se suscribe.
+        Party party = buildParty();
+        given(partyRepository.findById(partyId)).willReturn(Optional.of(party));
+        UUID executiveId = UUID.randomUUID();
+
+        service.assignExecutive(partyId, executiveId, "Ana Torres");
+
+        then(eventPublisher).should()
+                .publishExecutiveAssigned(eq(partyId), eq(executiveId), eq("Ana Torres"), any());
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("Si la publicación falla, la asignación queda hecha igual")
+    void el_aviso_no_tumba_la_asignacion() {
+        // Un hecho no publicado se nota mucho menos que una asignación perdida. Atar la transacción
+        // al bus le añadiría a la operación un modo de fallo a cambio de nada.
+        Party party = buildParty();
+        given(partyRepository.findById(partyId)).willReturn(Optional.of(party));
+        org.mockito.BDDMockito.willThrow(new RuntimeException("kafka caído"))
+                .given(eventPublisher).publishExecutiveAssigned(any(), any(), any(), any());
+
+        UUID executiveId = UUID.randomUUID();
+        org.assertj.core.api.Assertions.assertThatCode(
+                () -> service.assignExecutive(partyId, executiveId, "Ana Torres")).doesNotThrowAnyException();
         then(partyRepository).should().save(party);
     }
 

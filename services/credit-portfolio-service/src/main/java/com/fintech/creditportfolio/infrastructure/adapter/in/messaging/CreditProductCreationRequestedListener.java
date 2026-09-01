@@ -50,6 +50,10 @@ public class CreditProductCreationRequestedListener {
                         // nacional. En cuanto origination resuelva la sucursal, aquí se pide su tasa
                         // a sales-org y el crédito nace con la de su plaza.
                 payload.obligorName(),
-                payload.obligorTaxId()));
+                payload.obligorTaxId(),
+                // Lo que el cliente pidió al firmar, no el tope del producto. Nulo es "nadie lo
+                // pidió" y es lo que deja el plan empezando en el período siguiente; el tope lo
+                // aplica `OpcionesDePago`, recortando lo pedido si se pasa.
+                payload.bnplDeferralDays()));
     }
 }

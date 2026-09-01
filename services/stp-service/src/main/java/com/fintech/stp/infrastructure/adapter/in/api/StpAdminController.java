@@ -6,7 +6,6 @@ import com.fintech.stp.infrastructure.adapter.in.api.dto.CompanyResponse;
 import com.fintech.stp.infrastructure.adapter.in.api.dto.KeyMetadataResponse;
 import com.fintech.stp.infrastructure.adapter.in.api.dto.RegisterCompanyRequest;
 import com.fintech.stp.infrastructure.adapter.in.api.dto.RegisterKeyRequest;
-import com.fintech.stp.infrastructure.adapter.in.api.dto.RegisterOrderingAccountRequest;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -60,20 +59,10 @@ class StpAdminController {
                 .map(CompanyResponse::from).toList());
     }
 
-    @PostMapping("/{companyId}/ordering-accounts")
-    @Operation(summary = "Registra una cuenta ordenante — valida el dígito verificador de la CLABE")
-    @ApiResponses({
-        @ApiResponse(responseCode = "201", description = "Cuenta registrada"),
-        @ApiResponse(responseCode = "422", description = "CLABE inválida")
-    })
-    @SecurityRequirement(name = "bearerAuth")
-    @ResponseStatus(HttpStatus.CREATED)
-    ResponseEntity<Void> addOrderingAccount(@PathVariable UUID companyId,
-                                            @Valid @RequestBody RegisterOrderingAccountRequest request) {
-        manageCompany.addOrderingAccount(companyId, request.clabe(), request.holderName(),
-                request.taxId(), request.accountType(), request.stpClientNumber(), request.defaultAccount());
-        return ResponseEntity.status(HttpStatus.CREATED).build();
-    }
+    // `POST /{companyId}/ordering-accounts` se retiró en BK-07b. La cuenta de la que sale el
+    // dinero la da de alta tesorería —`POST /api/v1/bank-accounts` en `banking`— que es quien la
+    // concilia. Dos puertas para lo mismo habrían permitido registrar aquí una cuenta que el ruteo
+    // no conoce, y que por tanto no cuadra nadie.
 
     @PostMapping("/{companyId}/keys")
     @Operation(summary = "Alta o rotación de llave. La respuesta NUNCA incluye material criptográfico")

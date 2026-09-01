@@ -6,6 +6,8 @@ import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.Collectio
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.CreditProductCreationRequestedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DisbursementCompletedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DisbursementFailedPayload;
+import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.CutoffClosedPayload;
+import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DisbursementReturnedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DispositionRequestedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.PaymentAppliedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.PaymentReturnedPayload;
@@ -192,6 +194,22 @@ public class KafkaConfig {
     disbursementFailedListenerContainerFactory(KafkaProperties properties) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, DisbursementFailedPayload>();
         factory.setConsumerFactory(jsonConsumerFactory(properties, DisbursementFailedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, CutoffClosedPayload>
+    cutoffClosedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, CutoffClosedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, CutoffClosedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, DisbursementReturnedPayload>
+    disbursementReturnedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, DisbursementReturnedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, DisbursementReturnedPayload.class));
         return factory;
     }
 }

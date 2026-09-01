@@ -39,7 +39,6 @@ stateDiagram-v2
 |---|---|
 | `DisbursementOrder` [root] | La orden de pago (monto, beneficiario, rail, estado, origen opaco). |
 | `Beneficiary` | Nombre, cuenta, tipo de cuenta ("40" CLABE/"3" tarjeta/"10" celular), RFC, institución. |
-| `RoutingRule` | Regla que elige proveedor por rail/empresa. Cambiar de proveedor es un `INSERT`. |
 | `Provider` | Proveedor de pago (STP…). |
 | `CompanyMapping` | Resuelve el `companyId` (tenant) — DB-07. |
 | `OperatingWindow` | Ventana operativa por rail — DB-05. |
@@ -62,12 +61,12 @@ stateDiagram-v2
 |---|---|---|
 | `GET` | `/{disbursementId}` · `/{id}/events` | Orden + su bitácora de transiciones. |
 | `POST` | `/{disbursementId}/cancel` | Cancelar (solo desde REQUESTED, con motivo). |
-| `GET`/`POST` | `/routing`, `/routing/{id}/enabled` | Reglas de ruteo (cambiar proveedor = INSERT). |
+| — | ~~`/routing`~~ | **Retirado (BK-08).** Por dónde sale el dinero lo decide `banking`; este servicio lo consulta por su puerto ACL. |
 | `GET`/`POST` | `/company-mappings` | Resolución de empresa (tenant). |
 
 ## 7. Persistencia y outbox
 
-Liquibase, schema `disbursement` (6 changesets): `company_mappings`, `routing_rules`, `disbursement_orders`, `disbursement_events`, y la tabla de **event-publication** (outbox de Spring Modulith — el evento sale en la misma transacción que el cambio de estado). El repositorio usa `FOR UPDATE SKIP LOCKED` (`@Lock(PESSIMISTIC_WRITE)` + hint `lock.timeout=-2`) para despachar en paralelo sin coordinador.
+Liquibase, schema `disbursement`: `company_mappings`, `disbursement_orders`, `disbursement_events`, y la tabla de **event-publication** (outbox de Spring Modulith — el evento sale en la misma transacción que el cambio de estado). El repositorio usa `FOR UPDATE SKIP LOCKED` (`@Lock(PESSIMISTIC_WRITE)` + hint `lock.timeout=-2`) para despachar en paralelo sin coordinador.
 
 ## 8. Decisiones de diseño
 

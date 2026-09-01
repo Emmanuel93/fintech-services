@@ -65,14 +65,17 @@ public class WalletClient {
                 .block();
     }
 
+    /**
+     * El tipo de disposición ya no se manda: lo decide el producto (BK-13). Se dejó de pasar en vez
+     * de mandarlo en duro, porque un valor que el receptor ignora acaba pareciendo un contrato.
+     */
     public void requestDisposition(UUID creditAccountId, String userId, BigDecimal amount,
-                                   String dispositionType, UUID beneficiaryPartyId,
-                                   Integer termPeriods) {
-        log.info("-> POST wallet-service /api/v1/wallet/{}/dispositions type={}", creditAccountId, dispositionType);
+                                   UUID beneficiaryPartyId, Integer termPeriods) {
+        log.info("-> POST wallet-service /api/v1/wallet/{}/dispositions", creditAccountId);
         webClient.post()
                 .uri("/api/v1/wallet/{creditAccountId}/dispositions", creditAccountId)
                 .header("X-User-Id", userId)
-                .bodyValue(new RequestDispositionPayload(amount, dispositionType, beneficiaryPartyId, null, termPeriods))
+                .bodyValue(new RequestDispositionPayload(amount, null, beneficiaryPartyId, null, termPeriods))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, resp ->
                         Mono.error(new ResponseStatusException(resp.statusCode(),

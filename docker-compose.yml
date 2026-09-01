@@ -444,6 +444,82 @@ services:
     networks:
       - fintech-network
 
+  # ─────────────────────────────────────────────────────────────────────────────
+  # D14: Closing & Cutoff — motor de cierres, cortes y conciliación a tres puntas.
+  # Deployment aparte a propósito: el barrido de todas las cuentas no debe compartir
+  # JVM ni pool con la API de cartera, que es lo que hoy lo hace competir con el backoffice.
+  # ─────────────────────────────────────────────────────────────────────────────
+  banking-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: banking-service
+    image: fintech/banking-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "banking-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+    ports:
+      - "${BANKING_PORT:-8104}:8080"
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  closing-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: closing-service
+    image: fintech/closing-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "closing-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      REDIS_HOST: redis
+      # Identidad del pod en el arrendamiento del candado. Con `docker compose up --scale`,
+      # cada réplica trae la suya y el reparto se reparte de verdad.
+      HOSTNAME: ${HOSTNAME:-closing-1}
+    ports:
+      - "${CLOSING_PORT:-8103}:8080"
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
   charges-service:
     build:
       context: .
@@ -1043,6 +1119,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      BANKING_BASE_URL: http://banking-service:8080
       DISBURSEMENT_DISPATCH_ENABLED: ${DISBURSEMENT_DISPATCH_ENABLED:-true}
     <<: *app-mem
     depends_on:
@@ -1083,8 +1160,15 @@ services:
       # ENFORCE | WARN | OFF — ver .env.example.
       STP_SIGNATURE_POLICY: ${STP_SIGNATURE_POLICY:-WARN}
       STP_CURRENT_KEK_ID: ${STP_CURRENT_KEK_ID:-local}
-      # Material de la KEK. NUNCA se commitea: va en .env, y en producción en el gestor de secretos.
-      STP_KEK_LOCAL: ${STP_KEK_LOCAL:-}
+      # Material de la KEK. En producción va en el gestor de secretos y esta variable llega de
+      # fuera; el default de abajo es SÓLO para el stack local y por eso está escrito a la vista:
+      # un valor publicado en el repositorio no es un secreto y no pretende serlo.
+      #
+      # Sin default, el conector no podía guardar ninguna llave de firma y el carril del dinero
+      # nunca podía completarse en local. El síntoma era una excepción al arrancar el sembrador
+      # del stub, cuatro pagos parados en PENDING, y nada que dijera que faltaba una variable.
+      # Mismo criterio que `JWT_SECRET` del configuration-service, que ya se resolvió así.
+      STP_KEK_LOCAL: ${STP_KEK_LOCAL:-c3RhY2stbG9jYWwtbm8tZXMtdW4tc2VjcmV0byEhISE=}
       STP_ACCOUNT_HASH_SALT: ${STP_ACCOUNT_HASH_SALT:-cambiar-en-cada-ambiente}
       STP_BASE_URL: ${STP_BASE_URL:-https://demo.stpmex.com:7024/speiws/rest/}
       STP_CONSULTA_BASE_URL: ${STP_CONSULTA_BASE_URL:-https://efws-dev.stpmex.com/efws/API/}

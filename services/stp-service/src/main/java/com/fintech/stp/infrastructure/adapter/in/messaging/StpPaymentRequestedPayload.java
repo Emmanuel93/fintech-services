@@ -27,5 +27,11 @@ public record StpPaymentRequestedPayload(
         Long numericReference,
         String paymentType,
         String correlationId,
+        /** La cuenta de la que sale el dinero, decidida por tesorería (BK-07). */
+        UUID orderingAccountId,
+        String orderingClabe,
+        String orderingHolderName,
+        String orderingTaxId,
+        String orderingClientRef,
         Instant occurredOn
 ) {}
