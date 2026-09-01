@@ -1,7 +1,6 @@
 package com.fintech.stp.application.port.in;
 
 import com.fintech.stp.domain.KeyPurpose;
-import com.fintech.stp.domain.OrderingAccount;
 import com.fintech.stp.domain.StpCompany;
 import com.fintech.stp.domain.StpCompanyKey;
 
@@ -18,8 +17,9 @@ public interface ManageCompanyUseCase {
 
     List<StpCompany> listCompanies();
 
-    OrderingAccount addOrderingAccount(UUID companyId, String clabe, String holderName, String taxId,
-                                       String accountType, String stpClientNumber, boolean defaultAccount);
+    // `addOrderingAccount` se retiró en BK-07b: dar de alta una cuenta de la que sale dinero es una
+    // decisión de tesorería, y vive en `banking` — que además la concilia. Una segunda puerta aquí
+    // habría permitido registrar una cuenta ordenante que el ruteo no conoce y que nadie cuadra.
 
     /**
      * Da de alta material criptográfico. El {@code materialBase64} se cifra dentro de esta llamada y

@@ -55,6 +55,26 @@ public class DisbursementOutcomeListener {
         settleDisbursement.onDisbursementFailed(dispositionId, event.failureCode(), event.failureReason());
     }
 
+    /**
+     * BK-16 · el banco receptor devolvió el dinero.
+     *
+     * <p>`disbursement.returned` se publicaba y <b>nadie lo escuchaba</b>: el cliente quedaba
+     * debiendo un dinero que el banco ya había devuelto, y sólo se descubría en la conciliación.
+     */
+    @KafkaListener(
+            topics = "${credit-portfolio.topics.disbursement-returned:disbursement.returned}",
+            groupId = "${spring.kafka.consumer.group-id}",
+            containerFactory = "disbursementReturnedListenerContainerFactory")
+    public void onDisbursementReturned(DisbursementReturnedPayload event) {
+        UUID dispositionId = dispositionId(event.sourceMetadata(), event.sourceReference());
+        if (dispositionId == null) {
+            log.warn("disbursement.returned sin dispositionId correlacionable disbursementId={} — ignorado",
+                    event.disbursementId());
+            return;
+        }
+        settleDisbursement.onDisbursementReturned(dispositionId, event.returnReason());
+    }
+
     /** Prefiere el eco explícito de metadata; cae a sourceReference (que este servicio pobló con el id). */
     private static UUID dispositionId(Map<String, String> metadata, String sourceReference) {
         String raw = metadata != null ? metadata.get("dispositionId") : null;

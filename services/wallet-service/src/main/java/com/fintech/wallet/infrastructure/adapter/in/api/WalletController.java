@@ -141,7 +141,7 @@ class WalletController {
         var obligorPartyId = UUID.fromString(auth.getName());
         var cmd = new RequestDispositionCommand(
                 creditAccountId, obligorPartyId,
-                req.amount(), req.dispositionType(),
+                req.amount(), null,   // el tipo lo decide el producto (BK-13)
                 req.beneficiaryPartyId(), req.payeeAccount(), req.termPeriods());
         requestDispositionUseCase.request(cmd);
         return ResponseEntity.accepted().build();

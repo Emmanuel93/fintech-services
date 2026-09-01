@@ -22,15 +22,15 @@ public class DispositionRequestedListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "dispositionRequestedListenerContainerFactory")
     public void onMessage(DispositionRequestedPayload payload) {
-        log.info("disposition-requested received creditAccountId={} amount={} type={}",
-                payload.creditAccountId(), payload.amount(), payload.dispositionType());
+        // El tipo que venga en el payload NO se registra ni se usa: lo decide el producto (BK-13).
+        log.info("disposition-requested recibida creditAccountId={} amount={}",
+                payload.creditAccountId(), payload.amount());
 
         processDispositionUseCase.process(new ProcessDispositionCommand(
                 payload.dispositionRequestId() != null ? payload.dispositionRequestId().toString() : null,
                 payload.creditAccountId(),
                 payload.obligorPartyId(),
                 payload.amount(),
-                payload.dispositionType(),
                 payload.beneficiaryPartyId(),
                 payload.payeeAccount(),
                 payload.termPeriods()));

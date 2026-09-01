@@ -34,6 +34,9 @@ public class StpPaymentRequestedListener {
                 event.paymentRequestId(), event.companyId(), event.amount(), event.currency(),
                 event.beneficiaryName(), event.beneficiaryAccount(), event.beneficiaryAccountType(),
                 event.beneficiaryTaxId(), event.beneficiaryInstitution(), event.concept(),
-                event.numericReference(), event.paymentType(), event.correlationId()));
+                event.numericReference(), event.paymentType(), event.correlationId(),
+                event.orderingAccountId(), event.orderingClabe(), event.orderingHolderName(),
+                event.orderingTaxId(),
+                event.orderingClientRef()));
     }
 }

@@ -1,7 +1,6 @@
 package com.fintech.wallet;
 
 import com.fintech.wallet.application.WithdrawFromWalletCommand;
-import com.fintech.wallet.application.port.out.WalletDispatchPort;
 import com.fintech.wallet.application.port.out.WalletEventPublisher;
 import com.fintech.wallet.application.port.out.WalletMovementRepository;
 import com.fintech.wallet.application.port.out.WalletViewRepository;
@@ -28,7 +27,6 @@ class WalletWithdrawalServiceTest {
     @Mock WalletViewRepository walletViewRepository;
     @Mock WalletWithdrawalRepository withdrawalRepository;
     @Mock WalletMovementRepository movementRepository;
-    @Mock WalletDispatchPort dispatchPort;
     @Mock WalletEventPublisher eventPublisher;
 
     WalletWithdrawalService service;
@@ -40,20 +38,19 @@ class WalletWithdrawalServiceTest {
     @BeforeEach
     void setUp() {
         service = new WalletWithdrawalService(
-                walletViewRepository, withdrawalRepository, movementRepository, dispatchPort, eventPublisher);
+                walletViewRepository, withdrawalRepository, movementRepository, eventPublisher);
         view = WalletView.createFromActivation(creditAccountId, obligorPartyId,
                 "REVOLVING_CREDIT", BigDecimal.ZERO, new BigDecimal("20000"));
         view.credit(new BigDecimal("5000")); // disposed and sitting in the wallet
     }
 
     @Test
-    void withdraw_sufficientBalance_debitsAtomicallyAndDispatches() {
+    void elRetiroSeSolicitaYQuedaPendienteDePago() {
         given(walletViewRepository.findByCreditAccountId(creditAccountId)).willReturn(Optional.of(view));
         // Débito atómico exitoso: 1 fila afectada.
         given(walletViewRepository.debitWalletBalanceIfEnough(creditAccountId, new BigDecimal("2000")))
                 .willReturn(1);
         given(withdrawalRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
-        given(dispatchPort.dispatch(any(), any(), any())).willReturn("WALLET-WD-STUB-ABCD1234");
 
         var cmd = new WithdrawFromWalletCommand(
                 creditAccountId, obligorPartyId, PaymentMethod.SPEI,
@@ -62,8 +59,10 @@ class WalletWithdrawalServiceTest {
 
         then(walletViewRepository).should().debitWalletBalanceIfEnough(creditAccountId, new BigDecimal("2000"));
         then(movementRepository).should().save(any());
-        assertThat(result.getStatus()).isEqualTo("SENT");
-        assertThat(result.getExternalRef()).isEqualTo("WALLET-WD-STUB-ABCD1234");
+        assertThat(result.getStatus()).isEqualTo("PENDING");
+        // BK-12 · aquí ya no sale dinero: `WalletDispatchPort` era un despachador PARALELO que se
+        // adelantaba al evento que `disbursement` ya consumía. El retiro queda pendiente de pago.
+        assertThat(result.getExternalRef()).isNull();
         then(eventPublisher).should().publishWithdrawalCompleted(any());
         then(eventPublisher).should().publishWalletSnapshotUpdated(view);
     }
@@ -84,7 +83,6 @@ class WalletWithdrawalServiceTest {
 
         then(withdrawalRepository).shouldHaveNoInteractions();
         then(movementRepository).shouldHaveNoInteractions();
-        then(dispatchPort).shouldHaveNoInteractions();
         then(eventPublisher).shouldHaveNoInteractions();
     }
 

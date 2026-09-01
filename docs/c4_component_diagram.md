@@ -4,12 +4,16 @@
 > **Alcance:** el **núcleo del ciclo de crédito** (D0–D8 + T1–T6).  
 > **Convención de flechas:** `──►` evento/comando · `- - ►` lectura de vista (query)
 >
-> ⚠️ **No están dibujados** seis servicios posteriores a este diagrama: **D9 Risk**,
-> **D10 sales-org**, **D11 disbursement**, **D12 stp**, **D13 beneficiary** (colocación B2B2C) y
-> **T7 Observability**, más `accounting` e `invoicing`. Se deja anotado en vez de dibujarlos a
-> medias: un diagrama incompleto que no lo declara es peor que uno acotado que sí.
+> ⚠️ **No están dibujados** los servicios posteriores a este diagrama: **D9 Risk**,
+> **D10 sales-org**, **D11 disbursement**, **D12 stp**, **D13 beneficiary** (colocación B2B2C),
+> **D14 closing** (cierres y cortes), **D15 banking** (tesorería y conciliación) y
+> **T7 Observability**. Se deja anotado en vez de dibujarlos a medias: un diagrama incompleto que no
+> lo declara es peor que uno acotado que sí.
 >
-> El inventario completo y al día está en la [tabla de servicios del README](../README.md#3-servicios-24--gateway--observabilidad--estado).
+> El aviso decía «seis» y enumeraba ocho. Ahora no lleva número: contarlos aquí garantiza que la
+> cuenta se quede vieja al siguiente servicio, y la lista ya dice cuántos son.
+>
+> El inventario completo y al día está en la [tabla de servicios del README](../README.md#3-servicios-26--gateway--observabilidad--estado).
 
 ---
 

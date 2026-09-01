@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -26,6 +27,10 @@ import java.util.UUID;
 public class CreditPortfolioClient {
 
     private static final Logger log = LoggerFactory.getLogger(CreditPortfolioClient.class);
+
+    /** Los programas viajan sin tipar: el BFF los reenvía tal cual los da el dominio. */
+    private static final ParameterizedTypeReference<Map<String, Object>> MAPA =
+            new ParameterizedTypeReference<>() {};
 
     private final WebClient webClient;
 
@@ -55,6 +60,58 @@ public class CreditPortfolioClient {
             if (!roles.isBlank()) h.set("X-Roles", roles);
             h.set("X-Channel", "BACKOFFICE");
         };
+    }
+
+    // ── Programas de apoyo por contingencia (BK-32, BK-33) ───────────────────
+    //
+    // El maker-checker lo resuelve el dominio a partir de `X-User-Id`, que `staffIdentity()` ya
+    // reenvía. El BFF no lo replica: dos sitios decidiendo quién puede autorizar es un sitio de más
+    // donde la separación de funciones puede aflojarse sin que nadie lo note.
+
+    public Map<String, Object> proponerPrograma(Object cuerpo) {
+        log.info("-> POST credit-portfolio-service /api/v1/portfolio/relief-programs");
+        return webClient.post()
+                .uri("/api/v1/portfolio/relief-programs")
+                .headers(staffIdentity())
+                .bodyValue(cuerpo)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("credit-portfolio-service", r))
+                .bodyToMono(MAPA)
+                .block();
+    }
+
+    /** Simula el padrón: a cuántas cuentas alcanza, sin mover un solo vencimiento. */
+    public Map<String, Object> padronDelPrograma(UUID programId) {
+        log.info("-> GET credit-portfolio-service /api/v1/portfolio/relief-programs/{}/padron", programId);
+        return webClient.get()
+                .uri("/api/v1/portfolio/relief-programs/{id}/padron", programId)
+                .headers(staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("credit-portfolio-service", r))
+                .bodyToMono(MAPA)
+                .block();
+    }
+
+    public Map<String, Object> autorizarPrograma(UUID programId) {
+        log.info("-> POST credit-portfolio-service /api/v1/portfolio/relief-programs/{}/approve", programId);
+        return webClient.post()
+                .uri("/api/v1/portfolio/relief-programs/{id}/approve", programId)
+                .headers(staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("credit-portfolio-service", r))
+                .bodyToMono(MAPA)
+                .block();
+    }
+
+    public Map<String, Object> otorgarPrograma(UUID programId) {
+        log.info("-> POST credit-portfolio-service /api/v1/portfolio/relief-programs/{}/grant", programId);
+        return webClient.post()
+                .uri("/api/v1/portfolio/relief-programs/{id}/grant", programId)
+                .headers(staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("credit-portfolio-service", r))
+                .bodyToMono(MAPA)
+                .block();
     }
 
     public List<CreditAccountResponse> listByParty(UUID partyId) {

@@ -38,5 +38,19 @@ public record CreateCreditAccountCommand(
          */
         java.math.BigDecimal vatRate,
         String beneficiaryName,
-        String beneficiaryTaxId
+        String beneficiaryTaxId,
+        /**
+         * Días de BNPL que el cliente <b>pidió</b> al originar, o {@code null} si no pidió ninguno.
+         *
+         * <p>BNPL es una decisión del alta, no una propiedad del producto. Lo que el producto trae
+         * es el <b>tope</b> ({@code bnplMaxDeferralDays}), y aquí viaja lo solicitado dentro de ese
+         * tope. Sin esta distinción, cartera no tenía forma de saber si el aplazamiento se había
+         * pedido, y aplicaba el tope a todo el mundo: <b>ningún</b> préstamo personal empezaba a
+         * pagar cuando debía.
+         *
+         * <p>Hoy llega nulo porque originación todavía no lo captura. Que el campo exista y sea
+         * nulo es la diferencia entre «nadie lo pidió» y «no sabemos», y sólo el primero permite
+         * no aplicarlo.
+         */
+        Integer bnplDeferralDays
 ) {}

@@ -10,5 +10,10 @@
     <include file="db/changelog/charges/003-create-charge-records.sql"  relativeToChangelogFile="false"/>
     <include file="db/changelog/charges/004-create-event-publication.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/charges/005-create-account-balance-snapshots.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/charges/006-idempotencia-devengo.sql" relativeToChangelogFile="false"/>
+
+    <include file="db/changelog/charges/007-mora-sobre-capital-vencido.sql" relativeToChangelogFile="false"/>
+
+    <include file="db/changelog/charges/008-bnpl-fecha-de-arranque.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

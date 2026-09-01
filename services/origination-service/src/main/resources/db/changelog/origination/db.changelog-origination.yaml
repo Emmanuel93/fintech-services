@@ -133,3 +133,21 @@ databaseChangeLog:
             path: db/changelog/origination/015-document-review.sql
             relativeToChangelogFile: false
             splitStatements: true
+
+  - changeSet:
+      id: 016-tarjeta-y-microcredito
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/016-tarjeta-y-microcredito.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 017-bnpl-al-firmar
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/017-bnpl-al-firmar.sql
+            relativeToChangelogFile: false
+            splitStatements: true

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <include file="db/changelog/banking/001-create-schema.sql"          relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/002-create-bank-accounts.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/003-create-payout-routes.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/004-create-reconciliation.sql"  relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/005-seed-demo.sql"              relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/006-internal-movements.sql"     relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/007-movement-trace.sql"         relativeToChangelogFile="false"/>
+
+</databaseChangeLog>

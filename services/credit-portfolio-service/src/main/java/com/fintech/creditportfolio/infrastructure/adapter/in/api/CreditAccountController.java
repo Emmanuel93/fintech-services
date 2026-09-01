@@ -1,6 +1,8 @@
 package com.fintech.creditportfolio.infrastructure.adapter.in.api;
 
+import com.fintech.creditportfolio.application.port.in.DeferDispositionUseCase;
 import com.fintech.creditportfolio.application.port.in.FindCreditAccountUseCase;
+import com.fintech.creditportfolio.application.port.in.SkipPaymentUseCase;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.OriginUnitStat;
 import com.fintech.creditportfolio.application.port.out.PortfolioStat;
@@ -41,15 +43,21 @@ class CreditAccountController {
     /** Dimensiones válidas de agregación para /stats. */
     private static final Set<String> STAT_GROUPINGS = Set.of("status", "productType", "dpdBucket");
 
+    private final DeferDispositionUseCase deferUseCase;
+    private final SkipPaymentUseCase skipUseCase;
     private final FindCreditAccountUseCase findUseCase;
     private final CreditAccountRepository creditAccountRepository;
     private final DispositionRepository dispositionRepository;
     private final InstallmentRepository installmentRepository;
 
     CreditAccountController(FindCreditAccountUseCase findUseCase,
+                             DeferDispositionUseCase deferUseCase,
+                             SkipPaymentUseCase skipUseCase,
                              CreditAccountRepository creditAccountRepository,
                              DispositionRepository dispositionRepository,
                              InstallmentRepository installmentRepository) {
+        this.deferUseCase             = deferUseCase;
+        this.skipUseCase              = skipUseCase;
         this.findUseCase              = findUseCase;
         this.creditAccountRepository  = creditAccountRepository;
         this.dispositionRepository    = dispositionRepository;
@@ -288,5 +296,41 @@ class CreditAccountController {
                 ? Sort.Direction.ASC
                 : Sort.Direction.DESC;
         return Sort.by(dir, field);
+    }
+
+    /**
+     * El titular difiere una compra ya hecha: sale del exigible del corte y pasa a plazos.
+     *
+     * <p>{@code 202} y no {@code 200}: el plan se genera aquí, pero la reversa del interés que la
+     * compra devengó como revolvente la aplica {@code charges} al recibir el hecho. Decir
+     * {@code 200} afirmaría que todo terminó.
+     *
+     * <p>Fuera de ventana, plazo inválido o producto que no difiere → {@code 409} con motivo.
+     */
+    @PostMapping("/{creditAccountId}/dispositions/{dispositionId}/defer")
+    @Operation(summary = "Diferir una compra revolvente a plazos")
+    ResponseEntity<Void> diferir(@PathVariable UUID creditAccountId,
+                                 @PathVariable UUID dispositionId,
+                                 @RequestBody(required = false) DeferRequest req) {
+        deferUseCase.diferir(new DeferDispositionUseCase.DiferirCompra(
+                creditAccountId, dispositionId, req != null ? req.termPeriods() : null));
+        return ResponseEntity.accepted().build();
+    }
+
+    /** Nulo o sin plazo cae al plazo por defecto del producto — 3, salvo que diga otra cosa. */
+    record DeferRequest(Integer termPeriods) {}
+
+    /**
+     * El cliente salta un pago: el compromiso se corre y no genera mora.
+     *
+     * <p>Es una opción <b>suya</b>, no del backoffice — por eso vive aquí y no en el módulo de
+     * programas de apoyo, que otorga la institución.
+     */
+    @PostMapping("/{creditAccountId}/installments/{installmentId}/skip")
+    @Operation(summary = "Saltar un pago")
+    ResponseEntity<Void> saltarPago(@PathVariable UUID creditAccountId,
+                                    @PathVariable UUID installmentId) {
+        skipUseCase.saltar(new SkipPaymentUseCase.SaltarPago(creditAccountId, installmentId));
+        return ResponseEntity.accepted().build();
     }
 }

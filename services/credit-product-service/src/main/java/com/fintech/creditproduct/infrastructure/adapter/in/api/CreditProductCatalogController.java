@@ -202,4 +202,20 @@ class CreditProductCatalogController {
                 })
                 .toList();
     }
+
+    /**
+     * Re-publica la configuración de un producto activo, sin cambiarlo.
+     *
+     * <p>Para cuando el catálogo se corrigió por fuera de esta API —un changeset de seed, un ajuste
+     * directo— y los consumidores conservan la copia con la que se activó. Sin esto, un cambio de
+     * configuración no llega nunca y el síntoma aparece lejos: el producto dice una cosa y cartera
+     * se comporta según otra.
+     */
+    // La autorización va en `SecurityConfig` como el resto del controlador: todo POST de este
+    // catálogo exige ROLE_ADMIN, y anotarlo aquí además sería una segunda fuente de la misma regla.
+    @PostMapping("/{productCode}/republish")
+    public ResponseEntity<Void> republish(@PathVariable String productCode) {
+        service.republishConfig(productCode);
+        return ResponseEntity.accepted().build();
+    }
 }

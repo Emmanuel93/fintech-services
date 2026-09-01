@@ -15,4 +15,6 @@
     <include file="db/changelog/accounting/008-order-accounts.sql"          relativeToChangelogFile="false"/>
     <include file="db/changelog/accounting/009-opening-balance.sql"        relativeToChangelogFile="false"/>
     <include file="db/changelog/accounting/010-writeoff-derecognition.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/011-bank-suspense.sql"          relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/012-disposition-always-to-bank.sql" relativeToChangelogFile="false"/>
 </databaseChangeLog>

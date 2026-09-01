@@ -1,7 +1,6 @@
 package com.fintech.disbursement.application.port.out;
 
 import com.fintech.disbursement.domain.DisbursementOrder;
-import com.fintech.disbursement.domain.Provider;
 
 /**
  * Salida hacia el conector del proveedor.
@@ -13,5 +12,10 @@ import com.fintech.disbursement.domain.Provider;
  */
 public interface ProviderDispatchPort {
 
-    void dispatch(DisbursementOrder order, Provider provider);
+    /**
+     * @param route la decisión de tesorería: proveedor <b>y cuenta ordenante</b>. La cuenta viaja
+     *              hasta el conector porque es quien la necesita para armar la cadena original;
+     *              resolverla allá contra una copia del catálogo es de donde venimos
+     */
+    void dispatch(DisbursementOrder order, PayoutRouteResolverPort.PayoutRoute route);
 }

@@ -5,8 +5,6 @@ import com.fintech.disbursement.domain.Provider;
 import com.fintech.disbursement.domain.Rail;
 import com.fintech.disbursement.infrastructure.adapter.in.api.dto.CompanyMappingRequest;
 import com.fintech.disbursement.infrastructure.adapter.in.api.dto.CompanyMappingResponse;
-import com.fintech.disbursement.infrastructure.adapter.in.api.dto.RoutingRuleRequest;
-import com.fintech.disbursement.infrastructure.adapter.in.api.dto.RoutingRuleResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -40,27 +38,8 @@ public class DisbursementRoutingController {
         this.manageRouting = manageRouting;
     }
 
-    @PostMapping("/routing")
-    @Operation(summary = "Da de alta una regla de encaminamiento")
-    public ResponseEntity<RoutingRuleResponse> createRule(@Valid @RequestBody RoutingRuleRequest request) {
-        var rule = manageRouting.createRule(request.companyId(), parse(Rail.class, request.rail()),
-                parse(Provider.class, request.provider()), request.minAmount(), request.maxAmount(),
-                request.priority());
-        return ResponseEntity.status(HttpStatus.CREATED).body(RoutingRuleResponse.from(rule));
-    }
 
-    @PostMapping("/routing/{routingRuleId}/enabled")
-    @Operation(summary = "Habilita o deshabilita una regla")
-    public RoutingRuleResponse setEnabled(@PathVariable UUID routingRuleId,
-                                          @RequestParam boolean enabled) {
-        return RoutingRuleResponse.from(manageRouting.setRuleEnabled(routingRuleId, enabled));
-    }
 
-    @GetMapping("/routing")
-    @Operation(summary = "Lista las reglas de encaminamiento")
-    public List<RoutingRuleResponse> listRules() {
-        return manageRouting.listRules().stream().map(RoutingRuleResponse::from).toList();
-    }
 
     /**
      * Alta o corrección. Devuelve {@code 200 OK} y no {@code 201}: la operación es un upsert, y

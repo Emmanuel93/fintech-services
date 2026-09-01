@@ -17,6 +17,7 @@ public class KafkaPartyEventPublisher implements PartyEventPublisher {
     private static final String TOPIC_FISCAL_PROFILE = "party.fiscal-profile-updated";
     private static final String TOPIC_ROLE_GRANTED = "party.role-granted";
     private static final String TOPIC_ROLE_REVOKED = "party.role-revoked";
+    private static final String TOPIC_EXECUTIVE_ASSIGNED = "party.executive-assigned";
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
@@ -80,4 +81,32 @@ public class KafkaPartyEventPublisher implements PartyEventPublisher {
                     }
                 });
     }
+
+    @Override
+    public void publishExecutiveAssigned(UUID partyId, UUID executiveId, String executiveName, String clientName) {
+        ExecutiveAssignedPayload payload = new ExecutiveAssignedPayload(
+                partyId, executiveId, executiveName, clientName, Instant.now());
+
+        // La clave es el ejecutivo y no el cliente: quien consuma esto va a agrupar por ejecutivo
+        // —su cartera, su bandeja, su aviso— y así todo lo suyo cae en la misma partición y en orden.
+        kafkaTemplate.send(TOPIC_EXECUTIVE_ASSIGNED, executiveId.toString(), payload)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        log.error("Failed to publish ExecutiveAssigned partyId={} executiveId={}",
+                                partyId, executiveId, ex);
+                    } else {
+                        log.debug("ExecutiveAssigned published partyId={} executiveId={}", partyId, executiveId);
+                    }
+                });
+    }
+
+    /**
+     * El hecho, con lo que hace falta para entenderlo sin volver a preguntar.
+     *
+     * <p>Lleva los nombres además de los ids a propósito: quien reaccione —un aviso, una bitácora—
+     * necesita decir <em>quién</em> y <em>a quién</em>, y obligarle a consultar party para eso le
+     * añadiría una dependencia síncrona a cambio de dos cadenas que aquí ya están en la mano.
+     */
+    record ExecutiveAssignedPayload(UUID partyId, UUID executiveId, String executiveName,
+                                    String clientName, Instant occurredOn) {}
 }

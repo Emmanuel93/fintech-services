@@ -1,23 +1,19 @@
 package com.fintech.disbursement.application.port.in;
 
 import com.fintech.disbursement.domain.CompanyMapping;
-import com.fintech.disbursement.domain.Provider;
-import com.fintech.disbursement.domain.Rail;
-import com.fintech.disbursement.domain.RoutingRule;
 
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.UUID;
 
-/** Cambiar de proveedor es dato, no despliegue (DC-7). */
+/**
+ * Resolver la empresa a partir de la procedencia (DB-07).
+ *
+ * <p><b>Las reglas de ruteo ya no viven aquí.</b> Elegir proveedor y cuenta es una decisión de
+ * tesorería, y tenerla partida en dos —el proveedor en este servicio, la cuenta en el conector—
+ * era lo que dejaba que el dinero saliera por una cuenta que nadie eligió. La configuración está
+ * en {@code banking}; este servicio la consulta por su puerto ACL.
+ */
 public interface ManageRoutingUseCase {
-
-    RoutingRule createRule(UUID companyId, Rail rail, Provider provider,
-                           BigDecimal minAmount, BigDecimal maxAmount, int priority);
-
-    RoutingRule setRuleEnabled(UUID routingRuleId, boolean enabled);
-
-    List<RoutingRule> listRules();
 
     CompanyMapping mapCompany(String sourceSystem, String sourceKey, UUID companyId);
 

@@ -17,4 +17,6 @@
     <include file="db/changelog/notifications/011-add-read-state.sql"                relativeToChangelogFile="false"/>
     <include file="db/changelog/notifications/012-abstract-recipient.sql"    relativeToChangelogFile="false"/>
     <include file="db/changelog/notifications/013-seed-backoffice-policies.sql"  relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/014-aviso-de-asignacion-singular.sql" relativeToChangelogFile="false"/>
+
 </databaseChangeLog>

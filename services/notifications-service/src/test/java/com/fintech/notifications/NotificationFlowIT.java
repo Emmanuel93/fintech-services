@@ -6,10 +6,14 @@ import com.fintech.notifications.application.port.out.NotificationRecordReposito
 import com.fintech.notifications.application.port.out.PartyContactDirectoryRepository;
 import com.fintech.notifications.domain.EventType;
 import com.fintech.notifications.domain.NotificationChannel;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.kafka.config.KafkaListenerEndpointRegistry;
 import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.listener.MessageListenerContainer;
+import org.springframework.kafka.test.utils.ContainerTestUtils;
 import org.springframework.kafka.test.context.EmbeddedKafka;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -62,6 +66,28 @@ class NotificationFlowIT {
     @Autowired CreditAccountProgressRepository progressRepository;
     @Autowired NotificationRecordRepository recordRepository;
     @Autowired KafkaTemplate<String, Object> kafkaTemplate;
+    @Autowired KafkaListenerEndpointRegistry listenerRegistry;
+
+    /**
+     * Esperar a que los consumidores tengan particiones ANTES de publicar nada.
+     *
+     * <p>Sin esto, el presupuesto de los {@code await} se lo comía el rebalanceo: la prueba
+     * publicaba recién arrancado el contexto, cuando los contenedores todavía no se habían unido al
+     * grupo, y los veinte segundos contaban desde ahí. Con la suite completa del monorepo compitiendo
+     * por la máquina, unirse tarda más y la prueba fallaba <b>sin que nada del código cambiara</b>.
+     *
+     * <p>No se pierde ningún mensaje —el servicio lee {@code earliest}—, así que subir el número
+     * habría tapado el síntoma con otro número arbitrario. Lo que hacía falta era sacar de la
+     * medición lo que no se está midiendo: una prueba que depende de cuánta máquina sobra no
+     * distingue «roto» de «ocupado», y eso enseña a ignorar los rojos.
+     */
+    @BeforeEach
+    void esperarQueLosConsumidoresTenganParticiones() {
+        for (MessageListenerContainer container : listenerRegistry.getListenerContainers()) {
+            String[] topics = container.getContainerProperties().getTopics();
+            ContainerTestUtils.waitForAssignment(container, topics == null ? 1 : topics.length);
+        }
+    }
 
     @Test
     void flow_offerToActivationToSettlement_dispatchesTheRightNotifications() {

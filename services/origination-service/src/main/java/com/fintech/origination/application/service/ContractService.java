@@ -77,7 +77,7 @@ public class ContractService implements GenerateContractUseCase, SignContractUse
         String docRef = cmd.documentRef() != null ? cmd.documentRef()
                 : "DOC-" + app.getApplicationId().toString().substring(0, 8).toUpperCase();
 
-        app.signContract(cmd.clabeAccount(), docRef);
+        app.signContract(cmd.clabeAccount(), docRef, cmd.bnplDeferralDays());
         CreditApplication saved = applicationRepository.save(app);
 
         log.info("Contract signed applicationId={} contractNumber={}",
@@ -150,7 +150,8 @@ public class ContractService implements GenerateContractUseCase, SignContractUse
                 app.getRiskLevel(),
                 app.getPromoterCode(),
                 obligorName,
-                obligorTaxId);
+                obligorTaxId,
+                app.getContract().getBnplDeferralDays());
     }
 
     private static String fullName(Prospect p) {

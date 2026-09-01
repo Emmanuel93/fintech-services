@@ -164,6 +164,22 @@ public class PartyService {
         party.assignExecutive(executiveId, executiveName);
         Party saved = partyRepository.save(party);
         log.info("Party {} assigned to executive {} ({})", partyId, executiveId, executiveName);
+
+        // Se publica el HECHO, no una petición de aviso: party no sabe quién va a reaccionar.
+        //
+        // Después de guardar y sin atarlo al resultado: si la publicación falla, el cliente ya
+        // quedó asignado, que es lo que importa. Un hecho no publicado se nota mucho menos que una
+        // asignación perdida, y hacer que la transacción dependa del bus le añadiría a la operación
+        // un modo de fallo a cambio de nada.
+        try {
+            eventPublisher.publishExecutiveAssigned(partyId, executiveId, executiveName, nombreDe(saved));
+        } catch (RuntimeException ex) {
+            // El envío es asíncrono y sus fallos llegan por callback, pero un error al construir o
+            // serializar el mensaje sí revienta aquí. Sin este catch, el comentario de arriba sería
+            // una promesa que el código no cumple — y lo destapó la prueba que lo afirmaba.
+            log.error("La asignación quedó hecha pero el hecho no se pudo publicar partyId={} executiveId={}",
+                    partyId, executiveId, ex);
+        }
         return saved;
     }
 
@@ -179,5 +195,15 @@ public class PartyService {
 
     public List<KycVerification> findKycVerifications(UUID partyId) {
         return kycRepository.findAllByPartyId(partyId);
+    }
+
+    /** El nombre con el que el ejecutivo reconoce al cliente en su campana. */
+    private static String nombreDe(Party p) {
+        String nombre = java.util.stream.Stream.of(p.getFirstName(), p.getLastName1(), p.getLastName2())
+                .filter(x -> x != null && !x.isBlank())
+                .reduce((a, b) -> a + " " + b)
+                .orElse(null);
+        // Una persona moral no tiene nombre de pila: su razón social vive en `taxName`.
+        return nombre != null ? nombre : p.getTaxName();
     }
 }

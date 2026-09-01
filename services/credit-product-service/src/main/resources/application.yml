@@ -73,10 +73,6 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
-fintech:
-  credit-product:
-    jwt-secret: ${JWT_SECRET:}
-
 kafka:
   topics:
     product-activated: product-catalog.product-activated

@@ -41,6 +41,20 @@ public class ProductConfigVersionService {
                 ? capabilities
                 : Capabilities.degradedFor(behavior, null);
 
+        // La configuración se guarda igual, pero no en silencio.
+        //
+        // Cartera no es quien autoriza un producto y rechazarlo aquí dejaría al catálogo y a la
+        // cartera discrepando —que es justo el problema que ya costó una tarde—. Lo que sí puede
+        // hacer es decirlo: una combinación contradictoria no rompe nada, sólo miente sobre lo que
+        // el producto hace, y el síntoma aparece lejos y sin relación aparente. Con el WARN, el
+        // día que alguien pregunte «por qué este producto no deja saltar pagos si el catálogo dice
+        // que sí», la respuesta está en el log del arranque y no en una tarde de bisección.
+        if (caps.opciones() != null) {
+            for (String mal : caps.opciones().incoherencias()) {
+                log.warn("Configuración contradictoria en {} v{}: {}", productCode, productVersion, mal);
+            }
+        }
+
         Optional<ProductConfigVersion> existing =
                 repository.findByCodeAndVersion(productCode, productVersion);
 

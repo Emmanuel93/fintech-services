@@ -25,5 +25,15 @@ public record PaymentOrderRequestedPayload(
         Long numericReference,
         String paymentType,
         String correlationId,
+        /**
+         * La cuenta de la que sale el dinero, decidida por <b>tesorería</b>. Viaja en el mensaje y
+         * no como un id a resolver: si fuera un id, el conector necesitaría su propia copia del
+         * catálogo de cuentas propias — que es exactamente de donde venimos.
+         */
+        UUID orderingAccountId,
+        String orderingClabe,
+        String orderingHolderName,
+        String orderingTaxId,
+        String orderingClientRef,
         Instant occurredOn
 ) {}

@@ -2,13 +2,11 @@ package com.fintech.stp.application.service;
 
 import com.fintech.stp.application.port.in.ManageCompanyUseCase;
 import com.fintech.stp.application.port.out.KeyMaterialCipher;
-import com.fintech.stp.application.port.out.OrderingAccountRepository;
 import com.fintech.stp.application.port.out.SigningKeyProvider;
 import com.fintech.stp.application.port.out.StpCompanyKeyRepository;
 import com.fintech.stp.application.port.out.StpCompanyRepository;
 import com.fintech.stp.domain.CompanyNotFoundException;
 import com.fintech.stp.domain.KeyPurpose;
-import com.fintech.stp.domain.OrderingAccount;
 import com.fintech.stp.domain.StpCompany;
 import com.fintech.stp.domain.StpCompanyKey;
 import org.slf4j.Logger;
@@ -33,18 +31,15 @@ public class CompanyAdminService implements ManageCompanyUseCase {
     private static final Logger log = LoggerFactory.getLogger(CompanyAdminService.class);
 
     private final StpCompanyRepository companyRepository;
-    private final OrderingAccountRepository orderingAccountRepository;
     private final StpCompanyKeyRepository keyRepository;
     private final KeyMaterialCipher cipher;
     private final SigningKeyProvider signingKeyProvider;
 
     public CompanyAdminService(StpCompanyRepository companyRepository,
-                               OrderingAccountRepository orderingAccountRepository,
                                StpCompanyKeyRepository keyRepository,
                                KeyMaterialCipher cipher,
                                SigningKeyProvider signingKeyProvider) {
         this.companyRepository = companyRepository;
-        this.orderingAccountRepository = orderingAccountRepository;
         this.keyRepository = keyRepository;
         this.cipher = cipher;
         this.signingKeyProvider = signingKeyProvider;
@@ -68,29 +63,10 @@ public class CompanyAdminService implements ManageCompanyUseCase {
         return companyRepository.findAll();
     }
 
-    @Override
-    public OrderingAccount addOrderingAccount(UUID companyId, String clabe, String holderName, String taxId,
-                                              String accountType, String stpClientNumber, boolean defaultAccount) {
-        requireCompany(companyId);
-
-        // Mismo motivo que en registerKey: hay un índice único parcial de "una cuenta default activa
-        // por empresa". Sin desmarcar la anterior (y sin flush), cambiar la cuenta ordenante —una
-        // operación normal— devolvía un 500 de Postgres.
-        if (defaultAccount) {
-            orderingAccountRepository.findDefaultByCompanyId(companyId).ifPresent(previous -> {
-                previous.clearDefault();
-                orderingAccountRepository.saveAndFlush(previous);
-                log.info("Previous default ordering account cleared companyId={} accountId={}",
-                        companyId, previous.getOrderingAccountId());
-            });
-        }
-
-        OrderingAccount account = orderingAccountRepository.save(OrderingAccount.create(
-                companyId, clabe, holderName, taxId, accountType, stpClientNumber, defaultAccount));
-        log.info("Ordering account added companyId={} clabe={} default={}",
-                companyId, AccountHasher.mask(clabe), defaultAccount);
-        return account;
-    }
+    // `addOrderingAccount` se retiró en BK-07b. Dar de alta una cuenta de la que sale dinero es
+    // una decisión de TESORERÍA, no del conector: vive en `banking`, que además la concilia. Dejar
+    // aquí una segunda puerta habría permitido registrar una cuenta ordenante que el ruteo no
+    // conoce — y que por tanto nadie cuadra.
 
     @Override
     public StpCompanyKey registerKey(UUID companyId, String alias, KeyPurpose purpose, String materialBase64,

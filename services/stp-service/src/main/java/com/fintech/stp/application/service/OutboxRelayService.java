@@ -2,7 +2,6 @@ package com.fintech.stp.application.service;
 
 import com.fintech.stp.application.StpProperties;
 import com.fintech.stp.application.port.in.RelayOutboxUseCase;
-import com.fintech.stp.application.port.out.OrderingAccountRepository;
 import com.fintech.stp.application.port.out.OutboxMessageRepository;
 import com.fintech.stp.application.port.out.SigningKeyProvider;
 import com.fintech.stp.application.port.out.StpCompanyRepository;
@@ -11,7 +10,6 @@ import com.fintech.stp.application.port.out.StpGatewayPort;
 import com.fintech.stp.application.port.out.StpPaymentOrderEventRepository;
 import com.fintech.stp.application.port.out.StpPaymentOrderRepository;
 import com.fintech.stp.domain.BanxicoResponseCode;
-import com.fintech.stp.domain.OrderingAccount;
 import com.fintech.stp.domain.OutboxMessage;
 import com.fintech.stp.domain.StpCompany;
 import com.fintech.stp.domain.StpCompanyKey;
@@ -60,7 +58,6 @@ public class OutboxRelayService implements RelayOutboxUseCase {
     private final StpPaymentOrderRepository orderRepository;
     private final StpPaymentOrderEventRepository eventRepository;
     private final StpCompanyRepository companyRepository;
-    private final OrderingAccountRepository orderingAccountRepository;
     private final SigningKeyProvider signingKeyProvider;
     private final StpGatewayPort gateway;
     private final StpEventPublisher eventPublisher;
@@ -71,7 +68,6 @@ public class OutboxRelayService implements RelayOutboxUseCase {
                               StpPaymentOrderRepository orderRepository,
                               StpPaymentOrderEventRepository eventRepository,
                               StpCompanyRepository companyRepository,
-                              OrderingAccountRepository orderingAccountRepository,
                               SigningKeyProvider signingKeyProvider,
                               StpGatewayPort gateway,
                               StpEventPublisher eventPublisher,
@@ -81,7 +77,6 @@ public class OutboxRelayService implements RelayOutboxUseCase {
         this.orderRepository = orderRepository;
         this.eventRepository = eventRepository;
         this.companyRepository = companyRepository;
-        this.orderingAccountRepository = orderingAccountRepository;
         this.signingKeyProvider = signingKeyProvider;
         this.gateway = gateway;
         this.eventPublisher = eventPublisher;
@@ -146,7 +141,12 @@ public class OutboxRelayService implements RelayOutboxUseCase {
         }
 
         StpCompany company = companyRepository.findById(order.getCompanyId()).orElseThrow();
-        OrderingAccount ordering = orderingAccountRepository.findById(order.getOrderingAccountId()).orElseThrow();
+        // Se firma con la cuenta que la ORDEN congeló, y ya no hay otra opción (BK-07b).
+        //
+        // Releerla por id abría una ventana real: entre registrar y firmar pueden pasar minutos, y
+        // cambiar la cuenta ordenante de la empresa en ese hueco alteraba la cadena original de una
+        // orden ya registrada. El id además viene de `banking` y no resuelve contra nada de aquí.
+        CuentaOrdenante ordering = CuentaOrdenante.deLaOrdenRegistrada(order);
         StpCompanyKey keyMetadata = signingKeyProvider.activeKeyMetadata(
                 company.getCompanyId(), com.fintech.stp.domain.KeyPurpose.SIGNING);
 
@@ -253,7 +253,7 @@ public class OutboxRelayService implements RelayOutboxUseCase {
         outboxRepository.save(message);
     }
 
-    private OrdenPagoFirma buildFirma(StpPaymentOrder order, StpCompany company, OrderingAccount ordering) {
+    private OrdenPagoFirma buildFirma(StpPaymentOrder order, StpCompany company, CuentaOrdenante ordering) {
         return OrdenPagoFirma.builder()
                 .institucionContraparte(order.getBeneficiaryInstitution())
                 .empresa(company.getStpEmpresa())
@@ -278,7 +278,7 @@ public class OutboxRelayService implements RelayOutboxUseCase {
     }
 
     private StpGatewayPort.PaymentOrderRequest toRequest(StpPaymentOrder order, StpCompany company,
-                                                          OrderingAccount ordering, OrdenPagoFirma firma,
+                                                          CuentaOrdenante ordering, OrdenPagoFirma firma,
                                                           String sello) {
         return new StpGatewayPort.PaymentOrderRequest(
                 order.getTrackingKey(), company.getStpEmpresa(), order.getBusinessDate(),

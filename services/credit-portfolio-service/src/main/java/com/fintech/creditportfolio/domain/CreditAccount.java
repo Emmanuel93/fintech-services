@@ -369,6 +369,27 @@ public class CreditAccount {
         touch();
     }
 
+    /**
+     * El dinero no llegó a su destino: se deshace la disposición.
+     *
+     * <p>El saldo sube cuando la disposición se autoriza, no cuando el banco confirma —
+     * deliberadamente: el compromiso existe desde que se autoriza. Pero si el pago falla o el banco
+     * receptor lo devuelve, ese compromiso desaparece y el saldo tiene que volver. Sin esto, un
+     * rechazo del proveedor dejaba al cliente debiendo dinero que nunca recibió.
+     *
+     * <p>{@code guardActive()} no aplica: una cuenta puede haberse suspendido entre la autorización
+     * y la devolución, y negarse a deshacer entonces dejaría la deuda fantasma justo en la cuenta
+     * que más lo notaría.
+     */
+    public void revertDisposition(BigDecimal amount) {
+        this.principalBalance = nonNegative(principalBalance.subtract(amount));
+        if (isRevolving() && creditLimit != null) {
+            this.availableCredit = (availableCredit != null ? availableCredit : BigDecimal.ZERO)
+                    .add(amount).min(creditLimit);
+        }
+        touch();
+    }
+
     /** NightlyJob → sets daysDelinquent from the oldest unpaid overdue installment. */
     public void updateDelinquency(int days) {
         this.daysDelinquent = Math.max(0, days);

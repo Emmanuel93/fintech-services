@@ -36,6 +36,8 @@ class CreditAccountControllerTest {
     @Autowired MockMvc mockMvc;
 
     @MockitoBean FindCreditAccountUseCase findUseCase;
+    @MockitoBean com.fintech.creditportfolio.application.port.in.DeferDispositionUseCase deferUseCase;
+    @MockitoBean com.fintech.creditportfolio.application.port.in.SkipPaymentUseCase skipUseCase;
     @MockitoBean CreditAccountRepository creditAccountRepository;
     @MockitoBean DispositionRepository dispositionRepository;
     @MockitoBean InstallmentRepository installmentRepository;

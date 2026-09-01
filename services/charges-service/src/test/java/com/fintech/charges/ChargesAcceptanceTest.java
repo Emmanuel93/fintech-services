@@ -60,7 +60,8 @@ class ChargesAcceptanceTest {
                 UUID.randomUUID().toString(), accountId, UUID.randomUUID(), obligorId,
                 "PERSONAL_LOAN", "AMORTIZING",
                 new BigDecimal("0.24"), new BigDecimal("0.36"), new BigDecimal("0.02"),
-                new BigDecimal("10000"), new BigDecimal("10000"), "A", Instant.now());
+                new BigDecimal("10000"), new BigDecimal("10000"), "A", Instant.now(),
+                null);   // sin BNPL: devenga desde el alta
 
         KafkaTemplate<String, Object> producer = buildProducer(broker.getBrokersAsString());
         producer.send("credit-portfolio.credit-account-activated", accountId.toString(), payload);

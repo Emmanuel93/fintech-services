@@ -62,7 +62,22 @@ public class RateCard {
     @Column(name = "moratorium_rate", nullable = false, precision = 7, scale = 4)
     private BigDecimal moratoriumRate;
 
+    /**
+     * Para qué sirve esta tasa: {@code ORIGINATION} al colocar, {@code DEFERRAL} al diferir una
+     * compra ya hecha.
+     *
+     * <p>Sin este discriminador, un producto no puede colocarse al 36 % y a la vez ofrecer tres y
+     * seis meses sin intereses: las dos tasas competirían por la misma banda de plazo.
+     */
+    @Column(name = "purpose", nullable = false, length = 12)
+    private String purpose;
+
     protected RateCard() {}
+
+    /** Tasa al colocar el crédito. */
+    public static final String ORIGINACION = "ORIGINATION";
+    /** Tasa al diferir una compra ya hecha. Un MSI es esta, en cero. */
+    public static final String DIFERIMIENTO = "DEFERRAL";
 
     public static RateCard create(
             UUID productDefinitionId,
@@ -70,8 +85,32 @@ public class RateCard {
             BigDecimal minAmount, BigDecimal maxAmount,
             Integer minTerm, Integer maxTerm,
             BigDecimal nominalRate, BigDecimal moratoriumRate) {
+        return create(productDefinitionId, tierBand, minAmount, maxAmount, minTerm, maxTerm,
+                nominalRate, moratoriumRate, ORIGINACION);
+    }
+
+    /**
+     * @param purpose {@link #ORIGINACION} o {@link #DIFERIMIENTO}
+     */
+    public static RateCard create(
+            UUID productDefinitionId,
+            String tierBand,
+            BigDecimal minAmount, BigDecimal maxAmount,
+            Integer minTerm, Integer maxTerm,
+            BigDecimal nominalRate, BigDecimal moratoriumRate,
+            String purpose) {
+
+        // La nominal en CERO es válida: es exactamente lo que es un MSI. La moratoria no: si una
+        // promoción tampoco cobrara mora, diferir sería una forma de dejar de pagar sin consecuencia.
+        if (nominalRate == null || nominalRate.signum() < 0) {
+            throw new IllegalArgumentException("La tasa nominal no puede ser negativa");
+        }
+        if (moratoriumRate == null || moratoriumRate.signum() <= 0) {
+            throw new IllegalArgumentException("La tasa moratoria debe ser mayor que cero");
+        }
 
         RateCard rc = new RateCard();
+        rc.purpose             = purpose != null ? purpose : ORIGINACION;
         rc.rateCardId          = UUID.randomUUID();
         rc.productDefinitionId = productDefinitionId;
         rc.tierBand            = tierBand;
@@ -86,6 +125,18 @@ public class RateCard {
 
     /** Returns true when this row applies to the given (tier, amount, term) combination. */
     public boolean matches(String tier, BigDecimal amount, Integer term) {
+        return matches(tier, amount, term, ORIGINACION);
+    }
+
+    /**
+     * Igual, pero acotado al propósito.
+     *
+     * <p>El propósito se compara <b>antes</b> que las bandas y no participa en la especificidad: no
+     * es un criterio más que desempata, es un filtro. Una tasa de originación nunca debe ganarle a
+     * una de diferimiento por ser más específica en el plazo.
+     */
+    public boolean matches(String tier, BigDecimal amount, Integer term, String paraQue) {
+        if (!purposeOrDefault().equals(paraQue)) return false;
         if (tierBand != null && !tierBand.equalsIgnoreCase(tier)) return false;
         if (minAmount != null && amount != null && amount.compareTo(minAmount) < 0) return false;
         if (maxAmount != null && amount != null && amount.compareTo(maxAmount) > 0) return false;
@@ -112,4 +163,15 @@ public class RateCard {
     public Integer getMaxTerm()          { return maxTerm; }
     public BigDecimal getNominalRate()   { return nominalRate; }
     public BigDecimal getMoratoriumRate(){ return moratoriumRate; }
+    public String getPurpose()           { return purposeOrDefault(); }
+
+    /** Las filas anteriores a BK-25b no traen propósito: son todas de originación. */
+    private String purposeOrDefault() {
+        return purpose != null ? purpose : ORIGINACION;
+    }
+
+    /** Meses sin intereses: la tasa es exactamente cero. */
+    public boolean esMesesSinIntereses() {
+        return DIFERIMIENTO.equals(purposeOrDefault()) && nominalRate.signum() == 0;
+    }
 }

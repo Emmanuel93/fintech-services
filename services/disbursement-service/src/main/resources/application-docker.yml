@@ -7,6 +7,12 @@ spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
 
+fintech:
+  disbursement:
+    banking:
+      # En Docker los servicios se hablan por nombre y puerto interno.
+      base-url: ${BANKING_BASE_URL:http://banking-service:8080}
+
 logging:
   level:
     com.fintech: INFO

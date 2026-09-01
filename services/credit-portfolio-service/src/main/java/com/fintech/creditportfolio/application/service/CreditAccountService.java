@@ -13,7 +13,6 @@ import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
 import com.fintech.creditportfolio.application.port.out.DispositionRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
-import com.fintech.creditportfolio.application.port.out.SpeiDispatchPort;
 import com.fintech.creditportfolio.domain.BalanceEvent;
 import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.CreditAccountNotFoundException;
@@ -23,9 +22,11 @@ import com.fintech.creditportfolio.domain.DispositionStatus;
 import com.fintech.creditportfolio.domain.DispositionType;
 import com.fintech.creditportfolio.domain.Installment;
 import com.fintech.creditportfolio.domain.config.Capabilities;
+import com.fintech.creditportfolio.domain.config.OpcionesDePago;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import com.fintech.creditportfolio.domain.event.BalanceUpdatedEvent;
 import com.fintech.creditportfolio.domain.event.CreditAccountActivatedEvent;
+import com.fintech.creditportfolio.domain.event.DispositionAuthorizedEvent;
 import com.fintech.creditportfolio.domain.event.DispositionCompletedEvent;
 import com.fintech.creditportfolio.domain.event.DispositionRejectedEvent;
 import org.slf4j.Logger;
@@ -58,7 +59,6 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
     /** IVA nacional, para los créditos cuya sucursal todavía no se resuelve al originar. */
     @org.springframework.beans.factory.annotation.Value("${fintech.credit-portfolio.vat-rate:0.16}")
     private BigDecimal ivaPorDefecto = AmortizationEngine.IVA_NACIONAL;
-    private final SpeiDispatchPort speiDispatch;
     private final CreditPortfolioEventPublisher eventPublisher;
     private final ProductConfigResolver configResolver;
 
@@ -76,7 +76,6 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                                  InstallmentRepository installmentRepository,
                                  BalanceEventRepository balanceEventRepository,
                                  AmortizationEngine amortizationEngine,
-                                 SpeiDispatchPort speiDispatch,
                                  CreditPortfolioEventPublisher eventPublisher,
                                  ProductConfigResolver configResolver,
                                  @org.springframework.beans.factory.annotation.Value(
@@ -88,7 +87,6 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         this.installmentRepository  = installmentRepository;
         this.balanceEventRepository = balanceEventRepository;
         this.amortizationEngine     = amortizationEngine;
-        this.speiDispatch           = speiDispatch;
         this.eventPublisher         = eventPublisher;
         this.configResolver         = configResolver;
     }
@@ -135,6 +133,13 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         log.info("CreditAccount created accountId={} contractId={} status=PENDING_ACTIVATION vatRate={}",
                 account.getCreditAccountId(), cmd.contractId(), account.getVatRate());
 
+        // BK-29 · BNPL corre el arranque del pago, y con él el PLAN ENTERO.
+        //
+        // Correr sólo el devengo y dejar el plan quieto es el error obvio y silencioso: el cliente
+        // no pagaría interés pero su primera cuota vencería igual, así que el «compra ahora, paga
+        // después» le llegaría con una cuota exigible antes de haber empezado a pagar.
+        LocalDate arranqueBnpl = arranqueDeBnpl(caps.opciones(), cmd.bnplDeferralDays());
+
         // 2. Generate amortisation schedule when the config enables it (AE-01)
         if (caps.hasAmortizationSchedule() && cmd.assignedTerm() != null) {
             UUID scheduleId = account.getCreditAccountId();
@@ -145,7 +150,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                     cmd.assignedTerm(),
                     config.getAmortizationType() != null ? config.getAmortizationType() : cmd.amortizationType(),
                     config.getPaymentFrequency(),
-                    LocalDate.now().plusMonths(1),
+                    AmortizationEngine.firstDueDate(arranqueBnpl, config.getPaymentFrequency()),
                     account.getVatRate());
             installmentRepository.saveAll(schedule);
             log.info("AmortizationSchedule generated scheduleId={} method={} freq={} installments={}",
@@ -221,7 +226,13 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                 account.getActivatedAt(),
                 cmd.promoterCode(),
                 account.getOriginUnitCode(),
-                instruction));
+                instruction,
+                // La cadencia y el plazo viajan para que el cierre derive su calendario de corte
+                // sin tener que consultar el calendario de esta cuenta en línea.
+                config.getPaymentFrequency(),
+                account.getAssignedTerm(),
+                // BNPL: charges no devenga antes de esta fecha. Nulo cuando el producto no lo usa.
+                arranqueBnpl.isAfter(LocalDate.now()) ? arranqueBnpl : null));
 
         log.info("CreditAccount activated and event published accountId={}", account.getCreditAccountId());
         return account;
@@ -261,10 +272,83 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
     }
 
     /**
-     * Wallet-initiated disposition (wallet.disposition-requested). SELF_USE stays on the
-     * platform (no SPEI — Wallet credits its own walletBalance from DispositionCompleted);
-     * THIRD_PARTY_CREDIT/PAYROLL dispatch a real SPEI to payeeAccount, same as the
-     * origination-time flow.
+     * El tipo de disposición del producto de esta cuenta.
+     *
+     * <p>Un producto de uso propio dispone siempre para su titular; una línea de distribuidor
+     * dispone siempre a la beneficiaria. <b>No es una elección de cada petición</b>, y tratarla
+     * como tal es lo que permitía desviar el dinero.
+     *
+     * <p>Si la configuración del producto no se puede resolver, <b>se detiene</b>. Un default aquí
+     * sería el mismo agujero con otro disfraz: adivinar el tipo es adivinar a quién se le manda el
+     * dinero, y equivocarse no se descubre hasta que el titular reclama.
+     */
+    /**
+     * Desde cuándo empieza a correr el crédito.
+     *
+     * <p>Sin BNPL es hoy. Con BNPL es hoy más los días que el producto permite correr, acotados por
+     * {@code bnplMaxDeferralDays}: un tope que no se aplica no es un tope.
+     */
+    /** Delega en la configuración, que es quien sabe qué significa cada uno de sus campos. */
+    private LocalDate arranqueDeBnpl(OpcionesDePago opciones, Integer solicitados) {
+        LocalDate arranque = opciones.arranqueDeBnpl(LocalDate.now(), solicitados);
+        if (solicitados != null && solicitados > 0 && arranque.equals(LocalDate.now())) {
+            log.warn("BNPL pedido ({} días) sobre un producto que no lo admite — se ignora", solicitados);
+        }
+        return arranque;
+    }
+
+    /** Las opciones de pago del producto de esta cuenta. Nunca nulas: sin configuración, ninguna. */
+    private OpcionesDePago opciones(CreditAccount account) {
+        return configResolver
+                .resolveForAccount(account.getProductCode(), account.getProductVersion())
+                .map(ProductConfigVersion::getCapabilities)
+                .map(Capabilities::opciones)
+                .orElseGet(OpcionesDePago::ninguna);
+    }
+
+    private DispositionType tipoDelProducto(CreditAccount account) {
+        return configResolver
+                .resolveForAccount(account.getProductCode(), account.getProductVersion())
+                .map(ProductConfigVersion::getCapabilities)
+                .map(this::resolveDispositionType)
+                .orElseThrow(() -> new IllegalStateException(
+                        "Sin configuración del producto " + account.getProductCode() + " v"
+                                + account.getProductVersion() + ": no se puede decidir a quién va "
+                                + "la disposición de la cuenta " + account.getCreditAccountId()));
+    }
+
+    /**
+     * A qué cuenta bancaria va el dinero.
+     *
+     * <p><b>Siempre sale a una cuenta bancaria</b>, también en uso propio: el saldo a favor en
+     * monedero está fuera de alcance. En uso propio el destino es el titular —cuya CLABE ya
+     * guarda la cuenta— y en una línea de distribuidor, la beneficiaria.
+     */
+    private Destino destinoDe(CreditAccount account,
+                              ProcessDispositionCommand cmd,
+                              DispositionType type) {
+        boolean aTercero = type != DispositionType.SELF_USE;
+        String cuenta = aTercero && cmd.payeeAccount() != null
+                ? cmd.payeeAccount()
+                : account.getClabeAccount();
+        if (cuenta == null || cuenta.isBlank()) {
+            throw new IllegalStateException("La disposición " + account.getCreditAccountId()
+                    + " no tiene cuenta de destino: no hay adónde mandar el dinero");
+        }
+        return new Destino(account.getBeneficiaryName(), cuenta, "40",
+                account.getBeneficiaryTaxId());
+    }
+
+    /** Adónde va el dinero. Interno: el evento viaja plano porque así lo declara quien lo consume. */
+    private record Destino(String beneficiaryName, String beneficiaryAccount,
+                           String beneficiaryAccountType, String beneficiaryTaxId) {}
+
+    /**
+     * Disposición pedida sobre una línea ya activa (wallet.disposition-requested).
+     *
+     * <p><b>Aquí no sale dinero.</b> Se valida, se registra la disposición en PROCESSING y se
+     * publica {@code disposition-authorized}. Quien paga es {@code disbursement}, y la disposición
+     * se completa cuando hay evidencia del proveedor.
      */
     @Override
     public void process(ProcessDispositionCommand cmd) {
@@ -288,26 +372,52 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
             return;
         }
 
-        DispositionType type = parseDispositionType(cmd.dispositionType());
+        // BK-13 · El tipo lo decide el PRODUCTO, no quien pide. Cuando venía en la petición, una
+        // solicitud sobre una DISTRIBUTOR_LINE que mandara "SELF_USE" —o un valor basura, que caía
+        // al mismo default silencioso— acreditaba el dinero a la distribuidora en vez de mandarlo a
+        // la beneficiaria. No era un detalle de modelado: era dinero saliendo a la persona
+        // equivocada, alcanzable sin siquiera mentir a propósito.
+        DispositionType type = tipoDelProducto(account);
         Disposition disposition = Disposition.create(
                 cmd.creditAccountId(), type, cmd.amount(), cmd.beneficiaryPartyId(), cmd.sourceEventId());
         disposition.markProcessing();
         dispositionRepository.save(disposition);
 
-        String externalRef = type == DispositionType.SELF_USE
-                ? "WALLET-CREDIT"
-                : speiDispatch.dispatch(disposition.getDispositionId(), cmd.amount(), cmd.payeeAccount());
-        disposition.complete(externalRef);
-        dispositionRepository.save(disposition);
-
-        // El calendario de ESTA disposición.
+        // BK-11 · Aquí NO sale dinero. La disposición queda PROCESSING y se publica el hecho:
+        // `disposition-authorized`, que `disbursement` ya escuchaba y nadie emitía. Antes esto
+        // llamaba a un stub que devolvía "SPEI-STUB-…", marcaba la disposición COMPLETED y hacía
+        // que contabilidad asentara 1201 → 1101 —salida de caja— de dinero que nunca salió: el
+        // activo crecía y el banco bajaba contra nada.
         //
-        // Una revolvente no tiene un plazo; lo tiene cada disposición, y por eso el calendario
-        // cuelga de la disposición y no de la cuenta: `scheduleId = dispositionId`. Es la mecánica
-        // de una tarjeta con compras a meses —la línea vive, cada compra se amortiza por su
-        // cuenta— y es lo que le da a una revolvente algo que vencer. Sin esto, una línea no podía
-        // caer en mora nunca: el envejecido busca cuotas vencidas y no había ninguna que buscar.
-        generarCalendarioDeDisposicion(account, disposition, cmd.termPeriods());
+        // Se completa en `onDisbursementCompleted`, cuando hay evidencia del proveedor.
+        Destino destino = destinoDe(account, cmd, type);
+        eventPublisher.publishDispositionAuthorized(new DispositionAuthorizedEvent(
+                disposition.getDispositionId(), account.getCreditAccountId(), null,
+                // La unidad de origen es la clave con la que el orquestador resuelve la empresa.
+                // Cartera no conoce su catálogo de empresas, pero sí de qué sucursal es la cuenta.
+                account.getOriginUnitCode(),
+                cmd.amount(), "MXN",
+                destino.beneficiaryName(), destino.beneficiaryAccount(),
+                destino.beneficiaryAccountType(), destino.beneficiaryTaxId(),
+                "DISPOSICION DE CREDITO"));
+
+        // BK-24 · el calendario de ESTA disposición, **si el producto lo genera al disponer**.
+        //
+        // Una revolvente no tiene un plazo; lo tiene cada disposición. Eso es cierto para el
+        // distribuidor, donde el vendedor decide al colocar «a cuántos meses se lo dejas». Para una
+        // tarjeta es al revés: la compra nace revolvente pura —exigible entera en la siguiente
+        // fecha de pago posterior al corte— y el titular decide diferirla después.
+        //
+        // Generarlo siempre hacía que una compra con tarjeta naciera ya parcializada al plazo por
+        // defecto del producto: ni lo que el cliente pidió ni lo que el corte debía exigirle.
+        if (opciones(account).planPosterior()) {
+            disposition.comoRevolventePura();
+            dispositionRepository.save(disposition);
+            log.info("Disposición REVOLVENTE PURA (sin calendario) dispositionId={} — exigible en el corte",
+                    disposition.getDispositionId());
+        } else {
+            generarCalendarioDeDisposicion(account, disposition, cmd.termPeriods());
+        }
 
         account.applyDisposition(cmd.amount());
         accountRepository.save(account);
@@ -322,12 +432,12 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                 "DISPOSITION_" + type, account.getStatus().name(), account.getBalanceVersion(),
                 account.getOriginUnitCode()));
 
-        eventPublisher.publishDispositionCompleted(new DispositionCompletedEvent(
-                disposition.getDispositionId(), account.getCreditAccountId(), account.getObligorPartyId(),
-                cmd.amount(), type.name(), account.getAvailableCredit(), account.getBalanceVersion()));
+        // `disposition-completed` NO se publica aquí. Se publicaba, y era la mentira que sostenía
+        // todo lo demás: wallet, notificaciones y contabilidad daban por bueno un pago que aún no
+        // había salido. Lo publica `onDisbursementCompleted`, con la evidencia del proveedor.
 
-        log.info("Disposition processed dispositionId={} creditAccountId={} type={} amount={} externalRef={}",
-                disposition.getDispositionId(), account.getCreditAccountId(), type, cmd.amount(), externalRef);
+        log.info("Disposición AUTORIZADA (pendiente de pago) dispositionId={} creditAccountId={} type={} amount={}",
+                disposition.getDispositionId(), account.getCreditAccountId(), type, cmd.amount());
     }
 
     /**
@@ -387,8 +497,59 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         }
         disposition.fail();
         dispositionRepository.save(disposition);
-        log.warn("Disposition FAILED por disbursement dispositionId={} code={} reason={}",
+        // El saldo subió al autorizar. Si el pago no salió, tiene que bajar: sin esto el cliente
+        // queda debiendo un dinero que nunca recibió.
+        deshacerSaldo(disposition, "DISPOSITION_FAILED");
+        log.warn("Disposición FALLIDA y saldo revertido dispositionId={} code={} reason={}",
                 dispositionId, failureCode, failureReason);
+    }
+
+    /**
+     * disbursement.returned — el banco receptor devolvió el dinero.
+     *
+     * <p>Distinto de un fallo: el pago salió, llegó y volvió. A diferencia del fallo, aquí la
+     * disposición pudo estar ya COMPLETED, así que también se deshace desde ese estado.
+     */
+    @Override
+    public void onDisbursementReturned(UUID dispositionId, String reason) {
+        Disposition disposition = dispositionRepository.findById(dispositionId).orElse(null);
+        if (disposition == null) {
+            log.warn("disbursement.returned sin disposición conocida dispositionId={} — ignorado", dispositionId);
+            return;
+        }
+        if (disposition.getStatus() == DispositionStatus.REVERSED) {
+            log.info("disbursement.returned repetido dispositionId={} — idempotente", dispositionId);
+            return;
+        }
+
+        disposition.reverse();
+        dispositionRepository.save(disposition);
+        deshacerSaldo(disposition, "DISPOSITION_RETURNED");
+        log.warn("Disposición DEVUELTA por el banco receptor y saldo revertido dispositionId={} motivo={}",
+                dispositionId, reason);
+    }
+
+    /** Devuelve el saldo y el cupo, y publica el hecho para que el resto se entere. */
+    private void deshacerSaldo(Disposition disposition, String motivo) {
+        CreditAccount account = accountRepository.findById(disposition.getCreditAccountId()).orElse(null);
+        if (account == null) {
+            log.error("No se pudo revertir el saldo: cuenta ausente creditAccountId={}",
+                    disposition.getCreditAccountId());
+            return;
+        }
+        account.revertDisposition(disposition.getAmount());
+        accountRepository.save(account);
+
+        balanceEventRepository.save(BalanceEvent.record(account.getCreditAccountId(),
+                disposition.getDispositionId().toString(), motivo,
+                disposition.getAmount().negate(), account));
+
+        eventPublisher.publishBalanceUpdated(new BalanceUpdatedEvent(
+                account.getCreditAccountId(), account.getObligorPartyId(),
+                account.getPrincipalBalance(), account.getAccruedInterestBalance(),
+                account.getPenaltyBalance(), account.getAvailableCredit(), account.getTotalDebt(),
+                motivo, account.getStatus().name(), account.getBalanceVersion(),
+                account.getOriginUnitCode()));
     }
 
     /** CP-04 (terminal/suspended), CP-05 (single disposition for non-revolving), CP-03 (available credit). */
@@ -407,7 +568,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
      * </ul>
      */
     private String validateBeneficiary(CreditAccount account, ProcessDispositionCommand cmd) {
-        if (parseDispositionType(cmd.dispositionType()) != DispositionType.THIRD_PARTY_CREDIT) {
+        if (tipoDelProducto(account) != DispositionType.THIRD_PARTY_CREDIT) {
             return null;
         }
         if (cmd.beneficiaryPartyId() == null) {
@@ -483,15 +644,6 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                     + " availableCredit=" + account.getAvailableCredit();
         }
         return null;
-    }
-
-    private DispositionType parseDispositionType(String dispositionType) {
-        try {
-            return DispositionType.valueOf(dispositionType.toUpperCase());
-        } catch (Exception e) {
-            log.warn("Unknown dispositionType '{}' from wallet request — defaulting to SELF_USE", dispositionType);
-            return DispositionType.SELF_USE;
-        }
     }
 
     /**

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+            https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <include file="db/changelog/closing/001-create-schema.sql"               relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/002-create-calendars.sql"            relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/003-create-policies.sql"             relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/004-create-profiles.sql"             relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/005-create-cutoffs.sql"              relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/006-create-runs-units.sql"           relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/007-create-seals.sql"                relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/008-create-reconciliation.sql"       relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/009-create-event-publication.sql"    relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/010-seed-calendar-and-policies.sql"  relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/011-drop-bank.sql"                   relativeToChangelogFile="false"/>
+
+    <include file="db/changelog/closing/012-gracia-unificada.sql"            relativeToChangelogFile="false"/>
+
+</databaseChangeLog>

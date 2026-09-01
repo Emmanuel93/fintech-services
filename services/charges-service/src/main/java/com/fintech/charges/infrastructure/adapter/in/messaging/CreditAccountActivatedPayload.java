@@ -24,5 +24,6 @@ public record CreditAccountActivatedPayload(
         BigDecimal principalBalance,
         BigDecimal creditLimit,
         String riskTier,
-        Instant activatedAt
-) {}
+        Instant activatedAt,
+        /** BNPL: desde cuándo devenga. Nulo = desde el alta (BK-28). */
+        java.time.LocalDate accrualStartDate) {}

@@ -47,6 +47,23 @@ public class Installment {
     @Column(nullable = false)
     private InstallmentStatus status;
 
+    /** Cuándo se saltó este pago. Nulo = nunca se saltó. */
+    @Column(name = "skipped_at")
+    private java.time.Instant skippedAt;
+
+    /** {@code GIFT} el período no devenga · {@code DEFERRAL} sí devenga y sólo se corre. */
+    @Column(name = "skipped_mode", length = 12)
+    private String skippedMode;
+
+    /**
+     * El vencimiento que tenía antes de moverse.
+     *
+     * <p>No es cosmético: es lo que permite explicarle al cliente —y a una revisión— de qué fecha a
+     * qué fecha se movió su compromiso y por qué.
+     */
+    @Column(name = "original_due_date")
+    private LocalDate originalDueDate;
+
     protected Installment() {}
 
     public static Installment of(UUID scheduleId, int number, LocalDate dueDate,
@@ -78,6 +95,54 @@ public class Installment {
     public BigDecimal getTaxAmount()      { return taxAmount; }
     public BigDecimal getTotalAmount()    { return totalAmount; }
     public InstallmentStatus getStatus()  { return status; }
+    public java.time.Instant getSkippedAt() { return skippedAt; }
+    public String getSkippedMode()        { return skippedMode; }
+    public LocalDate getOriginalDueDate() { return originalDueDate; }
+
+    /**
+     * Saltar este pago: el vencimiento se corre y deja de ser exigible en su fecha original.
+     *
+     * <p>Sin correr la fecha, saltar un pago produciría exactamente la mora que pretende evitar: el
+     * envejecido seguiría encontrando la cuota vencida al día siguiente.
+     *
+     * @param modo {@code GIFT} si el período no devenga, {@code DEFERRAL} si sigue devengando
+     */
+    public void saltar(String modo, LocalDate nuevoVencimiento) {
+        if (status == InstallmentStatus.PAID) {
+            throw new IllegalStateException(
+                    "La cuota " + installmentNumber + " ya está pagada: no hay nada que saltar");
+        }
+        if (skippedAt != null) {
+            // Sin esto, saltar dos veces la misma cuota la correría dos períodos y el tope por
+            // ciclo dejaría de significar nada.
+            throw new IllegalStateException(
+                    "La cuota " + installmentNumber + " ya se saltó el " + skippedAt);
+        }
+        this.originalDueDate = dueDate;
+        this.dueDate         = nuevoVencimiento;
+        this.skippedAt       = java.time.Instant.now();
+        this.skippedMode     = modo;
+        // Vuelve a PENDING: una cuota que ya se había vencido y se salta deja de estar vencida.
+        this.status          = InstallmentStatus.PENDING;
+    }
+
+    public boolean seSalto() { return skippedAt != null; }
+
+    /**
+     * Corre el vencimiento sin marcar la cuota como saltada.
+     *
+     * <p>Es lo que le pasa a las cuotas <b>detrás</b> de una saltada: se mueven, pero no consumen
+     * el tope de saltos del cliente ni cuentan como beneficio otorgado.
+     */
+    public void correrVencimiento(LocalDate nuevoVencimiento) {
+        if (originalDueDate == null) {
+            this.originalDueDate = dueDate;
+        }
+        this.dueDate = nuevoVencimiento;
+    }
+
+    /** El período saltado como regalo no devenga: es una recompensa, no un aplazamiento. */
+    public boolean noDevenga() { return "GIFT".equals(skippedMode); }
 
     /**
      * Aplica [amount] a esta mensualidad y devuelve lo que sobró.

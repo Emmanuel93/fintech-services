@@ -35,6 +35,8 @@ public class StubVerificationKeySeeder {
 
     private static final Logger log = LoggerFactory.getLogger(StubVerificationKeySeeder.class);
     private static final int VALIDITY_DAYS = 365;
+    /** El mismo tamaño que usa el par del stub: la validación de la firma compara longitudes. */
+    private static final int TAMANO_LLAVE = 2048;
 
     private final StubStpGateway stub;
     private final StpCompanyRepository companies;
@@ -68,10 +70,38 @@ public class StubVerificationKeySeeder {
                         KeyPurpose.VERIFICATION, material, now,
                         now.plus(VALIDITY_DAYS, ChronoUnit.DAYS), "STUB_SEEDER");
                 log.info("Stub: llave VERIFICATION registrada para companyId={}", company.getCompanyId());
+
+                // Y la de FIRMA, que es la mitad que faltaba.
+                //
+                // Con sólo la de verificación, el relay del outbox no podía firmar **ninguna**
+                // orden: reintentaba con retroceso exponencial y dejaba el pago parado en PENDING
+                // para siempre. El mock existe para ejercitar el camino completo, y sin llave de
+                // firma no puede completar el flujo que existe para ejercitar.
+                //
+                // La privada se genera aquí, en el arranque, y **sólo en modo stub** —esta clase
+                // entera es `@ConditionalOnProperty(mode=stub)`—. En un ambiente real la llave de
+                // firma es nuestro certificado ante Banxico: se carga del almacén y no la siembra
+                // nadie. Que se genere una nueva en cada arranque es lo correcto para un ambiente
+                // bajo: no hay ningún secreto que se quede escrito en ningún lado.
+                manageCompany.registerKey(company.getCompanyId(), "stub-signing",
+                        KeyPurpose.SIGNING, generarPrivadaPkcs8(), now,
+                        now.plus(VALIDITY_DAYS, ChronoUnit.DAYS), "STUB_SEEDER");
+                log.info("Stub: llave SIGNING registrada para companyId={}", company.getCompanyId());
             } catch (RuntimeException e) {
-                log.error("Stub: no se pudo registrar la llave VERIFICATION de companyId={}: {}",
+                log.error("Stub: no se pudieron registrar las llaves de companyId={}: {}",
                         company.getCompanyId(), e.getMessage());
             }
+        }
+    }
+
+    /** Una privada RSA nueva en PKCS#8, que es el formato que `wrapSigningKey` espera. */
+    private static String generarPrivadaPkcs8() {
+        try {
+            java.security.KeyPairGenerator generador = java.security.KeyPairGenerator.getInstance("RSA");
+            generador.initialize(TAMANO_LLAVE);
+            return Base64.getEncoder().encodeToString(generador.generateKeyPair().getPrivate().getEncoded());
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("RSA no disponible en esta JVM", e);
         }
     }
 }

@@ -51,14 +51,32 @@ public class OriginationClient {
 
     /** Sólo lo que la bitácora necesita del expediente; el resto del detalle se ignora. */
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    /**
+     * El expediente capturado en el alta.
+     *
+     * <p>Trae más de lo que el alta necesitaba porque el perfil de la app lo muestra completo:
+     * party-service guarda la identidad —nombre, CURP, RFC— pero el domicilio, el género y el
+     * contacto verificado viven aquí, que es donde el usuario los escribió.
+     */
     public record ProspectDetail(
             String firstName,
             String lastName1,
             String lastName2,
             String curp,
             String phone,
-            String email
-    ) {}
+            String email,
+            String gender,
+            String stateOfBirth,
+            // El domicilio viaja anidado, como lo expone origination: aplanarlo
+            // aquí obligaría a mantener el mapeo en dos sitios.
+            Address address
+    ) {
+        public record Address(
+                String street, String exteriorNumber, String interiorNumber,
+                String neighborhood, String municipality, String city,
+                String state, String postalCode, String country
+        ) {}
+    }
 
     /**
      * Sube un documento del expediente.
@@ -219,12 +237,16 @@ public class OriginationClient {
     }
 
     public Map<String, Object> signContract(String userId, String applicationId, String clabeAccount,
-                                            String signatureProof, String documentRef) {
+                                            String signatureProof, String documentRef,
+                                            Integer bnplDeferralDays) {
         log.info("-> POST origination /applications/{}/contract/sign", applicationId);
         Map<String, Object> body = new HashMap<>();
         body.put("clabeAccount", clabeAccount);
         body.put("signatureProof", signatureProof);
         if (documentRef != null) body.put("documentRef", documentRef);
+        // Sólo viaja si el cliente lo pidió: mandar 0 y no mandar nada significan lo mismo, y una
+        // clave presente en cero invita a leerla como "BNPL de cero días", que no es una decisión.
+        if (bnplDeferralDays != null && bnplDeferralDays > 0) body.put("bnplDeferralDays", bnplDeferralDays);
         return postApplicationAction(userId, "/api/v1/origination/applications/{id}/contract/sign", applicationId, body);
     }
 

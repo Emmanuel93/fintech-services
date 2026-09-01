@@ -26,5 +26,7 @@ public record CreditProductCreationRequestedPayload(
         String riskTier,
         String promoterCode,
         String obligorName,
-        String obligorTaxId
+        String obligorTaxId,
+        /** Días de BNPL que el cliente pidió al firmar; nulo si no pidió ninguno. */
+        Integer bnplDeferralDays
 ) {}

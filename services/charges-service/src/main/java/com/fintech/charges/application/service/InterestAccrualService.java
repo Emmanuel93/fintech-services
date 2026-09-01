@@ -67,9 +67,16 @@ public class InterestAccrualService {
 
     @Transactional(readOnly = true)
     public List<UUID> findMoratoriumScheduleIds() {
+        return findMoratoriumScheduleIds(LocalDate.now());
+    }
+
+    /** Sólo los que de verdad deben devengar ese día: filtrar aquí evita N transacciones inútiles. */
+    @Transactional(readOnly = true)
+    public List<UUID> findMoratoriumScheduleIds(LocalDate date) {
         return scheduleRepository
                 .findAllByStatusAndMoratoriumActive(AccrualScheduleStatus.ACTIVE.name(), true)
                 .stream()
+                .filter(s -> s.needsMoratoriumAccrual(date))
                 .map(AccrualSchedule::getScheduleId)
                 .toList();
     }
@@ -85,6 +92,9 @@ public class InterestAccrualService {
             return;
         }
 
+        // El ordinario se devenga sobre TODO el saldo insoluto: es el precio del dinero prestado,
+        // esté o no vencido. La distinción con el moratorio —que sí va sólo sobre lo vencido— es
+        // justamente lo que separa un interés de una penalización.
         BigDecimal basis = schedule.getPrincipalBalance();
         if (basis == null || basis.compareTo(BigDecimal.ZERO) <= 0) {
             log.debug("Skipping accrual scheduleId={} — zero principal balance", scheduleId);
@@ -135,8 +145,24 @@ public class InterestAccrualService {
             return;
         }
 
-        BigDecimal basis = schedule.getPrincipalBalance();
-        if (basis == null || basis.compareTo(BigDecimal.ZERO) <= 0) return;
+        // TK-02: el devengo moratorio no tenía guarda de fecha — repetir la corrida del día
+        // duplicaba el cargo sin resistencia. Lleva su propio reloj, separado del ordinario:
+        // compartirlo dejaría sin devengar al job que llegara segundo.
+        if (!schedule.needsMoratoriumAccrual(accrualDate)) {
+            log.debug("Moratorium already accrued scheduleId={} for {} — skip", scheduleId, accrualDate);
+            return;
+        }
+
+        // BK-19 · CAPITAL VENCIDO, no el saldo completo. Con `principalBalance` un crédito de
+        // $20 000 con una cuota vencida de $1 800 de capital devengaba mora sobre los $20 000.
+        BigDecimal basis = schedule.getOverduePrincipal();
+        if (basis == null || basis.compareTo(BigDecimal.ZERO) <= 0) {
+            // Sin saldo no hay moratorio, pero el día queda marcado: si no, cada corrida volvería
+            // a evaluar esta cuenta para no hacer nada.
+            schedule.markMoratoriumAccruedFor(accrualDate);
+            scheduleRepository.save(schedule);
+            return;
+        }
 
         BigDecimal dailyMoraRate  = schedule.getMoratoriumRate().divide(DAYS_IN_YEAR, 10, RoundingMode.HALF_UP);
         BigDecimal moraAmount     = basis.multiply(dailyMoraRate).setScale(2, RoundingMode.HALF_UP);
@@ -158,6 +184,9 @@ public class InterestAccrualService {
                 schedule.getCreditAccountId(), ChargeType.MORATORIUM_INTEREST.name(), moraAmount, accrualDate);
         eventPublisher.publishChargeApplied(iva.getChargeId().toString(),
                 schedule.getCreditAccountId(), "IVA", taxAmount, accrualDate);
+
+        schedule.markMoratoriumAccruedFor(accrualDate);
+        scheduleRepository.save(schedule);
 
         log.info("MoratoriumInterest accrued scheduleId={} creditAccountId={} basis={} moraRate={} amount={} tax={}",
                 scheduleId, schedule.getCreditAccountId(), basis, dailyMoraRate, moraAmount, taxAmount);

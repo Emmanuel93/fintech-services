@@ -8,7 +8,6 @@
     <include file="db/changelog/stp/001-create-schema.sql"                 relativeToChangelogFile="false"/>
     <include file="db/changelog/stp/002-create-companies.sql"              relativeToChangelogFile="false"/>
     <include file="db/changelog/stp/003-create-company-keys.sql"           relativeToChangelogFile="false"/>
-    <include file="db/changelog/stp/004-create-ordering-accounts.sql"      relativeToChangelogFile="false"/>
     <include file="db/changelog/stp/005-create-payment-orders.sql"         relativeToChangelogFile="false"/>
     <include file="db/changelog/stp/006-create-payment-order-events.sql"   relativeToChangelogFile="false"/>
     <include file="db/changelog/stp/007-create-settlement-observations.sql" relativeToChangelogFile="false"/>
@@ -16,5 +15,11 @@
     <include file="db/changelog/stp/009-create-outbox-messages.sql"        relativeToChangelogFile="false"/>
     <include file="db/changelog/stp/010-create-stub-orders.sql"            relativeToChangelogFile="false"/>
     <include file="db/changelog/stp/011-create-event-publication.sql"      relativeToChangelogFile="false"/>
+
+    <include file="db/changelog/stp/012-ordering-account-snapshot.sql" relativeToChangelogFile="false"/>
+
+    <include file="db/changelog/stp/013-drop-ordering-accounts.sql" relativeToChangelogFile="false"/>
+
+    <include file="db/changelog/stp/014-seed-company.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

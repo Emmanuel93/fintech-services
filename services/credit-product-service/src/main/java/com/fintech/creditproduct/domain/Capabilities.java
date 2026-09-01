@@ -35,7 +35,16 @@ public record Capabilities(
         boolean commissionsEnabled,
 
         /** DISTRIBUTOR_LINE: each disposition must carry a beneficiaryPartyId. */
-        boolean requiresBeneficiaryPartyId
+        boolean requiresBeneficiaryPartyId,
+
+        /**
+         * Parcialidades, BNPL, salto de pago y elegibilidad para apoyos.
+         *
+         * <p>Puede llegar nula desde una versión de configuración anterior a BK-23: el catálogo se
+         * guarda como JSONB y las filas viejas no la traen. Se lee siempre con
+         * {@code OpcionesDePago.oNinguna(...)}, que devuelve todo apagado.
+         */
+        OpcionesDePago opcionesDePago
 
 ) {
 
@@ -57,5 +66,29 @@ public record Capabilities(
             case BUSINESS_REVOLVING_LINE ->
                     new Capabilities(false, true, true, "SELF_USE", true, true, false, false, false);
         };
+    }
+
+    /**
+     * Compatibilidad con la configuración anterior a BK-23.
+     *
+     * <p>Existe para que las decenas de sitios que construyen {@code Capabilities} con nueve
+     * argumentos —seeds, pruebas, fallbacks degradados— sigan compilando sin editarse. Quien no
+     * declara opciones de pago no las tiene, que es lo correcto: un default permisivo convertiría
+     * cada producto viejo del catálogo en uno que admite diferir y saltar pagos sin que nadie lo
+     * haya decidido.
+     */
+    public Capabilities(boolean hasAmortizationSchedule, boolean hasCreditLimit,
+                        boolean allowsMultipleDispositions, String dispositionType,
+                        boolean hasCutoffDate, boolean hasMinimumPayment,
+                        boolean allowsMultipleObligors, boolean commissionsEnabled,
+                        boolean requiresBeneficiaryPartyId) {
+        this(hasAmortizationSchedule, hasCreditLimit, allowsMultipleDispositions, dispositionType,
+             hasCutoffDate, hasMinimumPayment, allowsMultipleObligors, commissionsEnabled,
+             requiresBeneficiaryPartyId, OpcionesDePago.ninguna());
+    }
+
+    /** Nunca nulo, venga de donde venga la fila. */
+    public OpcionesDePago opciones() {
+        return OpcionesDePago.oNinguna(opcionesDePago);
     }
 }

@@ -39,6 +39,8 @@ public class CreditProductCreationRequestedEvent {
     // puede preguntarle al dominio de personas sin acoplarse a él: viaja en el hecho.
     private final String obligorName;
     private final String obligorTaxId;
+    /** Días de BNPL que el cliente pidió al firmar; nulo si no pidió ninguno. */
+    private final Integer bnplDeferralDays;
 
     public CreditProductCreationRequestedEvent(
             UUID applicationId,
@@ -59,7 +61,8 @@ public class CreditProductCreationRequestedEvent {
             String riskTier,
             String promoterCode,
             String obligorName,
-            String obligorTaxId) {
+            String obligorTaxId,
+            Integer bnplDeferralDays) {
         this.eventId        = UUID.randomUUID().toString();
         this.occurredOn     = Instant.now();
         this.applicationId  = applicationId;
@@ -81,6 +84,7 @@ public class CreditProductCreationRequestedEvent {
         this.promoterCode   = promoterCode;
         this.obligorName    = obligorName;
         this.obligorTaxId   = obligorTaxId;
+        this.bnplDeferralDays = bnplDeferralDays;
     }
 
     public String getEventId()             { return eventId; }
@@ -104,4 +108,5 @@ public class CreditProductCreationRequestedEvent {
     public String getPromoterCode()        { return promoterCode; }
     public String getObligorName()         { return obligorName; }
     public String getObligorTaxId()        { return obligorTaxId; }
+    public Integer getBnplDeferralDays()  { return bnplDeferralDays; }
 }

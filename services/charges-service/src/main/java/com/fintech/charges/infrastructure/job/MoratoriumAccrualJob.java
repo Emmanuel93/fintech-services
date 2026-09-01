@@ -29,7 +29,7 @@ public class MoratoriumAccrualJob {
 
     /** Igual que el ordinario: la fecha se recibe para poder devengar historia día a día. */
     public void runMoratoriumAccrualFor(LocalDate today) {
-        List<UUID> scheduleIds = accrualService.findMoratoriumScheduleIds();
+        List<UUID> scheduleIds = accrualService.findMoratoriumScheduleIds(today);
         log.info("MoratoriumAccrualJob starting date={} schedules={}", today, scheduleIds.size());
 
         int success = 0;

@@ -11,4 +11,5 @@
     <include file="db/changelog/commission/005-create-readmodels.sql"          relativeToChangelogFile="false"/>
     <include file="db/changelog/commission/006-create-event-publication.sql"   relativeToChangelogFile="false"/>
     <include file="db/changelog/commission/007-seed-commission-policies.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/008-idempotencia-liquidacion.sql" relativeToChangelogFile="false"/>
 </databaseChangeLog>
