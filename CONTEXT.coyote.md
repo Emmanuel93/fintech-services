@@ -1,0 +1,22 @@
+---
+coyote: 1
+repo: fintech-services
+updated: 2026-09-28
+---
+inv|channel-backoffice-service|lo usan fintech-backoffice-web: api-client y fintech-backoffice-web; un cambio de contrato los afecta|services/channel-backoffice-service/src/main/java/com/fintech/channelbackoffice/infrastructure/adapter/in/api/AccountingController.java#L73
+inv|credit-portfolio-service|lo usan channel-backoffice-service, channel-mobile-service, charges-service y 12 más; un cambio de contrato los afecta|services/credit-portfolio-service/src/main/java/com/fintech/creditportfolio/infrastructure/adapter/in/api/CreditAccountController.java#L79
+inv|channel-mobile-service|lo usan fintech-app: fa_credit, fintech-app: fa_placements, fintech-app: fa_onboarding y 4 más; un cambio de contrato los afecta|services/channel-mobile-service/src/main/java/com/fintech/channelmobile/infrastructure/adapter/in/api/AuthController.java#L36
+inv|origination-service|lo usan channel-backoffice-service, audit-service, channel-mobile-service y 7 más; un cambio de contrato los afecta|services/origination-service/src/main/java/com/fintech/origination/infrastructure/adapter/in/api/ContractController.java#L32
+inv|party-service|lo usan channel-backoffice-service, beneficiary-service, channel-mobile-service y 4 más; un cambio de contrato los afecta|services/party-service/src/main/java/com/fintech/party/infrastructure/adapter/in/api/PartyController.java#L48
+inv|collections-service|lo usan channel-backoffice-service, notifications-service, credit-portfolio-service y 2 más; un cambio de contrato los afecta|services/collections-service/src/main/java/com/fintech/collections/infrastructure/adapter/in/api/CollectionsController.java#L65
+inv|credit-product-service|lo usan channel-backoffice-service, audit-service, channel-mobile-service y 3 más; un cambio de contrato los afecta|services/credit-product-service/src/main/java/com/fintech/creditproduct/infrastructure/adapter/in/api/CreditProductCatalogController.java#L29
+inv|payments-service|lo usan audit-service, credit-portfolio-service, channel-backoffice-service y 3 más; un cambio de contrato los afecta|services/payments-service/src/main/java/com/fintech/payments/infrastructure/adapter/in/api/PaymentsController.java#L33
+inv|identity-service|lo usan channel-backoffice-service, channel-mobile-service y audit-service; un cambio de contrato los afecta|services/identity-service/src/main/java/com/fintech/identity/infrastructure/adapter/in/api/AuthController.java#L63
+inv|wallet-service|lo usan channel-mobile-service, accounting-service, beneficiary-service y 2 más; un cambio de contrato los afecta|services/wallet-service/src/main/java/com/fintech/wallet/infrastructure/adapter/in/api/WalletController.java#L56
+inv|scoring-service|lo usan channel-backoffice-service, beneficiary-service, audit-service y 2 más; un cambio de contrato los afecta|services/scoring-service/src/main/java/com/fintech/scoring/infrastructure/adapter/in/api/BureauReportController.java#L31
+inv|sales-org-service|lo usan channel-backoffice-service, credit-portfolio-service, origination-service y 1 más; un cambio de contrato los afecta|services/sales-org-service/src/main/java/com/fintech/salesorg/infrastructure/adapter/in/api/DistributorController.java#L31
+inv|notifications-service|lo usan channel-backoffice-service, channel-mobile-service y collections-service; un cambio de contrato los afecta|services/notifications-service/src/main/java/com/fintech/notifications/infrastructure/adapter/in/api/NotificationController.java#L45
+inv|accounting-service|lo usan channel-backoffice-service y invoicing-service; un cambio de contrato los afecta|services/accounting-service/src/main/java/com/fintech/accounting/infrastructure/adapter/in/api/AccountingController.java#L46
+inv|audit-service|lo usan channel-backoffice-service y channel-mobile-service; un cambio de contrato los afecta|services/audit-service/src/main/java/com/fintech/audit/infrastructure/adapter/in/api/AuditController.java#L45
+inv|charges-service|lo usan audit-service, credit-portfolio-service y channel-mobile-service; un cambio de contrato los afecta|services/charges-service/src/main/java/com/fintech/charges/infrastructure/adapter/in/api/ChargesController.java#L41
+inv|risk-service|lo usan accounting-service; un cambio de contrato los afecta|services/risk-service/src/main/java/com/fintech/risk/infrastructure/adapter/in/api/RiskController.java#L60
