@@ -383,3 +383,51 @@ perdida.
 
 **Reintentos:** régimen por defecto, sin DLT.
 Ver [README raíz §5.4](../../README.md#54-política-de-reintentos-y-dlt-kafka).
+
+---
+
+## Verificación de la persona — KYC y AML (D16)
+
+`party` es dueño de la persona, así que **aquí vive el veredicto** y aquí lo consultan las
+compuertas. Quien lo *produce* es `compliance` (D16), que es quien habla con los proveedores y tiene
+las listas. `party` no decide la verificación: la registra.
+
+```mermaid
+flowchart LR
+    classDef ok fill:#bbf7d0,stroke:#166534,color:#052e16,font-weight:bold
+    classDef d16 fill:#bfdbfe,stroke:#1e40af,color:#172554,font-weight:bold
+    classDef gt fill:#fef08a,stroke:#854d0e,color:#422006,font-weight:bold
+
+    E[["origination.prospect-created"]]:::ok
+    E --> P["party crea el Party<br/>identidad y listas en PENDING"]:::ok
+    E --> C["compliance evalúa<br/>KYC + AML"]:::d16
+    C -->|"compliance.verification-completed"| P
+    P --> G{"¿identidad VERIFIED<br/>∧ listas CLEARED?"}:::gt
+    G -->|"sí"| OK["puede originar"]:::ok
+    G -->|"no"| NO["bloqueado, con motivo"]:::gt
+```
+
+Dos campos y no una bandera «verificado», porque **no se resuelven igual**:
+
+| | `identity_status` | `screening_status` |
+|---|---|---|
+| Pregunta | ¿eres quien dices ser? | ¿estás en una lista? |
+| Si falla, lo resuelve | **la persona**, con mejor evidencia | **cumplimiento**, adjudicando |
+| Reintentar sirve | sí | no: la lista no cambia porque insistas |
+
+Mandarle «no pudimos verificar tu identidad, vuelve a intentarlo» a alguien que coincidió con una
+lista sería mandarlo a repetir una selfie que no cambia nada.
+
+> **El default es `PENDING`, y `PENDING` bloquea.** Es deliberadamente incómodo: al añadir las
+> columnas, toda la cartera existente queda bloqueada hasta verificarse. Un default permisivo habría
+> escrito en la base que a esas personas se les comprobó la identidad y se les buscó en listas —
+> cuando a ninguna se le hizo ni lo uno ni lo otro. El default no crea el problema: lo hace visible.
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

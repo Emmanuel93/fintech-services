@@ -88,7 +88,7 @@ stateDiagram-v2
     KYC_IN_PROGRESS --> FAILED : algo se rompió (con motivo)
     KYC_COMPLETED --> BUREAU_READY : el buró respondió
     KYC_COMPLETED --> FAILED
-    BUREAU_READY --> APPROVED : el distribuidor aprueba (exige identidad VERIFIED)
+    BUREAU_READY --> APPROVED : el distribuidor aprueba (exige identidad VERIFIED + listas CLEARED)
     BUREAU_READY --> REJECTED : el distribuidor rechaza
     BUREAU_READY --> FAILED
     APPROVED --> DISBURSING : disposición solicitada
@@ -127,6 +127,52 @@ Dos reglas del diseño están grabadas en la máquina, no en un servicio:
 1. **Revocar sólo antes del expediente.** Con documentos entregados y autorización firmada, la
    salida del distribuidor es `REJECTED` —una decisión con nombre— no una revocación silenciosa.
 2. **Vencer sólo mientras la liga vive.** Los 7 días corren sobre la liga, no sobre la colocación.
+
+## Qué KYC se exige, y quién lo decide (F3b)
+
+Lo decide el **producto** de la línea, no una propiedad del servicio.
+
+Antes era `BENEFICIARY_IDENTITY_VERIFICATION_MODE`: una variable de entorno. Eso tiene dos defectos
+que no se arreglan cambiándole el nombre. No se pueden tener dos productos con reglas distintas en
+el mismo ambiente —y es justo lo que un catálogo necesita: una línea de distribuidor y una tarjeta
+de uso propio no exigen lo mismo—. Y aflojar la verificación acababa siendo un `docker compose up`
+con otra variable: sin autor, sin fecha y sin quién lo aprobó. Como parte del producto, cambiarla es
+versionar el producto.
+
+| Campo de `Capabilities.kyc` | Qué decide |
+|---|---|
+| `kycRequired` | si se exige verificación de identidad |
+| `amlRequired` | si además se exige revisión de listas / PLD |
+| `automationEnabled` | si se intenta con proveedor antes de mandarlo a una persona |
+| `provider` | `INCODE` · `JUMIO` · `NONE` |
+| `manualFallbackAllowed` | si al fallar el proveedor puede resolverlo una persona |
+
+Dos campos para el proveedor y no uno: *«no hay automatización»* y *«hay automatización con
+Incode»* son estados distintos de *«hay automatización y no sé con quién»* — y ese tercero es el
+que el catálogo rechaza al declararlo.
+
+**El proceso es uno solo.** Quien queda registrado pasa por el mismo KYC/AML, sea la beneficiaria de
+una línea de distribuidor o el titular de un producto de uso propio. Lo que el producto configura no
+es *qué* proceso se corre, sino si se exige, si se automatiza y con quién.
+
+### El default no es permisivo, y esa es la mitad del diseño
+
+En opciones de pago, lo que no se declara no se tiene: un producto viejo no debe amanecer
+permitiendo diferir compras. **Aquí es al revés.** Cuando no se sabe de qué producto es una
+colocación —las anteriores a F3b no guardan `product_code`— o el catálogo todavía no publicó ese
+producto, se aplica «exigido y manual». Un hueco de configuración debe costar trabajo de analista,
+nunca gente registrada sin verificar.
+
+### Y el invariante del agregado gana sobre la configuración
+
+Un producto puede declarar `kycRequired=false` y el catálogo lo acepta: habrá productos que no
+registren gente. **Aquí no se puede honrar.** `Placement.approve(...)` exige
+`identityDecision = VERIFIED` —y además listas despejadas— y la base lo repite en
+`chk_approved_requires_identity`: obedecer la
+bandera produciría colocaciones que no se pueden aprobar nunca — o, si alguien quitara la
+restricción para «arreglarlo», beneficiarias dadas de alta sin que nadie comprobara que son ellas.
+Así que se exige igual y se registra un `WARN` nombrando el producto: es una contradicción que
+alguien tiene que corregir en el catálogo, no un caso que este servicio deba resolver en silencio.
 
 ## Límites de colocación
 
@@ -192,8 +238,33 @@ colocación sigue avanzando con una persona en vez de atorarse. Ninguna rama rom
 motivo siempre queda escrito (`identityReviewNotes`) para que el analista sepa qué mirar.
 
 El veredicto (`identityDecision`) es un juicio propio con autor, fecha, motivo y origen; ya **no** se
-deriva del avance de la colocación. Y `approve()` exige identidad `VERIFIED`: la distribuidora asume
-el riesgo, Kredius comprueba la identidad, y ninguna condición sustituye a la otra.
+deriva del avance de la colocación.
+
+#### `approve()` exige las DOS cosas: identidad verificada y listas despejadas
+
+La regla del negocio es «la decisión es del distribuidor **si y sólo si** se pudo validar la
+identidad **y** no se encuentra en listas negras». Hasta hace poco sólo se comprobaba la primera
+mitad: una beneficiaria sancionada con su INE perfectamente cotejada se aprobaba y se le depositaba.
+
+```
+approve(riskAcknowledged, screening)
+   riskAcknowledged   → el riesgo COMERCIAL lo asume la distribuidora, y la casilla es la evidencia
+   identityDecision   → ¿es quien dice ser?      lo comprueba Kredius
+   screening          → ¿está en listas o es PEP? lo decide compliance (D16)
+```
+
+Tres propiedades que no son accidentales:
+
+1. **El veredicto llega por parámetro, no guardado en la colocación.** No es un dato de la
+   colocación sino **de la persona**, y las listas se publican de nuevo cada semana: tenerlo copiado
+   sería aprobar contra una foto de ayer. Pedirlo en la firma hace **imposible** llamar a `approve`
+   sin haberlo consultado.
+2. **Se consulta al aprobar, no al crear.** Entre el alta de la beneficiaria y la decisión de colocar
+   pueden pasar días. El veredicto que importa es el del momento en que el dinero va a salir.
+3. **No poder consultarlo bloquea**, y cada caso tiene su tipo de error: a una identidad en revisión
+   se le pide mejor evidencia —y la distribuidora puede ayudar a conseguirla—; ante una coincidencia
+   de listas **no hay nada que ella pueda hacer**, y por eso es
+   `BeneficiaryScreeningBlockedException` y no el mismo error que la identidad.
 
 Sigue faltando **la evidencia que mirar** (OCR, prueba de vida, RENAPO): la ficha responde
 `identityEvidence.available=false` con su motivo.
@@ -266,7 +337,14 @@ aceptado y el `otpVerificationId` que ata el consentimiento a un teléfono demos
 El token de la liga **nunca** viaja en un evento.
 
 **Consume** (fases 4-5): `scoring.scoring-completed`,
-`credit-portfolio.disposition-completed`, `credit-portfolio.disposition-rejected`.
+`credit-portfolio.disposition-completed`, `credit-portfolio.disposition-rejected`,
+`product-catalog.product-activated`.
+
+El último es de F3b: mantiene al día `beneficiary.product_kyc_policies`, la proyección local de la
+política de KYC de cada producto. Va por evento y no por llamada al catálogo a propósito —resolver
+una identidad no puede depender de que otro servicio conteste en ese instante; si el catálogo está
+caído, la política vigente es la última que publicó, no un error—. Y como el catálogo republica
+todos sus productos activos al arrancar, la proyección se rellena sola: no hace falta sembrarla.
 
 ## Composición — este servicio no reinventa dominio
 
@@ -283,13 +361,14 @@ El token de la liga **nunca** viaja en un evento.
 
 ## Migraciones
 
-Liquibase (6 changesets) bajo `db/changelog/beneficiary/`. Los `CHECK` de `002` codifican
+Liquibase (7 changesets) bajo `db/changelog/beneficiary/`. Los `CHECK` de `002` codifican
 invariantes del dominio en la base, no sólo en Java: expediente todo-o-nada, disposición
 obligatoria para desembolsar y `FAILED` siempre con motivo. El `005` alinea con el contrato de
 la app y agrega el índice único parcial de **una sola liga viva por (distribuidor, celular)** —
 por distribuidor y no global, porque dos distribuidores distintos colocándole a la misma persona
 es negocio legítimo. El `006` añade el veredicto de identidad con su `CHECK` de firma —un
-«verificado» sin autor no puede existir— y el que impide aprobar sin identidad comprobada.
+«verificado» sin autor no puede existir— y el que impide aprobar sin identidad comprobada. El
+`007` es F3b: la proyección `product_kyc_policies` y el `product_code` de cada colocación.
 
 ## Conformidad con el contrato de la app
 
@@ -326,3 +405,14 @@ TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock \
 java -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapperMain \
   :beneficiary-service:cleanTest :beneficiary-service:test
 ```
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

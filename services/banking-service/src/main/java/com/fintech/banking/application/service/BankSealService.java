@@ -30,13 +30,13 @@ public class BankSealService {
     private static final Logger log = LoggerFactory.getLogger(BankSealService.class);
 
     private final BankReconciliationRepository repo;
-    private final BankAccountRepository cuentas;
+    private final BankAccountRepository accounts;
     private final ReconciliationAlertPublisher alertas;
 
-    public BankSealService(BankReconciliationRepository repo, BankAccountRepository cuentas,
+    public BankSealService(BankReconciliationRepository repo, BankAccountRepository accounts,
                            ReconciliationAlertPublisher alertas) {
         this.repo    = repo;
-        this.cuentas = cuentas;
+        this.accounts = accounts;
         this.alertas = alertas;
     }
 
@@ -46,9 +46,9 @@ public class BankSealService {
      * @param saldoDelBanco el saldo que reporta el estado de cuenta
      */
     @Transactional
-    public BankCloseSeal sellar(UUID bankAccountId, LocalDate businessDate, String periodType,
+    public BankCloseSeal seal(UUID bankAccountId, LocalDate businessDate, String periodType,
                                 BigDecimal saldoContable, BigDecimal saldoDelBanco) {
-        cuentas.findById(bankAccountId).orElseThrow(
+        accounts.findById(bankAccountId).orElseThrow(
                 () -> new NoSuchElementException("Sin cuenta bancaria " + bankAccountId));
 
         Optional<BankCloseSeal> yaSellado = repo.findSeal(bankAccountId, businessDate, periodType);
@@ -63,29 +63,29 @@ public class BankSealService {
         // de hoy. Sumar sólo las del día dejaría el sello sin cuadrar por algo ya declarado.
         List<SuspenseEntry> partidas = repo.findOpenSuspenseUpTo(bankAccountId, businessDate);
         BigDecimal totalPartidas = partidas.stream()
-                .map(SuspenseEntry::aportacionAlSaldo)
+                .map(SuspenseEntry::balanceContribution)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        List<BankStatementLine> lineas = repo.findLinesByDate(bankAccountId, businessDate);
-        int cruzadas = (int) lineas.stream().filter(l -> "MATCHED".equals(l.getMatchStatus())).count();
+        List<BankStatementLine> lines = repo.findLinesByDate(bankAccountId, businessDate);
+        int cruzadas = (int) lines.stream().filter(l -> "MATCHED".equals(l.getMatchStatus())).count();
 
-        BankCloseSeal sello = BankCloseSeal.calcular(bankAccountId, businessDate, periodType,
-                saldoContable, saldoDelBanco, totalPartidas, lineas.size(), cruzadas);
+        BankCloseSeal seal = BankCloseSeal.calculate(bankAccountId, businessDate, periodType,
+                saldoContable, saldoDelBanco, totalPartidas, lines.size(), cruzadas);
 
-        if (!sello.cuadra()) {
+        if (!seal.cuadra()) {
             log.error("El sello bancario NO cuadra cuenta={} fecha={} contable={} banco={} "
                             + "partidas={} diferencia={}",
                     bankAccountId, businessDate, saldoContable, saldoDelBanco, totalPartidas,
-                    sello.getDifference());
-            alertas.publicarDescuadre(bankAccountId, businessDate, saldoContable, saldoDelBanco,
-                    totalPartidas, sello.getDifference(), partidas.size());
+                    seal.getDifference());
+            alertas.publishMismatch(bankAccountId, businessDate, saldoContable, saldoDelBanco,
+                    totalPartidas, seal.getDifference(), partidas.size());
             // Se persiste igual: la diferencia es el dato, y no guardarla obligaría a recalcularla
             // para saber qué pasó ese día. Lo que no se emite es la afirmación de que cuadró.
         } else {
             log.info("Sello bancario cuenta={} fecha={} CUADRA — {} líneas, {} cruzadas, {} partidas",
-                    bankAccountId, businessDate, lineas.size(), cruzadas, partidas.size());
+                    bankAccountId, businessDate, lines.size(), cruzadas, partidas.size());
         }
 
-        return repo.saveSeal(sello);
+        return repo.saveSeal(seal);
     }
 }

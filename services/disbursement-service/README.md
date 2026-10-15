@@ -294,3 +294,14 @@ HTTP entre ellos. Es parte de la prueba de desacople.
 ---
 
 Análisis completo, decisiones y plan: [`docs/ANALISIS_Y_PLAN_disbursement_stp.md`](../../docs/ANALISIS_Y_PLAN_disbursement_stp.md)
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

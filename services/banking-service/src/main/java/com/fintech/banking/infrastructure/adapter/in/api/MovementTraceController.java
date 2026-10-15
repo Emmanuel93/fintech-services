@@ -36,47 +36,47 @@ class MovementTraceController {
 
     private static final int LIMITE_POR_DEFECTO = 100;
 
-    private final MovementTraceService trazas;
+    private final MovementTraceService traces;
 
-    MovementTraceController(MovementTraceService trazas) { this.trazas = trazas; }
+    MovementTraceController(MovementTraceService traces) { this.traces = traces; }
 
     @GetMapping("/by-credit-account/{creditAccountId}")
     @Operation(summary = "Este crédito, ¿por dónde salió su dinero?")
-    List<TraceResponse> porCredito(@PathVariable UUID creditAccountId) {
-        return trazas.porCredito(creditAccountId).stream().map(TraceResponse::de).toList();
+    List<TraceResponse> byCreditAccount(@PathVariable UUID creditAccountId) {
+        return traces.byCreditAccount(creditAccountId).stream().map(TraceResponse::from).toList();
     }
 
     @GetMapping("/by-tracking-key/{trackingKey}")
     @Operation(summary = "Esta clave de rastreo, ¿de qué crédito era?")
     ResponseEntity<TraceResponse> porClave(@PathVariable String trackingKey) {
-        return trazas.porClaveDeRastreo(trackingKey)
-                .map(t -> ResponseEntity.ok(TraceResponse.de(t)))
+        return traces.byTrackingKey(trackingKey)
+                .map(t -> ResponseEntity.ok(TraceResponse.from(t)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/by-line/{lineId}")
     @Operation(summary = "Este movimiento del banco, ¿a qué corresponde?")
     ResponseEntity<TraceResponse> porLinea(@PathVariable UUID lineId) {
-        return trazas.porLineaBancaria(lineId)
-                .map(t -> ResponseEntity.ok(TraceResponse.de(t)))
+        return traces.byStatementLine(lineId)
+                .map(t -> ResponseEntity.ok(TraceResponse.from(t)))
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/by-voucher/{voucherRef}")
     @Operation(summary = "Esta póliza, ¿qué dinero real la respalda?")
-    List<TraceResponse> porPoliza(@PathVariable String voucherRef) {
-        return trazas.porPoliza(voucherRef).stream().map(TraceResponse::de).toList();
+    List<TraceResponse> byJournalEntry(@PathVariable String voucherRef) {
+        return traces.byJournalEntry(voucherRef).stream().map(TraceResponse::from).toList();
     }
 
     @GetMapping("/incomplete")
     @Operation(summary = "Lo que se quedó a medias, con el eslabón en que se detuvo")
-    List<TraceResponse> incompletas(@RequestParam(required = false) Integer limit) {
-        return trazas.incompletas(limit != null ? limit : LIMITE_POR_DEFECTO).stream()
-                .map(TraceResponse::de).toList();
+    List<TraceResponse> incomplete(@RequestParam(required = false) Integer limit) {
+        return traces.incomplete(limit != null ? limit : LIMITE_POR_DEFECTO).stream()
+                .map(TraceResponse::from).toList();
     }
 
     /**
-     * {@code eslabonFaltante} es lo que hace útil la respuesta.
+     * {@code missingLink} es lo que hace útil la respuesta.
      *
      * <p>Saber que una traza está incompleta no ayuda; saber que le falta {@code SIN_CONCILIAR} dice
      * exactamente a quién preguntarle.
@@ -85,13 +85,13 @@ class MovementTraceController {
                          UUID creditAccountId, UUID payoutId, UUID bankAccountId,
                          String trackingKey, UUID lineId, String voucherRef,
                          BigDecimal amount, LocalDate businessDate, String status,
-                         boolean completa, String eslabonFaltante) {
+                         boolean complete, String missingLink) {
 
-        static TraceResponse de(MovementTrace t) {
+        static TraceResponse from(MovementTrace t) {
             return new TraceResponse(t.getId(), t.getSourceSystem(), t.getSourceReference(),
                     t.getCreditAccountId(), t.getPayoutId(), t.getBankAccountId(),
                     t.getTrackingKey(), t.getLineId(), t.getVoucherRef(), t.getAmount(),
-                    t.getBusinessDate(), t.getStatus(), t.estaCompleta(), t.eslabonFaltante());
+                    t.getBusinessDate(), t.getStatus(), t.isComplete(), t.missingLink());
         }
     }
 }

@@ -2,7 +2,7 @@ package com.fintech.beneficiary.infrastructure.adapter.out.verification;
 
 import com.fintech.beneficiary.application.port.out.IdentityVerificationGateway;
 import com.fintech.beneficiary.application.port.out.KycProviderPort;
-import com.fintech.beneficiary.domain.IdentityVerificationMode;
+import com.fintech.beneficiary.domain.KycPolicy;
 import com.fintech.beneficiary.infrastructure.config.BeneficiaryProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,9 +21,13 @@ import java.util.UUID;
  * beans obligaría a duplicar esa caída o a que un adaptador llamara al otro.
  *
  * <h2>Qué hace en cada caso</h2>
+ * <p><b>Quién decide el modo (F3b).</b> Ya no una propiedad del servicio, sino la política del
+ * <b>producto</b> de la colocación, que llega como argumento. Los umbrales sí siguen en
+ * configuración: calibran a un proveedor, no definen un producto.
+ *
  * <pre>
- * MANUAL      → siempre a revisión humana. No se llama a nadie.
- * AUTOMATIC   → se pregunta al proveedor:
+ * sin automatización → siempre a revisión humana. No se llama a nadie.
+ * con automatización → se pregunta al proveedor:
  *                 · caído / sin contrato / timeout → revisión humana  ← RESILIENCIA
  *                 · no pudo validar un documento   → revisión humana
  *                 · algún umbral no alcanzado      → revisión humana
@@ -50,16 +54,22 @@ public class ConfigurableIdentityVerificationGateway implements IdentityVerifica
                                                     KycProviderPort provider) {
         this.properties = properties;
         this.provider   = provider;
-        log.info("Verificación de identidad en modo {} (proveedor: {})",
-                properties.getIdentityVerification().getMode(), provider.providerName());
+        log.info("Verificación de identidad: el modo lo fija cada producto (F3b). "
+                 + "Proveedor disponible: {}", provider.providerName());
     }
 
     @Override
-    public VerificationOutcome evaluate(UUID placementId, UUID prospectId) {
+    public VerificationOutcome evaluate(UUID placementId, UUID prospectId, KycPolicy policy) {
         var config = properties.getIdentityVerification();
+        KycPolicy applied = policy == null ? KycPolicy.requiredManual() : policy;
 
-        if (config.getMode() == IdentityVerificationMode.MANUAL) {
-            return VerificationOutcome.requiresHumanReview("REVISION_MANUAL_CONFIGURADA");
+        if (!applied.attemptsProvider()) {
+            // Tres razones distintas caen aquí y conviene distinguirlas en la cola del analista:
+            // el producto no automatiza, o automatiza sin proveedor configurado, o el proveedor
+            // declarado no es ninguno.
+            return VerificationOutcome.requiresHumanReview(applied.automationEnabled()
+                    ? "AUTOMATIZACION_SIN_PROVEEDOR: el producto la declara y no hay proveedor"
+                    : "REVISION_MANUAL_POR_PRODUCTO");
         }
 
         KycProviderPort.Assessment assessment;
@@ -108,22 +118,22 @@ public class ConfigurableIdentityVerificationGateway implements IdentityVerifica
     private static List<String> belowThreshold(Map<String, Double> scores, Map<String, Double> thresholds) {
         List<String> reasons = new ArrayList<>();
         thresholds.forEach((metric, minimum) -> {
-            Double actual = scores.get(metric);
-            if (actual == null) {
+            Double current = scores.get(metric);
+            if (current == null) {
                 reasons.add("UMBRAL_SIN_MEDIR: " + metric);
-            } else if (actual < minimum) {
-                reasons.add("UMBRAL_NO_ALCANZADO: " + metric + " " + actual + " < " + minimum);
+            } else if (current < minimum) {
+                reasons.add("UMBRAL_NO_ALCANZADO: " + metric + " " + current + " < " + minimum);
             }
         });
         return reasons;
     }
 
     @Override
-    public String describeStrategy() {
-        var config = properties.getIdentityVerification();
-        return config.getMode() == IdentityVerificationMode.MANUAL
-                ? "MANUAL"
-                : "AUTOMATIC(" + provider.providerName() + ")";
+    public String describeStrategy(KycPolicy policy) {
+        KycPolicy applied = policy == null ? KycPolicy.requiredManual() : policy;
+        return applied.attemptsProvider()
+                ? "AUTOMATIC(" + applied.provider() + " → " + provider.providerName() + ")"
+                : "MANUAL";
     }
 
     private static String nullSafe(String s) { return s == null ? "sin detalle" : s; }

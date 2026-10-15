@@ -96,9 +96,9 @@ class OriginUnitStatsIT {
     @Test
     @DisplayName("sin filtro devuelve todas las unidades, incluidas las sembradas por otros")
     void noFilterReturnsEveryUnit() {
-        List<OriginUnitStat> todas = repository.statsByOriginUnit(null);
+        List<OriginUnitStat> all = repository.statsByOriginUnit(null);
 
-        assertThat(todas).extracting(OriginUnitStat::unitCode).contains(unitA, unitB);
+        assertThat(all).extracting(OriginUnitStat::unitCode).contains(unitA, unitB);
         // Colección vacía = sin filtro, igual que null. Es el caso que produce un IN () inválido
         // si el adaptador no lo normaliza.
         assertThat(repository.statsByOriginUnit(List.of()))

@@ -38,12 +38,12 @@ public class StpOrderSettledListener {
             log.warn("stp.order-settled sin clave o importe id={} — no se proyecta", event.eventId());
             return;
         }
-        proyector.proyectar(InternalMovement.de("STP_ORDER", event.paymentRequestId().toString(),
-                event.amount(), fecha(event), event.trackingKey(), "DEBIT", event.eventId()));
+        proyector.project(InternalMovement.from("STP_ORDER", event.paymentRequestId().toString(),
+                event.amount(), date(event), event.trackingKey(), "DEBIT", event.eventId()));
     }
 
     /** La fecha de negocio de la orden, no la de proceso: el banco reporta por fecha de operación. */
-    private static LocalDate fecha(StpOrderSettledPayload e) {
+    private static LocalDate date(StpOrderSettledPayload e) {
         return e.businessDate() != null ? e.businessDate() : LocalDate.now();
     }
 

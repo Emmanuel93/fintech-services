@@ -1,5 +1,8 @@
 package com.fintech.scoring.application.service;
 
+import com.fintech.scoring.application.EvaluationNotReady;
+import com.fintech.scoring.application.BureauReportPending;
+import com.fintech.scoring.application.port.out.BureauPrefetchRepository;
 import com.fintech.scoring.application.port.out.CirculoReportRepository;
 import com.fintech.scoring.application.port.out.PrequalificationSnapshotRepository;
 import com.fintech.scoring.application.port.out.ScoreEvaluationRepository;
@@ -25,6 +28,7 @@ public class ScoringEvaluationService {
 
     private static final Logger log = LoggerFactory.getLogger(ScoringEvaluationService.class);
 
+    private final BureauPrefetchRepository  prefetchRepository;
     private final ScoringPolicyRepository   policyRepository;
     private final ScoreEvaluationRepository evaluationRepository;
     private final CirculoReportRepository   reportRepository;
@@ -33,12 +37,14 @@ public class ScoringEvaluationService {
     private final long                      prequalificationTtlHours;
     private final ScoringRuleEvaluator      ruleEvaluator = new ScoringRuleEvaluator();
 
-    public ScoringEvaluationService(ScoringPolicyRepository policyRepository,
+    public ScoringEvaluationService(BureauPrefetchRepository prefetchRepository,
+                                    ScoringPolicyRepository policyRepository,
                                     ScoreEvaluationRepository evaluationRepository,
                                     CirculoReportRepository reportRepository,
                                     ScoringEventPublisher eventPublisher,
                                     PrequalificationSnapshotRepository snapshotRepository,
                                     @Value("${fintech.scoring.prequalification-ttl-hours:24}") long prequalificationTtlHours) {
+        this.prefetchRepository  = prefetchRepository;
         this.policyRepository    = policyRepository;
         this.evaluationRepository= evaluationRepository;
         this.reportRepository    = reportRepository;
@@ -58,18 +64,22 @@ public class ScoringEvaluationService {
                                                             String prospectType, String productType) {
         Optional<CirculoReport> reportOpt = reportRepository.findByProspectId(prospectId);
         if (reportOpt.isEmpty()) {
-            // El prefetch de onboarding aún no ha completado (o no hubo consentimiento).
-            // TODO: prefetch on-demand / reintento. Por ahora se omite — la aplicación queda PENDING_SCORING.
-            log.warn("No prefetched CirculoReport for prospectId={} — cannot evaluate applicationId={} yet",
-                    prospectId, applicationId);
-            return Optional.empty();
+            // Se lanza con el MOTIVO en vez de devolver vacío.
+            //
+            // Antes «el prefetch va en camino» y «el prefetch falló hace horas» salían por el mismo
+            // `Optional.empty()` y el mismo log. A uno se le espera —es una carrera entre el evento
+            // de puntaje y el reporte— y al otro no se le espera nunca: reintentar la evaluación no
+            // vuelve a pedir el reporte. Quien recibe esto necesita la diferencia para decidir si
+            // reintenta o si lo deja para intervención manual.
+            throw missingReport(prospectId, applicationId);
         }
 
         Optional<ScoringPolicy> policyOpt = policyRepository.findActiveBy(productType);
         if (policyOpt.isEmpty()) {
-            log.warn("No active scoring policy for productType={} — skipping applicationId={} "
-                    + "(prospectType={}, informativo)", productType, applicationId, prospectType);
-            return Optional.empty();
+            // Falta una fila de configuración. No aparece sola, así que esperar no sirve.
+            throw new EvaluationNotReady(EvaluationNotReady.Reason.NO_ACTIVE_POLICY,
+                    "Sin política de scoring activa para productType=" + productType
+                            + " (applicationId=" + applicationId + ")");
         }
 
         CirculoReport report = reportOpt.get();
@@ -216,5 +226,26 @@ public class ScoringEvaluationService {
                 .orElseGet(() -> thresholds.stream()
                         .min(Comparator.comparingInt(RiskThreshold::getMinScore))
                         .orElseThrow(() -> new IllegalStateException("Policy has no risk thresholds")));
+    }
+
+    /**
+     * Por qué no hay reporte: distingue la carrera del fallo mirando el prefetch.
+     *
+     * <p>Es lo que permite que el reintento sea honesto. Sin esta distinción, o se reintenta todo
+     * —y se retrasa el momento en que alguien se entera de un fallo— o no se reintenta nada, y una
+     * carrera de medio segundo se convierte en una solicitud atascada.
+     */
+    private EvaluationNotReady missingReport(UUID prospectId, UUID applicationId) {
+        if (prefetchRepository.existsActiveByProspectId(prospectId)) {
+            return new BureauReportPending(
+                    "El prefetch de buró del prospecto " + prospectId + " sigue en vuelo");
+        }
+        return prefetchRepository.findLatestByProspectId(prospectId)
+                .map(p -> new EvaluationNotReady(EvaluationNotReady.Reason.PREFETCH_FAILED,
+                        "El prefetch de buró terminó en " + p.getStatus() + " ("
+                                + p.getFailureReason() + ") — applicationId=" + applicationId))
+                .orElseGet(() -> new EvaluationNotReady(EvaluationNotReady.Reason.NO_PREFETCH,
+                        "Nunca hubo prefetch de buró para el prospecto " + prospectId
+                                + " — ¿sin consentimiento? applicationId=" + applicationId));
     }
 }

@@ -73,16 +73,16 @@ class BureauReportAssembler {
         double balance = 0;
         double overdue = 0;
         for (JsonNode c : report.path("credits")) {
-            double saldo = c.path("saldoActual").asDouble(0);
-            double vencido = c.path("saldoVencido").asDouble(0);
-            int atraso = (int) c.path("peorAtraso").asDouble(0);
-            worstDelay = Math.max(worstDelay, atraso);
-            if (saldo > 0) {
+            double creditBalance = c.path("saldoActual").asDouble(0);
+            double creditOverdue = c.path("saldoVencido").asDouble(0);
+            int delay = (int) c.path("peorAtraso").asDouble(0);
+            worstDelay = Math.max(worstDelay, delay);
+            if (creditBalance > 0) {
                 live++;
-                balance += saldo;
-                if (vencido <= 0) current++;
+                balance += creditBalance;
+                if (creditOverdue <= 0) current++;
             }
-            overdue += vencido;
+            overdue += creditOverdue;
         }
 
         facts.add(new BureauReportResponse.Fact("Peor atraso en 24 meses",

@@ -188,7 +188,7 @@ public class NotificationTriggerService {
         vars.put("installmentNumber", String.valueOf(installmentNumber.get()));
         vars.put("totalAmount", money(amount));
         Integer remaining = progress.remainingInstallments();
-        vars.put("cuotasRestantes", remaining == null ? "algunas" : String.valueOf(remaining));
+        vars.put("remainingInstallments", remaining == null ? "algunas" : String.valueOf(remaining));
 
         dispatchService.dispatch(sourceEventId, EventType.INSTALLMENT_PAID, progress.getObligorPartyId(),
                 contact, preference, vars);
@@ -233,8 +233,8 @@ public class NotificationTriggerService {
         NotificationPreference preference = preferenceRepository.findById(obligorPartyId).orElse(null);
 
         Map<String, String> vars = baseVars(contact);
-        vars.put("diasAtraso", String.valueOf(daysDelinquent));
-        vars.put("saldoTotal", money(totalDebt));
+        vars.put("daysDelinquent", String.valueOf(daysDelinquent));
+        vars.put("totalDebt", money(totalDebt));
 
         dispatchService.dispatch(sourceEventId, eventType, obligorPartyId, contact, preference, vars);
     }
@@ -253,9 +253,9 @@ public class NotificationTriggerService {
         NotificationPreference preference = preferenceRepository.findById(obligorPartyId).orElse(null);
 
         Map<String, String> vars = baseVars(contact);
-        vars.put("montoPagado", money(amount));
-        vars.put("quedaSaldo", daysDelinquent > 0 ? "si" : "no");
-        vars.put("diasAtraso", String.valueOf(daysDelinquent));
+        vars.put("amountPaid", money(amount));
+        vars.put("hasOutstandingBalance", daysDelinquent > 0 ? "si" : "no");
+        vars.put("daysDelinquent", String.valueOf(daysDelinquent));
 
         dispatchService.dispatch(sourceEventId, EventType.COLLECTION_PAYMENT_THANKS, obligorPartyId,
                 contact, preference, vars);
@@ -275,7 +275,7 @@ public class NotificationTriggerService {
 
     private Map<String, String> baseVars(ContactInfo contact) {
         Map<String, String> vars = new HashMap<>();
-        vars.put("nombre", contact.firstName() == null ? "" : contact.firstName());
+        vars.put("firstName", contact.firstName() == null ? "" : contact.firstName());
         return vars;
     }
 

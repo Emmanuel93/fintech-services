@@ -19,9 +19,9 @@ public interface ManagePayoutRoutesUseCase {
                       BigDecimal maxAmount,
                       Integer priority) {}
 
-    PayoutRoute alta(AltaDeRuta alta);
+    PayoutRoute register(AltaDeRuta alta);
 
-    List<PayoutRoute> listar();
+    List<PayoutRoute> list();
 
-    PayoutRoute deshabilitar(UUID id);
+    PayoutRoute disable(UUID id);
 }

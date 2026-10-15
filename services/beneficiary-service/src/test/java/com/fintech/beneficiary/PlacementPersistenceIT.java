@@ -2,6 +2,7 @@ package com.fintech.beneficiary;
 
 import com.fintech.beneficiary.application.CreatePlacementCommand;
 import com.fintech.beneficiary.application.port.in.PlacementLifecycleUseCase;
+import com.fintech.beneficiary.application.port.out.PersonScreeningReader;
 import com.fintech.beneficiary.application.port.out.PlacementEventPublisher;
 import com.fintech.beneficiary.application.port.out.PlacementTransitionRepository;
 import com.fintech.beneficiary.domain.DuplicateLivePlacementException;
@@ -11,6 +12,7 @@ import com.fintech.beneficiary.domain.Placement;
 import com.fintech.beneficiary.domain.PlacementLimits;
 import com.fintech.beneficiary.domain.PlacementStatus;
 import com.fintech.beneficiary.domain.PlacementTransition;
+import com.fintech.beneficiary.domain.ScreeningVerdict;
 import com.fintech.beneficiary.domain.VerificationMode;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,11 +50,22 @@ class PlacementPersistenceIT {
 
     @MockitoBean PlacementEventPublisher eventPublisher;
 
+    /**
+     * El veredicto de listas se sustituye: lo produce `compliance` y viaja por `party`, y esta
+     * prueba es sobre el <b>schema</b>, no sobre la compuerta.
+     *
+     * <p>Sin sustituirlo, el adaptador real llamaría a un party que aquí no existe, devolvería
+     * «no se pudo comprobar» —que bloquea, y con razón— y esta prueba fallaría por el motivo
+     * equivocado. La compuerta se prueba donde toca:
+     * {@code PlacementRequiresCleanListsTest} y {@code PartyScreeningAdapterTest}.
+     */
+    @MockitoBean PersonScreeningReader personScreening;
+
     private static final PlacementLimits LIMITS = new PlacementLimits(
             new BigDecimal("5000"), new BigDecimal("60000"), 1000, 8, 16, 1);
 
     private static CreatePlacementCommand command() {
-        return new CreatePlacementCommand(UUID.randomUUID(), UUID.randomUUID(),
+        return new CreatePlacementCommand(UUID.randomUUID(), UUID.randomUUID(), "DISTRIBUIDORA-QUINCENAL",
                 "María Luisa Cortés Hernández", "5541829037", "Clienta de mi tienda desde 2023",
                 new BigDecimal("18000"), 12, new BigDecimal("868.06"),
                 VerificationMode.SELF_SERVICE_LINK, Instant.now().plus(7, ChronoUnit.DAYS),
@@ -62,6 +75,9 @@ class PlacementPersistenceIT {
     @Test
     @DisplayName("el ciclo completo INVITED → PAID_OFF sobrevive a Postgres, con su bitácora")
     void fullLifecyclePersists() {
+        org.mockito.BDDMockito.given(personScreening.screeningOf(org.mockito.ArgumentMatchers.any()))
+                .willReturn(new ScreeningVerdict("CLEARED", null));
+
         Placement created = placements.create(command());
         UUID id = created.getPlacementId();
 
@@ -109,7 +125,7 @@ class PlacementPersistenceIT {
         placements.create(first);
 
         CreatePlacementCommand again = new CreatePlacementCommand(
-                first.distributorPartyId(), first.distributorCreditAccountId(),
+                first.distributorPartyId(), first.distributorCreditAccountId(), first.productCode(),
                 first.beneficiaryFullName(), first.beneficiaryPhone(), first.beneficiaryRelationship(),
                 first.amount(), first.termFortnights(), first.fortnightlyPayment(),
                 first.verificationMode(), first.inviteExpiresAt(),
@@ -126,7 +142,7 @@ class PlacementPersistenceIT {
         placements.create(first);
 
         CreatePlacementCommand fromSomeoneElse = new CreatePlacementCommand(
-                UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), "DISTRIBUIDORA-QUINCENAL",
                 first.beneficiaryFullName(), first.beneficiaryPhone(), first.beneficiaryRelationship(),
                 first.amount(), first.termFortnights(), first.fortnightlyPayment(),
                 first.verificationMode(), first.inviteExpiresAt(),

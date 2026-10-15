@@ -8,7 +8,7 @@ import java.util.UUID;
 
 interface StubOrderRepository extends JpaRepository<StubOrder, UUID> {
 
-    List<StubOrder> findByEmpresaAndBusinessDateOrderByReceivedAt(String empresa, LocalDate businessDate);
+    List<StubOrder> findByEmpresaAndBusinessDateOrderByReceivedAt(String company, LocalDate businessDate);
 
     boolean existsByClaveRastreo(String claveRastreo);
 }

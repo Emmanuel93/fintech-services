@@ -25,13 +25,13 @@ public interface ManageBankAccountsUseCase {
                         String suspenseDebitAccount,
                         String providerClientRef) {}
 
-    BankAccount alta(AltaDeCuenta alta);
+    BankAccount register(AltaDeCuenta alta);
 
-    BankAccount consultar(UUID id);
+    BankAccount query(UUID id);
 
-    List<BankAccount> listar(UUID companyId);
+    List<BankAccount> list(UUID companyId);
 
     BankAccount suspender(UUID id);
 
-    BankAccount reactivar(UUID id);
+    BankAccount reactivate(UUID id);
 }

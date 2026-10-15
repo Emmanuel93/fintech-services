@@ -63,13 +63,11 @@ do
     esac
 done
 
-# This is reliable if readlink is available.
-if command -v readlink >/dev/null; then
-    app_path=$(readlink -e "$app_path")
-    APP_HOME=$(dirname "$app_path")
-else
-    APP_HOME=$( cd "${APP_HOME:-./}" && pwd -P ) || exit
-fi
+# `readlink -e` es de GNU y en macOS falla con «illegal option -- e», así que este script no
+# arrancaba en ningún Mac. El bucle de arriba ya resolvió los enlaces simbólicos encadenados, así
+# que basta con la forma portable que trae el wrapper oficial de Gradle. El `> /dev/null` descarta
+# la salida de `cd` por si $CDPATH está puesto (gradle/gradle#25036).
+APP_HOME=$( cd -P "${APP_HOME:-./}" > /dev/null && printf '%s\n' "$PWD" ) || exit
 
 APP_NAME="Gradle"
 APP_BASE_NAME=${0##*/}

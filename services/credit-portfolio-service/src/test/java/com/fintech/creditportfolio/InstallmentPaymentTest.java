@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class InstallmentPaymentTest {
 
-    private static Installment cuota(int numero, String total) {
+    private static Installment installment(int numero, String total) {
         return Installment.of(UUID.randomUUID(), numero, LocalDate.now().plusMonths(numero),
                 new BigDecimal(total).multiply(new BigDecimal("0.9")),
                 new BigDecimal(total).multiply(new BigDecimal("0.1")));
@@ -25,7 +25,7 @@ class InstallmentPaymentTest {
 
     @Test
     void cubrirla_completa_la_marca_pagada_y_devuelve_el_excedente() {
-        Installment i = cuota(1, "1000");
+        Installment i = installment(1, "1000");
 
         BigDecimal sobrante = i.applyPayment(new BigDecimal("1500"));
 
@@ -35,14 +35,14 @@ class InstallmentPaymentTest {
 
     @Test
     void cubrirla_exacta_no_deja_excedente() {
-        Installment i = cuota(1, "1000");
+        Installment i = installment(1, "1000");
         assertThat(i.applyPayment(new BigDecimal("1000"))).isEqualByComparingTo("0");
         assertThat(i.getStatus()).isEqualTo(InstallmentStatus.PAID);
     }
 
     @Test
     void cubrirla_a_medias_la_deja_parcial_y_consume_todo() {
-        Installment i = cuota(1, "1000");
+        Installment i = installment(1, "1000");
 
         BigDecimal sobrante = i.applyPayment(new BigDecimal("400"));
 
@@ -52,7 +52,7 @@ class InstallmentPaymentTest {
 
     @Test
     void una_mensualidad_ya_pagada_no_consume_nada() {
-        Installment i = cuota(1, "1000");
+        Installment i = installment(1, "1000");
         i.applyPayment(new BigDecimal("1000"));
 
         // El excedente tiene que seguir de largo hacia la siguiente, no
@@ -63,7 +63,7 @@ class InstallmentPaymentTest {
 
     @Test
     void un_importe_no_positivo_no_cambia_nada() {
-        Installment i = cuota(1, "1000");
+        Installment i = installment(1, "1000");
 
         assertThat(i.applyPayment(BigDecimal.ZERO)).isEqualByComparingTo("0");
         assertThat(i.applyPayment(new BigDecimal("-50"))).isEqualByComparingTo("-50");
@@ -72,7 +72,7 @@ class InstallmentPaymentTest {
 
     @Test
     void un_pago_grande_recorre_el_calendario_de_la_mas_vieja_a_la_mas_nueva() {
-        Installment[] plan = { cuota(1, "1000"), cuota(2, "1000"), cuota(3, "1000") };
+        Installment[] plan = { installment(1, "1000"), installment(2, "1000"), installment(3, "1000") };
 
         BigDecimal restante = new BigDecimal("2300");
         for (Installment i : plan) {

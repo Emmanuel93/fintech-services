@@ -164,24 +164,24 @@ public class InterestAccrualService {
             return;
         }
 
-        BigDecimal dailyMoraRate  = schedule.getMoratoriumRate().divide(DAYS_IN_YEAR, 10, RoundingMode.HALF_UP);
-        BigDecimal moraAmount     = basis.multiply(dailyMoraRate).setScale(2, RoundingMode.HALF_UP);
-        BigDecimal taxAmount      = moraAmount.multiply(properties.getVatRate()).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal dailyMoratoriumRate  = schedule.getMoratoriumRate().divide(DAYS_IN_YEAR, 10, RoundingMode.HALF_UP);
+        BigDecimal delinquencyAmount     = basis.multiply(dailyMoratoriumRate).setScale(2, RoundingMode.HALF_UP);
+        BigDecimal taxAmount      = delinquencyAmount.multiply(properties.getVatRate()).setScale(2, RoundingMode.HALF_UP);
 
-        ChargeRecord mora = ChargeRecord.create(
+        ChargeRecord delinquency = ChargeRecord.create(
                 schedule.getCreditAccountId(), schedule.getObligorPartyId(),
                 ChargeType.MORATORIUM_INTEREST, basis, schedule.getMoratoriumRate(),
-                1, moraAmount, BigDecimal.ZERO, accrualDate, null);
-        chargeRecordRepository.save(mora);
+                1, delinquencyAmount, BigDecimal.ZERO, accrualDate, null);
+        chargeRecordRepository.save(delinquency);
 
         ChargeRecord iva = ChargeRecord.createIva(
                 schedule.getCreditAccountId(), schedule.getObligorPartyId(),
-                taxAmount, accrualDate, mora.getChargeId());
+                taxAmount, accrualDate, delinquency.getChargeId());
         chargeRecordRepository.save(iva);
 
         // Both MORATORIUM_INTEREST and IVA → penaltyBalance
-        eventPublisher.publishChargeApplied(mora.getChargeId().toString(),
-                schedule.getCreditAccountId(), ChargeType.MORATORIUM_INTEREST.name(), moraAmount, accrualDate);
+        eventPublisher.publishChargeApplied(delinquency.getChargeId().toString(),
+                schedule.getCreditAccountId(), ChargeType.MORATORIUM_INTEREST.name(), delinquencyAmount, accrualDate);
         eventPublisher.publishChargeApplied(iva.getChargeId().toString(),
                 schedule.getCreditAccountId(), "IVA", taxAmount, accrualDate);
 
@@ -189,6 +189,6 @@ public class InterestAccrualService {
         scheduleRepository.save(schedule);
 
         log.info("MoratoriumInterest accrued scheduleId={} creditAccountId={} basis={} moraRate={} amount={} tax={}",
-                scheduleId, schedule.getCreditAccountId(), basis, dailyMoraRate, moraAmount, taxAmount);
+                scheduleId, schedule.getCreditAccountId(), basis, dailyMoratoriumRate, delinquencyAmount, taxAmount);
     }
 }

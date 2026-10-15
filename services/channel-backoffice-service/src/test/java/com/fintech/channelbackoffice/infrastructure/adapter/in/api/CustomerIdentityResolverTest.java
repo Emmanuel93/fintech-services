@@ -39,7 +39,7 @@ class CustomerIdentityResolverTest {
                 null, "LOW", 700, null, null, Instant.now());
     }
 
-    private static OriginationClient.ProspectDetailResponse prospecto() {
+    private static OriginationClient.ProspectDetailResponse prospect() {
         return new OriginationClient.ProspectDetailResponse(
                 PROSPECT.toString(), "INDIVIDUAL", "ACTIVE",
                 "Pedro", "Ramírez", "Soto", CURP, "RASP880920AB1",
@@ -51,7 +51,7 @@ class CustomerIdentityResolverTest {
     @Test
     void resuelve_nombreCurpCorreoYTelefono_encadenandoPartyYOrigination() {
         when(party.getByPartyId(PARTY)).thenReturn(party());
-        when(origination.getProspect(PROSPECT)).thenReturn(prospecto());
+        when(origination.getProspect(PROSPECT)).thenReturn(prospect());
 
         var sujeto = resolver.resolve(PARTY.toString()).orElseThrow();
 
@@ -105,7 +105,7 @@ class CustomerIdentityResolverTest {
     @Test
     void cachea_yNoRepiteLaCadenaPorCadaPantallaDelExpediente() {
         when(party.getByPartyId(PARTY)).thenReturn(party());
-        when(origination.getProspect(PROSPECT)).thenReturn(prospecto());
+        when(origination.getProspect(PROSPECT)).thenReturn(prospect());
 
         resolver.resolve(PARTY.toString());
         resolver.resolve(PARTY.toString());

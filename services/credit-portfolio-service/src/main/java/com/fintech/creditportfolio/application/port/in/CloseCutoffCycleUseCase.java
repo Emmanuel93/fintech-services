@@ -23,5 +23,5 @@ public interface CloseCutoffCycleUseCase {
                         LocalDate paymentDueDate,
                         BigDecimal balanceAtCutoff) {}
 
-    void onCutoffClosed(CorteCerrado corte);
+    void onCutoffClosed(CorteCerrado cutoff);
 }

@@ -58,11 +58,11 @@ public class DelinquencyAccountProcessor {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     void process(CreditAccount account, LocalDate today) {
         List<Installment> overdue = account.isRevolving()
-                ? vencidasDeSusDisposiciones(account, today)
+                ? overdueFromItsDispositions(account, today)
                 : installmentRepository.findPendingOverdueByScheduleId(
                         account.getCreditAccountId(), today);
 
-        LocalDate masAntigua = vencimientoMasAntiguo(overdue);
+        LocalDate masAntigua = oldestDueDate(overdue);
         int days = masAntigua == null ? 0 : (int) ChronoUnit.DAYS.between(masAntigua, today);
 
         account.updateDelinquency(days);
@@ -73,7 +73,7 @@ public class DelinquencyAccountProcessor {
                 account.getObligorPartyId(),
                 account.getContractNumber(),
                 days,
-                capitalVencido(overdue),
+                overduePrincipal(overdue),
                 masAntigua));
     }
 
@@ -89,21 +89,21 @@ public class DelinquencyAccountProcessor {
      * sería inventarlo. Contarla entera sobreestima; descontar a ojo falsea. Se sobreestima, se
      * declara, y se corrige cuando exista la columna.
      */
-    private BigDecimal capitalVencido(List<Installment> overdue) {
+    private BigDecimal overduePrincipal(List<Installment> overdue) {
         return overdue.stream()
                 .map(Installment::getPrincipalAmount)
                 .filter(java.util.Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    private LocalDate vencimientoMasAntiguo(List<Installment> overdue) {
+    private LocalDate oldestDueDate(List<Installment> overdue) {
         return overdue.stream()
                 .map(Installment::getDueDate)
                 .min(Comparator.naturalOrder())
                 .orElse(null);
     }
 
-    private List<Installment> vencidasDeSusDisposiciones(CreditAccount account, LocalDate today) {
+    private List<Installment> overdueFromItsDispositions(CreditAccount account, LocalDate today) {
         List<UUID> calendarios = dispositionRepository
                 .findByCreditAccountId(account.getCreditAccountId()).stream()
                 .map(Disposition::getDispositionId)

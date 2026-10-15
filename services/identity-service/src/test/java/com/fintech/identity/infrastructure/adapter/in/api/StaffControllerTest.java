@@ -268,7 +268,7 @@ class StaffControllerTest {
     @Test
     @WithMockUser(roles = "ADMIN")
     void staffDirectory_exponeLaCurp_paraQueLaBitacoraLaCongele() throws Exception {
-        given(findStaffUseCase.find(null, null)).willReturn(List.of(executiveConCurp()));
+        given(findStaffUseCase.find(null, null)).willReturn(List.of(executiveWithCurp()));
 
         mockMvc.perform(get("/api/v1/staff"))
                 .andExpect(status().isOk())
@@ -285,7 +285,7 @@ class StaffControllerTest {
     @Test
     @WithMockUser(roles = "SERVICE_DIRECTORY")
     void getById_conCredencialDeServicio_resuelveLaIdentidad() throws Exception {
-        given(findStaffUseCase.getById(staffUserId)).willReturn(executiveConCurp());
+        given(findStaffUseCase.getById(staffUserId)).willReturn(executiveWithCurp());
 
         mockMvc.perform(get("/api/v1/staff/{id}", staffUserId))
                 .andExpect(status().isOk())
@@ -315,7 +315,7 @@ class StaffControllerTest {
                 .andExpect(status().isForbidden());
     }
 
-    private StaffUser executiveConCurp() {
+    private StaffUser executiveWithCurp() {
         return StaffUser.create(email, "Ana Torres", "TOAA900101HDFRNN09",
                 EmployeeType.INTERNO, null, Set.of(StaffRole.EXECUTIVE), "$2a$10$hash");
     }

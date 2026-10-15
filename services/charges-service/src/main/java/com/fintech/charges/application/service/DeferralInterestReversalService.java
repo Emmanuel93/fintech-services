@@ -66,7 +66,7 @@ public class DeferralInterestReversalService {
     }
 
     @Transactional
-    public void reversarPorDiferimiento(UUID creditAccountId, UUID dispositionId,
+    public void reverseForDeferral(UUID creditAccountId, UUID dispositionId,
                                         BigDecimal importeDeLaCompra,
                                         LocalDate desde, LocalDate hasta) {
         AccrualSchedule schedule = scheduleRepository.findByCreditAccountId(creditAccountId)
@@ -84,9 +84,9 @@ public class DeferralInterestReversalService {
             return;
         }
 
-        BigDecimal tasaDiaria = schedule.getNominalRate().divide(DIAS_DEL_ANIO, 10, RoundingMode.HALF_UP);
+        BigDecimal dailyRate = schedule.getNominalRate().divide(DIAS_DEL_ANIO, 10, RoundingMode.HALF_UP);
         BigDecimal interes = importeDeLaCompra
-                .multiply(tasaDiaria)
+                .multiply(dailyRate)
                 .multiply(BigDecimal.valueOf(dias))
                 .setScale(2, RoundingMode.HALF_UP);
 

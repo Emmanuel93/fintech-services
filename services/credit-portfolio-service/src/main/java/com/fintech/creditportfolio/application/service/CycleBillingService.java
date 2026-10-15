@@ -54,17 +54,17 @@ public class CycleBillingService implements CloseCutoffCycleUseCase {
 
     @Override
     @Transactional
-    public void onCutoffClosed(CorteCerrado corte) {
-        CreditAccount cuenta = accounts.findById(corte.creditAccountId()).orElse(null);
-        if (cuenta == null) {
+    public void onCutoffClosed(CorteCerrado cutoff) {
+        CreditAccount account = accounts.findById(cutoff.creditAccountId()).orElse(null);
+        if (account == null) {
             log.warn("cutoff-closed sin cuenta conocida creditAccountId={} — ignorado",
-                    corte.creditAccountId());
+                    cutoff.creditAccountId());
             return;
         }
-        if (!cuenta.isRevolving()) {
+        if (!account.isRevolving()) {
             // Un producto a plazo ya tiene su exigible en el plan de amortización. Fabricarle otro
             // aquí sería cobrarle dos veces la misma cuota.
-            log.debug("Corte de cuenta a plazo {} — su exigible sale del plan", corte.creditAccountId());
+            log.debug("Corte de cuenta a plazo {} — su exigible sale del plan", cutoff.creditAccountId());
             return;
         }
 
@@ -75,50 +75,50 @@ public class CycleBillingService implements CloseCutoffCycleUseCase {
         // Pasa de verdad: el corte se reentrega —Kafka entrega al menos una vez— y entretanto puede
         // haber llegado tarde el evento de una compra con fecha anterior al corte. Esa compra
         // pertenece al ciclo SIGUIENTE, no a uno ya facturado y ya comunicado al cliente.
-        if (yaFacturado(corte)) {
+        if (alreadyBilled(cutoff)) {
             log.info("El ciclo {} de la cuenta {} ya estaba facturado — las compras rezagadas "
                             + "entran al corte siguiente",
-                    corte.cycleNumber(), corte.creditAccountId());
+                    cutoff.cycleNumber(), cutoff.creditAccountId());
             return;
         }
 
         List<Disposition> porFacturar = dispositions
-                .findByCreditAccountId(corte.creditAccountId()).stream()
-                .filter(Disposition::esExigibleEnElCorte)
-                .filter(d -> !fecha(d).isAfter(corte.cutoffDate()))
+                .findByCreditAccountId(cutoff.creditAccountId()).stream()
+                .filter(Disposition::isDueAtCutoff)
+                .filter(d -> !date(d).isAfter(cutoff.cutoffDate()))
                 .toList();
 
         if (porFacturar.isEmpty()) {
             log.debug("Ciclo {} de la cuenta {} sin compras revolventes que exigir",
-                    corte.cycleNumber(), corte.creditAccountId());
+                    cutoff.cycleNumber(), cutoff.creditAccountId());
             return;
         }
 
-        BigDecimal exigible = porFacturar.stream()
+        BigDecimal amountDue = porFacturar.stream()
                 .map(Disposition::getAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         // La cuota del ciclo cuelga de la CUENTA, no de una disposición: representa al ciclo
         // entero, no a una compra. Es lo que el envejecido y el moratorio encuentran para vencer.
         installments.saveAll(List.of(Installment.of(
-                corte.creditAccountId(), corte.cycleNumber(), corte.paymentDueDate(),
-                exigible, BigDecimal.ZERO)));
+                cutoff.creditAccountId(), cutoff.cycleNumber(), cutoff.paymentDueDate(),
+                amountDue, BigDecimal.ZERO)));
 
-        porFacturar.forEach(d -> d.facturarEnCiclo(corte.cycleNumber()));
+        porFacturar.forEach(d -> d.billInCycle(cutoff.cycleNumber()));
         porFacturar.forEach(dispositions::save);
 
         log.info("Ciclo {} facturado cuenta={} compras={} exigible={} vence={}",
-                corte.cycleNumber(), corte.creditAccountId(), porFacturar.size(),
-                exigible, corte.paymentDueDate());
+                cutoff.cycleNumber(), cutoff.creditAccountId(), porFacturar.size(),
+                amountDue, cutoff.paymentDueDate());
     }
 
     /** ¿Ya existe la cuota de este ciclo? Es la guarda de idempotencia del corte. */
-    private boolean yaFacturado(CorteCerrado corte) {
-        return installments.findByScheduleIdOrdered(corte.creditAccountId()).stream()
-                .anyMatch(i -> i.getInstallmentNumber() == corte.cycleNumber());
+    private boolean alreadyBilled(CorteCerrado cutoff) {
+        return installments.findByScheduleIdOrdered(cutoff.creditAccountId()).stream()
+                .anyMatch(i -> i.getInstallmentNumber() == cutoff.cycleNumber());
     }
 
-    private static LocalDate fecha(Disposition d) {
+    private static LocalDate date(Disposition d) {
         return d.getCreatedAt().atZone(ZoneId.systemDefault()).toLocalDate();
     }
 }

@@ -70,7 +70,7 @@ public class BankStatementLine {
 
     protected BankStatementLine() {}
 
-    public static BankStatementLine de(UUID bankAccountId, LocalDate businessDate, String direction,
+    public static BankStatementLine from(UUID bankAccountId, LocalDate businessDate, String direction,
                                        BigDecimal amount, String externalId, String trackingKey,
                                        String reference, String counterparty,
                                        String counterpartyAccount) {
@@ -95,12 +95,12 @@ public class BankStatementLine {
         return l;
     }
 
-    public void marcarCruzado()   { this.matchStatus = "MATCHED"; }
-    public void marcarEnPuente()  { this.matchStatus = "SUSPENSE"; }
-    public void ignorar()         { this.matchStatus = "IGNORED"; }
+    public void markMatched()   { this.matchStatus = "MATCHED"; }
+    public void markInSuspense()  { this.matchStatus = "SUSPENSE"; }
+    public void ignore()         { this.matchStatus = "IGNORED"; }
 
-    public boolean estaSinCruzar() { return "UNMATCHED".equals(matchStatus); }
-    public boolean esAbono()       { return "CREDIT".equals(direction); }
+    public boolean isUnmatched() { return "UNMATCHED".equals(matchStatus); }
+    public boolean isCredit()       { return "CREDIT".equals(direction); }
 
     public UUID getId()                   { return id; }
     public UUID getBankAccountId()        { return bankAccountId; }

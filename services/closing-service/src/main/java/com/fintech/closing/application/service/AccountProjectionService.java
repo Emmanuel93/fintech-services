@@ -64,19 +64,19 @@ public class AccountProjectionService {
                 creditAccountId, obligorPartyId, productType, productBehavior, orgUnitCode,
                 activatedOn, paymentFrequency, termPeriods, nominalRate, principalBalance));
 
-        ClosePolicy politica = policyResolver.require(null, productType, activatedOn);
+        ClosePolicy policy = policyResolver.require(null, productType, activatedOn);
         int ciclos = perfil.isRevolving() || termPeriods == null ? CICLOS_REVOLVENTE : termPeriods;
 
-        List<CutoffSchedule> calendario = deriver.deriveAll(perfil, politica, ciclos);
+        List<CutoffSchedule> calendario = deriver.deriveAll(perfil, policy, ciclos);
         if (!calendario.isEmpty()) {
             cutoffs.saveAll(calendario);
-            CutoffSchedule primero = calendario.get(0);
-            perfil.scheduleNextCutoff(primero.getCycleNumber(), primero.getCutoffDate());
+            CutoffSchedule first = calendario.get(0);
+            perfil.scheduleNextCutoff(first.getCycleNumber(), first.getCutoffDate());
             profiles.save(perfil);
         }
 
         log.info("Cuenta proyectada {} producto={} regla={} cortes={} primerCorte={}",
-                creditAccountId, productType, politica.cutoffRule(), calendario.size(),
+                creditAccountId, productType, policy.cutoffRule(), calendario.size(),
                 calendario.isEmpty() ? "—" : calendario.get(0).getCutoffDate());
     }
 

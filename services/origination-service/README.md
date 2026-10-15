@@ -454,3 +454,43 @@ docker compose up -d postgres kafka zookeeper
 | Swagger UI | `http://localhost:8081/swagger-ui.html` |
 | OpenAPI JSON | `http://localhost:8081/v3/api-docs` |
 | Health | `http://localhost:8081/actuator/health` |
+
+---
+
+## La compuerta de KYC/AML al originar
+
+**Nada avanza sin veredicto.** Toda persona registrada pasa por identidad y listas al alta, sin
+importar su rol —uso propio, distribuidor o beneficiaria de una línea—, y `CreditApplicationService`
+consulta ese veredicto **antes** que cualquier otra validación.
+
+```mermaid
+flowchart TD
+    classDef ok fill:#bbf7d0,stroke:#166534,color:#052e16,font-weight:bold
+    classDef gt fill:#fef08a,stroke:#854d0e,color:#422006,font-weight:bold
+    classDef no fill:#fecaca,stroke:#991b1b,color:#450a0a,font-weight:bold
+
+    S(["start(solicitud)"]):::ok --> V{"¿veredicto de la persona?"}:::gt
+    V -->|"party no contesta"| B1["BLOQUEA<br/>no se pudo comprobar"]:::no
+    V -->|"identidad no VERIFIED"| B2["BLOQUEA<br/>se le pide mejor evidencia"]:::no
+    V -->|"listas no CLEARED"| B3["BLOQUEA<br/>lo adjudica cumplimiento"]:::no
+    V -->|"las dos limpias"| D{"¿solicitud activa duplicada?"}:::gt
+    D -->|"no"| C{"¿cooldown tras rechazo?"}:::gt
+    C -->|"no"| OK(["solicitud creada"]):::ok
+```
+
+Va **primero** a propósito: decirle a alguien «ya tienes una solicitud activa» cuando además no está
+verificado lo manda a resolver algo que no destraba nada, y le revela su expediente antes de haber
+comprobado quién es.
+
+Y **falla cerrado**: si `party` no contesta, el veredicto que llega bloquea. El puerto devuelve un
+veredicto —nunca un `Optional` vacío— precisamente porque un `Optional` invita a escribir
+`.orElse(true)`, que es fallar abierto disfrazado de código cuidadoso.
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

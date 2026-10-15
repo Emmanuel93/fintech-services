@@ -138,34 +138,34 @@ class CreditAccountController {
      *
      * <p>Sigue siendo acotado: dos consultas por página, no una por cuenta.
      */
-    private Map<UUID, PaymentPlanSummary> planesDe(List<CreditAccount> accounts) {
+    private Map<UUID, PaymentPlanSummary> plansOf(List<CreditAccount> accounts) {
         List<UUID> amortizables = accounts.stream()
                 .filter(a -> !a.isRevolving()).map(CreditAccount::getCreditAccountId).toList();
         List<UUID> revolventes = accounts.stream()
                 .filter(CreditAccount::isRevolving).map(CreditAccount::getCreditAccountId).toList();
 
-        Map<UUID, PaymentPlanSummary> planes =
+        Map<UUID, PaymentPlanSummary> plans =
                 new java.util.HashMap<>(installmentRepository.planSummaries(amortizables));
 
         if (!revolventes.isEmpty()) {
             // calendario (= disposición) → cuenta a la que pertenece
-            Map<UUID, UUID> cuentaDe = dispositionRepository.findByCreditAccountIdIn(revolventes)
+            Map<UUID, UUID> accountOf = dispositionRepository.findByCreditAccountIdIn(revolventes)
                     .stream()
                     .collect(java.util.stream.Collectors.toMap(
                             com.fintech.creditportfolio.domain.Disposition::getDispositionId,
                             com.fintech.creditportfolio.domain.Disposition::getCreditAccountId,
                             (a, b) -> a));
 
-            Map<UUID, List<Installment>> porCuenta = installmentRepository
-                    .findByScheduleIds(cuentaDe.keySet()).stream()
-                    .filter(i -> cuentaDe.containsKey(i.getScheduleId()))
+            Map<UUID, List<Installment>> byAccount = installmentRepository
+                    .findByScheduleIds(accountOf.keySet()).stream()
+                    .filter(i -> accountOf.containsKey(i.getScheduleId()))
                     .collect(java.util.stream.Collectors.groupingBy(
-                            i -> cuentaDe.get(i.getScheduleId())));
+                            i -> accountOf.get(i.getScheduleId())));
 
-            porCuenta.forEach((cuenta, cuotas) ->
-                    planes.put(cuenta, PaymentPlanSummary.fromRevolving(cuotas)));
+            byAccount.forEach((account, installments) ->
+                    plans.put(account, PaymentPlanSummary.fromRevolving(installments)));
         }
-        return planes;
+        return plans;
     }
 
     private CreditAccountResponse withPlan(CreditAccount account) {
@@ -175,7 +175,7 @@ class CreditAccountController {
         // sumando sus colocaciones. Leer sólo el calendario de la cuenta devolvía vacío y la ficha
         // de una línea salía sin plan de pagos.
         return CreditAccountResponse.from(account,
-                planesDe(List.of(account)).getOrDefault(
+                plansOf(List.of(account)).getOrDefault(
                         account.getCreditAccountId(), PaymentPlanSummary.empty()));
     }
 
@@ -200,7 +200,7 @@ class CreditAccountController {
 
         // El avance del plan de toda la página en **una** consulta: pedirlo
         // cuenta por cuenta convertiría una página de 25 en 26 viajes a la base.
-        var plans = planesDe(accounts.getContent());
+        var plans = plansOf(accounts.getContent());
 
         return accounts.map(a -> CreditAccountResponse.from(a,
                 plans.getOrDefault(a.getCreditAccountId(), PaymentPlanSummary.empty())));
@@ -216,7 +216,7 @@ class CreditAccountController {
                     "Máximo " + MAX_BATCH_IDS + " ids por lote (recibidos " + ids.size() + ")");
         }
         var accounts = creditAccountRepository.findByCreditAccountIdIn(ids);
-        var plans = planesDe(accounts);
+        var plans = plansOf(accounts);
         return accounts.stream()
                 .map(a -> CreditAccountResponse.from(a,
                         plans.getOrDefault(a.getCreditAccountId(), PaymentPlanSummary.empty())))
@@ -309,10 +309,10 @@ class CreditAccountController {
      */
     @PostMapping("/{creditAccountId}/dispositions/{dispositionId}/defer")
     @Operation(summary = "Diferir una compra revolvente a plazos")
-    ResponseEntity<Void> diferir(@PathVariable UUID creditAccountId,
+    ResponseEntity<Void> defer(@PathVariable UUID creditAccountId,
                                  @PathVariable UUID dispositionId,
                                  @RequestBody(required = false) DeferRequest req) {
-        deferUseCase.diferir(new DeferDispositionUseCase.DiferirCompra(
+        deferUseCase.defer(new DeferDispositionUseCase.DiferirCompra(
                 creditAccountId, dispositionId, req != null ? req.termPeriods() : null));
         return ResponseEntity.accepted().build();
     }
@@ -330,7 +330,7 @@ class CreditAccountController {
     @Operation(summary = "Saltar un pago")
     ResponseEntity<Void> saltarPago(@PathVariable UUID creditAccountId,
                                     @PathVariable UUID installmentId) {
-        skipUseCase.saltar(new SkipPaymentUseCase.SaltarPago(creditAccountId, installmentId));
+        skipUseCase.skip(new SkipPaymentUseCase.SaltarPago(creditAccountId, installmentId));
         return ResponseEntity.accepted().build();
     }
 }

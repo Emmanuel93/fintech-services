@@ -34,6 +34,8 @@ import time
 import unicodedata
 import urllib.error
 import urllib.request
+
+import _cumplimiento
 from collections import Counter
 
 BACKOFFICE = "http://backoffice.localhost:8090"
@@ -235,6 +237,13 @@ def alta(p: Persona) -> bool:
         p.party_id = espera_party_id(p.prospect_id)
         if not p.party_id:
             print(f"      ✗ party-service nunca creó el expediente de {p.nombre_completo}")
+            return False
+
+        # El responsable de crédito de la distribuidora se evalúa igual que cualquier persona: la
+        # regla es «siempre se evalúa al responsable de crédito», sin importar el rol.
+        if not _cumplimiento.despeja(p.prospect_id):
+            print(f"      ✗ {p.nombre_completo} quedó bloqueada en cumplimiento")
+            return False
         return bool(p.prospect_id and p.token and p.party_id)
     except Exception as e:
         print(f"      ✗ no se pudo dar de alta a {p.nombre_completo}: {e}")

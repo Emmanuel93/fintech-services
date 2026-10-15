@@ -57,14 +57,14 @@ public class SuspenseEntry {
 
     protected SuspenseEntry() {}
 
-    public static SuspenseEntry de(BankStatementLine linea, String motivo) {
+    public static SuspenseEntry from(BankStatementLine line, String motivo) {
         SuspenseEntry e = new SuspenseEntry();
         e.id            = UUID.randomUUID();
-        e.lineId        = linea.getId();
-        e.bankAccountId = linea.getBankAccountId();
-        e.businessDate  = linea.getBusinessDate();
-        e.amount        = linea.getAmount();
-        e.direction     = linea.getDirection();
+        e.lineId        = line.getId();
+        e.bankAccountId = line.getBankAccountId();
+        e.businessDate  = line.getBusinessDate();
+        e.amount        = line.getAmount();
+        e.direction     = line.getDirection();
         e.reason        = motivo;
         e.status        = "OPEN";
         e.createdAt     = OffsetDateTime.now();
@@ -88,7 +88,7 @@ public class SuspenseEntry {
      * un cargo— porque hasta BK-06 este estado cerraba la partida en banking y en el mayor seguía
      * viva para siempre.
      */
-    public void darDeBaja(String quien) {
+    public void deactivate(String quien) {
         if (!"OPEN".equals(status)) {
             throw new IllegalStateException("La partida " + id + " ya está " + status);
         }
@@ -97,10 +97,10 @@ public class SuspenseEntry {
         this.resolvedBy = quien;
     }
 
-    public boolean estaAbierta() { return "OPEN".equals(status); }
+    public boolean isOpen() { return "OPEN".equals(status); }
 
     /** El signo que aporta a la diferencia del sello: un abono suma, un cargo resta. */
-    public BigDecimal aportacionAlSaldo() {
+    public BigDecimal balanceContribution() {
         return "CREDIT".equals(direction) ? amount : amount.negate();
     }
 

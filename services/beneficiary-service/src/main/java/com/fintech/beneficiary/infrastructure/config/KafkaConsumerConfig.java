@@ -1,6 +1,7 @@
 package com.fintech.beneficiary.infrastructure.config;
 
 import com.fintech.beneficiary.infrastructure.adapter.in.messaging.DispositionCompletedListener.DispositionCompletedPayload;
+import com.fintech.beneficiary.infrastructure.adapter.in.messaging.ProductActivatedPayload;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -36,6 +37,30 @@ class KafkaConsumerConfig {
         config.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
 
         var factory = new ConcurrentKafkaListenerContainerFactory<String, DispositionCompletedPayload>();
+        factory.setConsumerFactory(new DefaultKafkaConsumerFactory<>(config));
+        return factory;
+    }
+
+    /**
+     * Factory propio para {@code product-catalog.product-activated} (F3b).
+     *
+     * <p>Hace falta uno aparte porque el tipo del valor se fija por fábrica con
+     * {@code VALUE_DEFAULT_TYPE}: el de arriba está clavado a {@code DispositionCompletedPayload} y
+     * un segundo listener con otro payload deserializaría contra la clase equivocada. Por eso el
+     * listener lo nombra explícitamente en {@code containerFactory}.
+     */
+    @Bean
+    ConcurrentKafkaListenerContainerFactory<String, ProductActivatedPayload>
+    productActivatedListenerContainerFactory(KafkaProperties properties) {
+        Map<String, Object> config = properties.buildConsumerProperties(null);
+        config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(JsonDeserializer.TRUSTED_PACKAGES, "com.fintech.*");
+        config.put(JsonDeserializer.VALUE_DEFAULT_TYPE, ProductActivatedPayload.class.getName());
+        config.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
+
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, ProductActivatedPayload>();
         factory.setConsumerFactory(new DefaultKafkaConsumerFactory<>(config));
         return factory;
     }

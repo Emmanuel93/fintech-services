@@ -17,9 +17,9 @@ public final class Clabe {
 
     private static final int LONGITUD = com.fintech.shared.banking.ClabeCheckDigit.LONGITUD;
 
-    private final String valor;
+    private final String value;
 
-    private Clabe(String valor) { this.valor = valor; }
+    private Clabe(String value) { this.value = value; }
 
     public static Clabe of(String entrada) {
         if (entrada == null) {
@@ -32,7 +32,7 @@ public final class Clabe {
         // El CUERPO, no la CLABE entera. La versión local aceptaba callada los 18 caracteres y
         // leía sólo los primeros 17; la compartida exige el cuerpo exacto, y tiene razón: pasarle
         // la cadena completa oculta un malentendido sobre qué recibe.
-        int esperado = digitoVerificador(limpia.substring(0, LONGITUD - 1));
+        int esperado = checkDigit(limpia.substring(0, LONGITUD - 1));
         int recibido = limpia.charAt(17) - '0';
         if (esperado != recibido) {
             // El mensaje NO revela el dígito correcto: quien captura debe volver al documento
@@ -49,21 +49,21 @@ public final class Clabe {
      *
      * <p>Delega en {@code shared} (BK-49): el algoritmo estaba escrito tres veces.
      */
-    public static int digitoVerificador(String clabe) {
-        return com.fintech.shared.banking.ClabeCheckDigit.de(clabe);
+    public static int checkDigit(String clabe) {
+        return com.fintech.shared.banking.ClabeCheckDigit.from(clabe);
     }
 
     /** Los tres primeros dígitos son la institución; el mismo dato que STP llama banco receptor. */
-    public String institucion() { return valor.substring(0, 3); }
+    public String institution() { return value.substring(0, 3); }
 
-    public String valor() { return valor; }
+    public String value() { return value; }
 
     /** Para bitácora y pantalla: nunca se registra la CLABE completa. */
-    public String enmascarada() { return "****" + valor.substring(14); }
+    public String masked() { return "****" + value.substring(14); }
 
-    @Override public String toString() { return enmascarada(); }
+    @Override public String toString() { return masked(); }
     @Override public boolean equals(Object o) {
-        return o instanceof Clabe c && valor.equals(c.valor);
+        return o instanceof Clabe c && value.equals(c.value);
     }
-    @Override public int hashCode() { return valor.hashCode(); }
+    @Override public int hashCode() { return value.hashCode(); }
 }

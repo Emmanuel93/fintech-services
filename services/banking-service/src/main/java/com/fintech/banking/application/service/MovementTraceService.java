@@ -32,22 +32,22 @@ public class MovementTraceService {
     public MovementTraceService(MovementTraceRepository repo) { this.repo = repo; }
 
     @Transactional
-    public void alSolicitar(UUID payoutId, String sourceSystem, String sourceReference,
+    public void onRequest(UUID payoutId, String sourceSystem, String sourceReference,
                             UUID creditAccountId, BigDecimal amount, String eventId) {
         repo.findByPayoutId(payoutId).ifPresentOrElse(
                 t -> log.debug("La traza del pago {} ya existía — idempotente", payoutId),
-                () -> repo.save(MovementTrace.abrir(payoutId, sourceSystem, sourceReference,
+                () -> repo.save(MovementTrace.open(payoutId, sourceSystem, sourceReference,
                         creditAccountId, amount, eventId)));
     }
 
     @Transactional
-    public void alRutear(UUID payoutId, UUID bankAccountId, String eventId) {
-        traza(payoutId).ifPresent(t -> { t.ruteado(bankAccountId, eventId); repo.save(t); });
+    public void onRoute(UUID payoutId, UUID bankAccountId, String eventId) {
+        trace(payoutId).ifPresent(t -> { t.routed(bankAccountId, eventId); repo.save(t); });
     }
 
     @Transactional
-    public void alDespachar(UUID payoutId, String trackingKey, LocalDate businessDate, String eventId) {
-        traza(payoutId).ifPresent(t -> { t.despachado(trackingKey, businessDate, eventId); repo.save(t); });
+    public void onDispatch(UUID payoutId, String trackingKey, LocalDate businessDate, String eventId) {
+        trace(payoutId).ifPresent(t -> { t.dispatched(trackingKey, businessDate, eventId); repo.save(t); });
     }
 
     /**
@@ -55,51 +55,51 @@ public class MovementTraceService {
      * el {@code payoutId} ya no viaja: el estado de cuenta sólo trae lo que la red bancaria conoce.
      */
     @Transactional
-    public void alConciliar(String trackingKey, UUID lineId, String eventId) {
+    public void onReconcile(String trackingKey, UUID lineId, String eventId) {
         repo.findByTrackingKey(trackingKey).ifPresentOrElse(
-                t -> { t.conciliado(lineId, eventId); repo.save(t); },
+                t -> { t.reconciled(lineId, eventId); repo.save(t); },
                 () -> log.warn("Movimiento conciliado con clave {} sin traza: el pago no salió de "
                         + "aquí, o su despacho aún no llega", trackingKey));
     }
 
     @Transactional
-    public void alAsentar(UUID payoutId, String voucherRef, String eventId) {
-        traza(payoutId).ifPresent(t -> { t.asentado(voucherRef, eventId); repo.save(t); });
+    public void onPost(UUID payoutId, String voucherRef, String eventId) {
+        trace(payoutId).ifPresent(t -> { t.posted(voucherRef, eventId); repo.save(t); });
     }
 
     // ── Las cuatro preguntas ────────────────────────────────────────────────
 
     /** «Este crédito, ¿por dónde salió su dinero?» */
     @Transactional(readOnly = true)
-    public List<MovementTrace> porCredito(UUID creditAccountId) {
+    public List<MovementTrace> byCreditAccount(UUID creditAccountId) {
         return repo.findByCreditAccountId(creditAccountId);
     }
 
     /** «Esta clave de rastreo, ¿de qué crédito era?» */
     @Transactional(readOnly = true)
-    public Optional<MovementTrace> porClaveDeRastreo(String trackingKey) {
+    public Optional<MovementTrace> byTrackingKey(String trackingKey) {
         return repo.findByTrackingKey(trackingKey);
     }
 
     /** «Este movimiento del banco, ¿a qué corresponde?» */
     @Transactional(readOnly = true)
-    public Optional<MovementTrace> porLineaBancaria(UUID lineId) {
+    public Optional<MovementTrace> byStatementLine(UUID lineId) {
         return repo.findByLineId(lineId);
     }
 
     /** «Esta póliza, ¿qué dinero real la respalda?» */
     @Transactional(readOnly = true)
-    public List<MovementTrace> porPoliza(String voucherRef) {
+    public List<MovementTrace> byJournalEntry(String voucherRef) {
         return repo.findByVoucherRef(voucherRef);
     }
 
     /** Lo que se quedó a medias, con el eslabón en que se detuvo. */
     @Transactional(readOnly = true)
-    public List<MovementTrace> incompletas(int limite) {
-        return repo.findIncompletas(limite);
+    public List<MovementTrace> incomplete(int limite) {
+        return repo.findIncomplete(limite);
     }
 
-    private Optional<MovementTrace> traza(UUID payoutId) {
+    private Optional<MovementTrace> trace(UUID payoutId) {
         Optional<MovementTrace> t = repo.findByPayoutId(payoutId);
         if (t.isEmpty()) {
             log.warn("Hecho sobre el pago {} sin traza abierta — llegó antes que su solicitud", payoutId);

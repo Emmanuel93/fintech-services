@@ -31,7 +31,7 @@ public class DispositionDeferredListener {
         log.debug("disposition-deferred recibido disposición={} importe={} de {} a {}",
                 event.dispositionId(), event.amount(), event.revolvingDesde(), event.revolvingHasta());
 
-        reversas.reversarPorDiferimiento(event.creditAccountId(), event.dispositionId(),
+        reversas.reverseForDeferral(event.creditAccountId(), event.dispositionId(),
                 event.amount(), event.revolvingDesde(), event.revolvingHasta());
     }
 }

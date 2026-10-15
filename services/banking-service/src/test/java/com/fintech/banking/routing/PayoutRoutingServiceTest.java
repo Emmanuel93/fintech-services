@@ -1,6 +1,6 @@
 package com.fintech.banking.routing;
 
-import com.fintech.banking.application.port.in.ResolvePayoutRouteUseCase.Peticion;
+import com.fintech.banking.application.port.in.ResolvePayoutRouteUseCase.Request;
 import com.fintech.banking.application.port.out.BankAccountRepository;
 import com.fintech.banking.application.port.out.PayoutRouteRepository;
 import com.fintech.banking.application.service.PayoutRoutingService;
@@ -35,18 +35,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class PayoutRoutingServiceTest {
 
-    private final Map<UUID, BankAccount> cuentas = new HashMap<>();
+    private final Map<UUID, BankAccount> accounts = new HashMap<>();
     private final List<PayoutRoute> rutas = new ArrayList<>();
-    private PayoutRoutingService servicio;
+    private PayoutRoutingService service;
 
     private static int sufijo = 0;
 
-    private BankAccount cuenta(String nombre) {
+    private BankAccount account(String name) {
         String base = String.format("012180001234%05d", sufijo++);
-        BankAccount c = BankAccount.alta(null, "012", nombre,
-                Clabe.of(base + Clabe.digitoVerificador(base)), "FINTECH SA DE CV",
-                "FIN200101ABC", "MXN", "1101", "2109", "1109", "CL-" + nombre);
-        cuentas.put(c.getId(), c);
+        BankAccount c = BankAccount.register(null, "012", name,
+                Clabe.of(base + Clabe.checkDigit(base)), "FINTECH SA DE CV",
+                "FIN200101ABC", "MXN", "1101", "2109", "1109", "CL-" + name);
+        accounts.put(c.getId(), c);
         return c;
     }
 
@@ -62,35 +62,35 @@ class PayoutRoutingServiceTest {
             }
             @Override public List<PayoutRoute> findAll() { return List.copyOf(rutas); }
         };
-        BankAccountRepository repoCuentas = new BankAccountRepository() {
-            @Override public BankAccount save(BankAccount c) { cuentas.put(c.getId(), c); return c; }
+        BankAccountRepository accountRepo = new BankAccountRepository() {
+            @Override public BankAccount save(BankAccount c) { accounts.put(c.getId(), c); return c; }
             @Override public Optional<BankAccount> findById(UUID id) {
-                return Optional.ofNullable(cuentas.get(id));
+                return Optional.ofNullable(accounts.get(id));
             }
             @Override public Optional<BankAccount> findByClabe(String clabe) {
-                return cuentas.values().stream().filter(c -> c.getClabe().equals(clabe)).findFirst();
+                return accounts.values().stream().filter(c -> c.getClabe().equals(clabe)).findFirst();
             }
             @Override public List<BankAccount> findByCompany(UUID companyId) { return List.of(); }
-            @Override public List<BankAccount> findAll() { return List.copyOf(cuentas.values()); }
+            @Override public List<BankAccount> findAll() { return List.copyOf(accounts.values()); }
         };
-        servicio = new PayoutRoutingService(repoRutas, repoCuentas);
+        service = new PayoutRoutingService(repoRutas, accountRepo);
         rutas.clear();
-        cuentas.clear();
+        accounts.clear();
     }
 
-    private void ruta(UUID empresa, BankAccount cuenta, int prioridad, String min, String max) {
-        rutas.add(PayoutRoute.of(empresa, PayoutRail.SPEI, PayoutProvider.STP, cuenta.getId(),
+    private void ruta(UUID company, BankAccount account, int prioridad, String min, String max) {
+        rutas.add(PayoutRoute.of(company, PayoutRail.SPEI, PayoutProvider.STP, account.getId(),
                 new BigDecimal(min), max == null ? null : new BigDecimal(max), prioridad));
     }
 
-    private PayoutDecision resolver(UUID empresa, String monto) {
-        return servicio.resolver(new Peticion(empresa, PayoutRail.SPEI, new BigDecimal(monto)));
+    private PayoutDecision resolver(UUID company, String amount) {
+        return service.resolve(new Request(company, PayoutRail.SPEI, new BigDecimal(amount)));
     }
 
     @Test
     @DisplayName("la respuesta trae cuenta, rail y proveedor — la decisión completa, no media")
     void decisionCompleta() {
-        BankAccount c = cuenta("BBVA");
+        BankAccount c = account("BBVA");
         ruta(null, c, 100, "0", null);
 
         PayoutDecision d = resolver(UUID.randomUUID(), "5000");
@@ -108,8 +108,8 @@ class PayoutRoutingServiceTest {
     @Test
     @DisplayName("gana la de menor prioridad numérica")
     void ganaLaDeMenorPrioridad() {
-        BankAccount principal = cuenta("BBVA");
-        BankAccount respaldo  = cuenta("SANTANDER");
+        BankAccount principal = account("BBVA");
+        BankAccount respaldo  = account("SANTANDER");
         ruta(null, respaldo, 200, "0", null);
         ruta(null, principal, 50, "0", null);
 
@@ -119,13 +119,13 @@ class PayoutRoutingServiceTest {
     @Test
     @DisplayName("a igual prioridad, la regla de la empresa manda sobre la genérica")
     void laEspecificaGana() {
-        UUID empresa = UUID.randomUUID();
-        BankAccount generica   = cuenta("BBVA");
-        BankAccount deLaEmpresa = cuenta("BANORTE");
+        UUID company = UUID.randomUUID();
+        BankAccount generica   = account("BBVA");
+        BankAccount ofTheCompany = account("BANORTE");
         ruta(null, generica, 100, "0", null);
-        ruta(empresa, deLaEmpresa, 100, "0", null);
+        ruta(company, ofTheCompany, 100, "0", null);
 
-        assertThat(resolver(empresa, "5000").bankAccountId()).isEqualTo(deLaEmpresa.getId());
+        assertThat(resolver(company, "5000").bankAccountId()).isEqualTo(ofTheCompany.getId());
         // Y otra empresa sigue cayendo en la genérica.
         assertThat(resolver(UUID.randomUUID(), "5000").bankAccountId()).isEqualTo(generica.getId());
     }
@@ -133,8 +133,8 @@ class PayoutRoutingServiceTest {
     @Test
     @DisplayName("el monto elige la banda")
     void reparteroPorMonto() {
-        BankAccount chicos  = cuenta("BBVA");
-        BankAccount grandes = cuenta("BANORTE");
+        BankAccount chicos  = account("BBVA");
+        BankAccount grandes = account("BANORTE");
         ruta(null, chicos, 100, "0", "10000");
         ruta(null, grandes, 100, "10000.01", null);
 
@@ -148,8 +148,8 @@ class PayoutRoutingServiceTest {
     void laSuspendidaSeSalta() {
         // Si la ruta ganara igual, suspender una cuenta no significaría nada: el pago fallaría en el
         // proveedor, que es donde ya no se puede corregir.
-        BankAccount caida    = cuenta("BBVA");
-        BankAccount respaldo = cuenta("SANTANDER");
+        BankAccount caida    = account("BBVA");
+        BankAccount respaldo = account("SANTANDER");
         ruta(null, caida, 50, "0", null);
         ruta(null, respaldo, 100, "0", null);
 
@@ -161,7 +161,7 @@ class PayoutRoutingServiceTest {
     @Test
     @DisplayName("sin ruta aplicable el pago NO sale — no hay cuenta de respaldo")
     void sinRutaNoSale() {
-        BankAccount c = cuenta("BBVA");
+        BankAccount c = account("BBVA");
         ruta(null, c, 100, "0", "1000");
 
         // Caer a un default es exactamente el defecto que este servicio corrige.
@@ -173,8 +173,8 @@ class PayoutRoutingServiceTest {
     @Test
     @DisplayName("si TODAS las cuentas candidatas están suspendidas, tampoco sale")
     void todasCaidas() {
-        BankAccount a = cuenta("BBVA");
-        BankAccount b = cuenta("SANTANDER");
+        BankAccount a = account("BBVA");
+        BankAccount b = account("SANTANDER");
         ruta(null, a, 50, "0", null);
         ruta(null, b, 100, "0", null);
         a.suspender();
@@ -187,9 +187,9 @@ class PayoutRoutingServiceTest {
     @Test
     @DisplayName("una ruta deshabilitada no participa")
     void deshabilitadaNoParticipa() {
-        BankAccount c = cuenta("BBVA");
+        BankAccount c = account("BBVA");
         ruta(null, c, 100, "0", null);
-        rutas.get(0).deshabilitar();
+        rutas.get(0).disable();
 
         assertThatThrownBy(() -> resolver(UUID.randomUUID(), "5000"))
                 .isInstanceOf(NoPayoutRouteException.class);
@@ -214,8 +214,8 @@ class PayoutRoutingServiceTest {
         // `findAllEnabled()` no garantiza orden. Sin un desempate final, dos rutas de igual
         // prioridad y especificidad harían que el pago saliera un día por una cuenta y al siguiente
         // por otra sin que nadie cambiara nada. Aquí se barajan las filas a propósito.
-        ruta(null, cuenta("BBVA"), 100, "0", null);
-        ruta(null, cuenta("BANORTE"), 100, "0", null);
+        ruta(null, account("BBVA"), 100, "0", null);
+        ruta(null, account("BANORTE"), 100, "0", null);
 
         // La ganadora se calcula aquí con la regla declarada, no se asume: así la prueba comprueba
         // que el servicio ordena de verdad y no que devuelve el primer elemento de la lista.
@@ -224,10 +224,10 @@ class PayoutRoutingServiceTest {
                 .orElseThrow()
                 .getBankAccountId();
 
-        UUID empresa = UUID.randomUUID();
+        UUID company = UUID.randomUUID();
         for (int i = 0; i < 20; i++) {
             java.util.Collections.shuffle(rutas);
-            assertThat(resolver(empresa, "5000").bankAccountId()).isEqualTo(esperada);
+            assertThat(resolver(company, "5000").bankAccountId()).isEqualTo(esperada);
         }
     }
 
@@ -242,7 +242,7 @@ class PayoutRoutingServiceTest {
     @Test
     @DisplayName("la decisión enmascara la CLABE al imprimirse")
     void noSeImprimeLaClabe() {
-        BankAccount c = cuenta("BBVA");
+        BankAccount c = account("BBVA");
         ruta(null, c, 100, "0", null);
 
         PayoutDecision d = resolver(UUID.randomUUID(), "5000");

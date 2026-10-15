@@ -120,7 +120,7 @@ public class ClosePolicy {
     }
 
     /** Si esta versión ya estaba vigente en la fecha de negocio dada. */
-    public boolean vigenteEn(LocalDate businessDate) {
+    public boolean activeOn(LocalDate businessDate) {
         return !effectiveDate.isAfter(businessDate);
     }
 

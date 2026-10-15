@@ -44,7 +44,7 @@ class AccessAuditInterceptorTest {
         MDC.clear();
     }
 
-    private void autenticaComoEjecutivo() {
+    private void authenticateAsExecutive() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(STAFF.toString(), null,
                         List.of(new SimpleGrantedAuthority("ROLE_EXECUTIVE"))));
@@ -53,7 +53,7 @@ class AccessAuditInterceptorTest {
                         "ana.torres@kredius.mx", "Ana Torres", "TOAA900101HDFRNN09")));
     }
 
-    private AuditClient.AccessLog registra(String method, String path) {
+    private AuditClient.AccessLog records(String method, String path) {
         var request = new MockHttpServletRequest(method, path);
         var response = new MockHttpServletResponse();
         response.setStatus(200);
@@ -67,9 +67,9 @@ class AccessAuditInterceptorTest {
 
     @Test
     void registra_nombreCurpYCorreo_deUnEjecutivoQueNoEsAdmin() {
-        autenticaComoEjecutivo();
+        authenticateAsExecutive();
 
-        var log = registra("GET", "/dashboard/summary");
+        var log = records("GET", "/dashboard/summary");
 
         assertThat(log.actor()).isEqualTo(STAFF.toString());
         assertThat(log.actorName()).isEqualTo("Ana Torres");
@@ -79,13 +79,13 @@ class AccessAuditInterceptorTest {
 
     @Test
     void sobreLaRutaDeUnCliente_registraTambienAlSujeto() {
-        autenticaComoEjecutivo();
+        authenticateAsExecutive();
         when(customers.resolve(PARTY.toString())).thenReturn(Optional.of(
                 new CustomerIdentityResolver.CustomerIdentity(
                         PARTY, "Pedro Ramírez Soto", "RASP880920HDFMTD05",
                         "pedro.ramirez@example.mx", "5215512345678")));
 
-        var log = registra("GET", "/clients/" + PARTY);
+        var log = records("GET", "/clients/" + PARTY);
 
         assertThat(log.subjectPartyId()).isEqualTo(PARTY.toString());
         assertThat(log.subjectName()).isEqualTo("Pedro Ramírez Soto");
@@ -96,9 +96,9 @@ class AccessAuditInterceptorTest {
 
     @Test
     void sobreUnUuidQueNoEsUnCliente_niSiquieraPreguntaPorElSujeto() {
-        autenticaComoEjecutivo();
+        authenticateAsExecutive();
 
-        var log = registra("GET", "/origination/applications/" + SOLICITUD);
+        var log = records("GET", "/origination/applications/" + SOLICITUD);
 
         assertThat(log.resourceId()).isEqualTo(SOLICITUD.toString());
         assertThat(log.subjectPartyId()).isNull();
@@ -107,19 +107,19 @@ class AccessAuditInterceptorTest {
 
     @Test
     void tomaLaCorrelacionDelMdc_noDeLaPeticion() {
-        autenticaComoEjecutivo();
+        authenticateAsExecutive();
         MDC.put(MdcCorrelationFilter.MDC_KEY, "corr-abcd");
 
         // El filtro genera el valor cuando el navegador no lo manda y lo deja en el MDC y en la
         // respuesta. Leerlo de la petición dejaba la columna vacía en el 100% de las entradas.
-        assertThat(registra("GET", "/dashboard/summary").correlationId()).isEqualTo("corr-abcd");
+        assertThat(records("GET", "/dashboard/summary").correlationId()).isEqualTo("corr-abcd");
     }
 
     @Test
     void seAtribuyeAlBackoffice_conNombreDeServicioExplicito() {
-        autenticaComoEjecutivo();
+        authenticateAsExecutive();
 
-        assertThat(registra("GET", "/dashboard/summary").domainSource())
+        assertThat(records("GET", "/dashboard/summary").domainSource())
                 .isEqualTo("channel-backoffice-service");
     }
 
@@ -130,7 +130,7 @@ class AccessAuditInterceptorTest {
                         List.of(new SimpleGrantedAuthority("ROLE_EXECUTIVE"))));
         when(staff.resolve(any())).thenReturn(Optional.empty());
 
-        var log = registra("GET", "/dashboard/summary");
+        var log = records("GET", "/dashboard/summary");
 
         assertThat(log.actor()).isEqualTo(STAFF.toString());
         assertThat(log.actorName()).isNull();

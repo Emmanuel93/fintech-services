@@ -42,9 +42,19 @@ public record Capabilities(
          *
          * <p>Puede llegar nula desde una versión de configuración anterior a BK-23: el catálogo se
          * guarda como JSONB y las filas viejas no la traen. Se lee siempre con
-         * {@code OpcionesDePago.oNinguna(...)}, que devuelve todo apagado.
+         * {@code PaymentOptions.orNone(...)}, que devuelve todo apagado.
          */
-        OpcionesDePago opcionesDePago
+        PaymentOptions opcionesDePago,
+
+        /**
+         * Qué verificación de identidad exige este producto, y cómo se resuelve (F3b).
+         *
+         * <p>Igual que {@code opcionesDePago}, puede llegar nula desde una configuración anterior.
+         * <b>Pero se lee al revés</b>: {@code KycOptions.orDefault(...)} devuelve
+         * {@code requiredManual()} y no un objeto apagado, porque una fila vieja no puede
+         * significar «este producto no verifica identidad». Ver {@link KycOptions}.
+         */
+        KycOptions kyc
 
 ) {
 
@@ -84,11 +94,30 @@ public record Capabilities(
                         boolean requiresBeneficiaryPartyId) {
         this(hasAmortizationSchedule, hasCreditLimit, allowsMultipleDispositions, dispositionType,
              hasCutoffDate, hasMinimumPayment, allowsMultipleObligors, commissionsEnabled,
-             requiresBeneficiaryPartyId, OpcionesDePago.ninguna());
+             requiresBeneficiaryPartyId, PaymentOptions.none(), KycOptions.requiredManual());
+    }
+
+    /**
+     * Compatibilidad con la configuración anterior a F3b: la que ya declaraba opciones de pago pero
+     * todavía no el bloque de KYC. Cae al default seguro, que es exigirlo y resolverlo a mano.
+     */
+    public Capabilities(boolean hasAmortizationSchedule, boolean hasCreditLimit,
+                        boolean allowsMultipleDispositions, String dispositionType,
+                        boolean hasCutoffDate, boolean hasMinimumPayment,
+                        boolean allowsMultipleObligors, boolean commissionsEnabled,
+                        boolean requiresBeneficiaryPartyId, PaymentOptions opcionesDePago) {
+        this(hasAmortizationSchedule, hasCreditLimit, allowsMultipleDispositions, dispositionType,
+             hasCutoffDate, hasMinimumPayment, allowsMultipleObligors, commissionsEnabled,
+             requiresBeneficiaryPartyId, opcionesDePago, KycOptions.requiredManual());
     }
 
     /** Nunca nulo, venga de donde venga la fila. */
-    public OpcionesDePago opciones() {
-        return OpcionesDePago.oNinguna(opcionesDePago);
+    public PaymentOptions options() {
+        return PaymentOptions.orNone(opcionesDePago);
+    }
+
+    /** Nunca nulo y nunca permisivo: una fila sin bloque exige KYC manual. */
+    public KycOptions kycOptions() {
+        return KycOptions.orDefault(kyc);
     }
 }

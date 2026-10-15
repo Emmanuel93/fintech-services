@@ -65,7 +65,7 @@ class DistributedLockIT {
         REDIS.stop();
     }
 
-    static Stream<org.junit.jupiter.params.provider.Arguments> proveedores() {
+    static Stream<org.junit.jupiter.params.provider.Arguments> providers() {
         StringRedisTemplate template = new StringRedisTemplate(lettuce);
         return Stream.of(
                 org.junit.jupiter.params.provider.Arguments.of("redisson",
@@ -74,47 +74,47 @@ class DistributedLockIT {
                         new RedisDistributedLock(template)));
     }
 
-    private static LockKey nuevaLlave() {
+    private static LockKey newKey() {
         return LockKey.of("test", "unit", UUID.randomUUID().toString());
     }
 
     // ── El requisito literal: el primero entra, los demás no esperan ──────────
 
     @ParameterizedTest(name = "[{0}] el primero entra y el segundo NO")
-    @MethodSource("proveedores")
+    @MethodSource("providers")
     @DisplayName("múltiples peticiones sobre la misma llave: sólo la primera se procesa")
-    void soloElPrimeroEntra(String nombre, DistributedLock lock) {
-        LockKey key = nuevaLlave();
+    void soloElPrimeroEntra(String name, DistributedLock lock) {
+        LockKey key = newKey();
 
-        Optional<LockHandle> primero = lock.tryAcquire(key, Duration.ofSeconds(30));
+        Optional<LockHandle> first = lock.tryAcquire(key, Duration.ofSeconds(30));
         Optional<LockHandle> segundo = lock.tryAcquire(key, Duration.ofSeconds(30));
 
-        assertThat(primero).as("[%s] el primero entra", nombre).isPresent();
-        assertThat(segundo).as("[%s] el segundo se descarta, no espera", nombre).isEmpty();
+        assertThat(first).as("[%s] el primero entra", name).isPresent();
+        assertThat(segundo).as("[%s] el segundo se descarta, no espera", name).isEmpty();
 
-        lock.release(primero.orElseThrow());
+        lock.release(first.orElseThrow());
     }
 
     @ParameterizedTest(name = "[{0}] tras liberar, el siguiente entra")
-    @MethodSource("proveedores")
-    void trasLiberarEntraElSiguiente(String nombre, DistributedLock lock) {
-        LockKey key = nuevaLlave();
+    @MethodSource("providers")
+    void trasLiberarEntraElSiguiente(String name, DistributedLock lock) {
+        LockKey key = newKey();
 
-        LockHandle primero = lock.tryAcquire(key, Duration.ofSeconds(30)).orElseThrow();
-        lock.release(primero);
+        LockHandle first = lock.tryAcquire(key, Duration.ofSeconds(30)).orElseThrow();
+        lock.release(first);
 
         Optional<LockHandle> segundo = lock.tryAcquire(key, Duration.ofSeconds(30));
-        assertThat(segundo).as("[%s]", nombre).isPresent();
+        assertThat(segundo).as("[%s]", name).isPresent();
         lock.release(segundo.orElseThrow());
     }
 
     @ParameterizedTest(name = "[{0}] llaves distintas no se estorban")
-    @MethodSource("proveedores")
-    void llavesDistintasNoSeEstorban(String nombre, DistributedLock lock) {
-        LockHandle a = lock.tryAcquire(nuevaLlave(), Duration.ofSeconds(30)).orElseThrow();
-        LockHandle b = lock.tryAcquire(nuevaLlave(), Duration.ofSeconds(30)).orElseThrow();
+    @MethodSource("providers")
+    void llavesDistintasNoSeEstorban(String name, DistributedLock lock) {
+        LockHandle a = lock.tryAcquire(newKey(), Duration.ofSeconds(30)).orElseThrow();
+        LockHandle b = lock.tryAcquire(newKey(), Duration.ofSeconds(30)).orElseThrow();
 
-        assertThat(a.key()).as("[%s]", nombre).isNotEqualTo(b.key());
+        assertThat(a.key()).as("[%s]", name).isNotEqualTo(b.key());
         lock.release(a);
         lock.release(b);
     }
@@ -122,42 +122,42 @@ class DistributedLockIT {
     // ── La llave de N segundos: el pod que muere no atasca el sistema ─────────
 
     @ParameterizedTest(name = "[{0}] al vencer el TTL, otro entra sin intervención")
-    @MethodSource("proveedores")
+    @MethodSource("providers")
     @DisplayName("el pod muere sin liberar: el TTL suelta el candado solo")
-    void elTtlSueltaElCandado(String nombre, DistributedLock lock) throws Exception {
-        LockKey key = nuevaLlave();
+    void elTtlSueltaElCandado(String name, DistributedLock lock) throws Exception {
+        LockKey key = newKey();
 
         // Se toma y NUNCA se libera: es el pod que muere a media corrida.
         assertThat(lock.tryAcquire(key, Duration.ofMillis(800))).isPresent();
         assertThat(lock.tryAcquire(key, Duration.ofSeconds(30)))
-                .as("[%s] mientras el TTL vive, nadie más entra", nombre).isEmpty();
+                .as("[%s] mientras el TTL vive, nadie más entra", name).isEmpty();
 
         Thread.sleep(1_100);
 
         Optional<LockHandle> despues = lock.tryAcquire(key, Duration.ofSeconds(5));
-        assertThat(despues).as("[%s] vencido el TTL, otro pod entra", nombre).isPresent();
+        assertThat(despues).as("[%s] vencido el TTL, otro pod entra", name).isPresent();
         lock.release(despues.orElseThrow());
     }
 
     // ── Fencing: la defensa contra el titular que ya no lo es ─────────────────
 
     @ParameterizedTest(name = "[{0}] el fencing token crece en cada adquisición")
-    @MethodSource("proveedores")
+    @MethodSource("providers")
     @DisplayName("el fencing token es estrictamente creciente y sobrevive a la liberación")
-    void fencingEstrictamenteCreciente(String nombre, DistributedLock lock) {
-        LockKey key = nuevaLlave();
+    void fencingEstrictamenteCreciente(String name, DistributedLock lock) {
+        LockKey key = newKey();
 
-        long t1 = tomarYSoltar(lock, key);
-        long t2 = tomarYSoltar(lock, key);
-        long t3 = tomarYSoltar(lock, key);
+        long t1 = acquireAndRelease(lock, key);
+        long t2 = acquireAndRelease(lock, key);
+        long t3 = acquireAndRelease(lock, key);
 
         // Si el contador viviera en la llave del candado, el borrado de la liberación lo
         // reiniciaría y los tres números serían el mismo.
-        assertThat(List.of(t1, t2, t3)).as("[%s]", nombre).isSorted();
-        assertThat(t1).as("[%s] estrictamente creciente", nombre).isLessThan(t3);
+        assertThat(List.of(t1, t2, t3)).as("[%s]", name).isSorted();
+        assertThat(t1).as("[%s] estrictamente creciente", name).isLessThan(t3);
     }
 
-    private long tomarYSoltar(DistributedLock lock, LockKey key) {
+    private long acquireAndRelease(DistributedLock lock, LockKey key) {
         LockHandle h = lock.tryAcquire(key, Duration.ofSeconds(10)).orElseThrow();
         long token = h.fencingToken();
         lock.release(h);
@@ -167,10 +167,10 @@ class DistributedLockIT {
     // ── Exclusión real bajo concurrencia ─────────────────────────────────────
 
     @ParameterizedTest(name = "[{0}] 32 hilos, una llave: exclusión estricta")
-    @MethodSource("proveedores")
+    @MethodSource("providers")
     @DisplayName("bajo concurrencia real, dos hilos nunca están dentro a la vez")
-    void exclusionBajoConcurrencia(String nombre, DistributedLock lock) throws Exception {
-        LockKey key = nuevaLlave();
+    void exclusionBajoConcurrencia(String name, DistributedLock lock) throws Exception {
+        LockKey key = newKey();
         int hilos = 32;
 
         AtomicInteger dentroAhora = new AtomicInteger();
@@ -202,21 +202,21 @@ class DistributedLockIT {
         }
 
         salida.countDown();
-        assertThat(fin.await(60, TimeUnit.SECONDS)).as("[%s] terminan a tiempo", nombre).isTrue();
+        assertThat(fin.await(60, TimeUnit.SECONDS)).as("[%s] terminan a tiempo", name).isTrue();
         pool.shutdownNow();
 
         assertThat(maxSimultaneos.get())
-                .as("[%s] nunca hubo dos hilos dentro de la sección crítica", nombre)
+                .as("[%s] nunca hubo dos hilos dentro de la sección crítica", name)
                 .isEqualTo(1);
         assertThat(ejecuciones.get())
-                .as("[%s] al menos uno hizo el trabajo", nombre)
+                .as("[%s] al menos uno hizo el trabajo", name)
                 .isGreaterThanOrEqualTo(1);
     }
 
     @ParameterizedTest(name = "[{0}] withLock libera aunque el trabajo lance")
-    @MethodSource("proveedores")
-    void withLockLiberaAnteExcepcion(String nombre, DistributedLock lock) {
-        LockKey key = nuevaLlave();
+    @MethodSource("providers")
+    void withLockLiberaAnteExcepcion(String name, DistributedLock lock) {
+        LockKey key = newKey();
 
         try {
             lock.withLock(key, Duration.ofSeconds(30), () -> { throw new IllegalStateException("boom"); });
@@ -224,8 +224,8 @@ class DistributedLockIT {
             // se propaga a propósito
         }
 
-        Optional<LockHandle> siguiente = lock.tryAcquire(key, Duration.ofSeconds(5));
-        assertThat(siguiente).as("[%s] el candado quedó libre pese a la excepción", nombre).isPresent();
-        lock.release(siguiente.orElseThrow());
+        Optional<LockHandle> next = lock.tryAcquire(key, Duration.ofSeconds(5));
+        assertThat(next).as("[%s] el candado quedó libre pese a la excepción", name).isPresent();
+        lock.release(next.orElseThrow());
     }
 }

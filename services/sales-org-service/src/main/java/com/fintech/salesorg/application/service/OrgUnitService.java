@@ -88,15 +88,15 @@ public class OrgUnitService implements OrgUnitUseCase {
         OrgLevel level = levelRepository.findById(unit.getLevelId())
                 .orElseThrow(() -> new OrgLevelNotFoundException(String.valueOf(unit.getLevelId())));
 
-        String pathAnterior = unit.getPath();
-        String nuevoPath;
+        String previousPath = unit.getPath();
+        String newPath;
 
         if (nuevoPadreId == null) {
             if (level.getDepth() != 0) {
                 throw new InvalidHierarchyException(
                         "Sólo el nivel raíz puede quedarse sin padre, y " + level.getCode() + " no lo es");
             }
-            nuevoPath = unit.getCode();
+            newPath = unit.getCode();
         } else {
             if (nuevoPadreId.equals(unitId)) {
                 throw new InvalidHierarchyException("Una unidad no puede colgar de sí misma");
@@ -105,7 +105,7 @@ public class OrgUnitService implements OrgUnitUseCase {
                     .orElseThrow(() -> new OrgUnitNotFoundException(String.valueOf(nuevoPadreId)));
             // Mover un ancestro dentro de su propia rama dejaría un ciclo: el árbol seguiría
             // guardado y cualquier recorrido no terminaría nunca.
-            if (padre.getPath().equals(pathAnterior) || padre.getPath().startsWith(pathAnterior + ".")) {
+            if (padre.getPath().equals(previousPath) || padre.getPath().startsWith(previousPath + ".")) {
                 throw new InvalidHierarchyException(
                         "No se puede mover una unidad dentro de su propia rama");
             }
@@ -116,24 +116,24 @@ public class OrgUnitService implements OrgUnitUseCase {
                         "El nivel " + level.getCode() + " (profundidad " + level.getDepth() + ") no "
                         + "cuelga de " + nivelPadre.getCode() + " (profundidad " + nivelPadre.getDepth() + ")");
             }
-            nuevoPath = padre.getPath() + "." + unit.getCode();
+            newPath = padre.getPath() + "." + unit.getCode();
         }
 
-        List<OrgUnit> rama = unitRepository.findSubtree(pathAnterior);
-        unit.moveTo(nuevoPadreId, nuevoPath);
+        List<OrgUnit> rama = unitRepository.findSubtree(previousPath);
+        unit.moveTo(nuevoPadreId, newPath);
         unitRepository.save(unit);
 
         for (OrgUnit descendiente : rama) {
             if (descendiente.getUnitId().equals(unitId)) continue;
             String suPath = descendiente.getPath();
-            if (!suPath.startsWith(pathAnterior + ".")) continue;
+            if (!suPath.startsWith(previousPath + ".")) continue;
             descendiente.moveTo(descendiente.getParentUnitId(),
-                    nuevoPath + suPath.substring(pathAnterior.length()));
+                    newPath + suPath.substring(previousPath.length()));
             unitRepository.save(descendiente);
         }
 
         log.info("Moved org unit {} from path {} to {} ({} descendientes reescritos)",
-                unit.getCode(), pathAnterior, nuevoPath, Math.max(0, rama.size() - 1));
+                unit.getCode(), previousPath, newPath, Math.max(0, rama.size() - 1));
         return unit;
     }
 

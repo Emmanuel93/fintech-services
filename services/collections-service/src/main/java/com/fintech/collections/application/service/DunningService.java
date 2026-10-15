@@ -71,7 +71,7 @@ public class DunningService {
             log.debug("Cadencia automática apagada por configuración");
             return 0;
         }
-        if (!dentroDeVentana()) {
+        if (!withinWindow()) {
             log.warn("Corrida de cadencia fuera de la ventana permitida ({}:00-{}:00); no se envía nada",
                     properties.getContactAllowedHoursStart(), properties.getContactAllowedHoursEnd());
             return 0;
@@ -111,7 +111,7 @@ public class DunningService {
     }
 
     /** La misma ventana que se le exige a un agente. */
-    private boolean dentroDeVentana() {
+    private boolean withinWindow() {
         int hora = LocalTime.now(ZoneId.systemDefault()).getHour();
         return hora >= properties.getContactAllowedHoursStart()
             && hora <  properties.getContactAllowedHoursEnd();

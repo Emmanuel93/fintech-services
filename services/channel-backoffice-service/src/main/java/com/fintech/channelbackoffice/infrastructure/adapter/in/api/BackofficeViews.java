@@ -215,9 +215,9 @@ final class BackofficeViews {
         cond.put("tasaMoratoriaAnual", p.moratoriumRateAnnual());
         cond.put("comisionApertura", p.openingFeeRate());
         cond.put("comisionPrepago", p.prepaymentFeeRate());
-        cond.put("plazoMeses", rango(p.minTerm(), p.defaultTerm(), p.maxTerm()));
-        cond.put("monto", rango(p.minAmount(), null, p.maxAmount()));
-        cond.put("lineaCredito", rango(p.minCreditLine(), p.defaultCreditLine(), p.maxCreditLine()));
+        cond.put("plazoMeses", range(p.minTerm(), p.defaultTerm(), p.maxTerm()));
+        cond.put("monto", range(p.minAmount(), null, p.maxAmount()));
+        cond.put("lineaCredito", range(p.minCreditLine(), p.defaultCreditLine(), p.maxCreditLine()));
         cond.put("moneda", p.currency());
         cond.put("amortizacion", p.amortizationType());
         cond.put("audiencia", p.targetAudience());
@@ -240,7 +240,7 @@ final class BackofficeViews {
         if (p.eligiblePartyTypes() != null) prospectTypes.addAll(p.eligiblePartyTypes());
         applicable.forEach(pol -> { if (pol.prospectType() != null) prospectTypes.add(pol.prospectType()); });
 
-        List<Map<String, Object>> porTipo = prospectTypes.stream().map(tipo -> {
+        List<Map<String, Object>> byType = prospectTypes.stream().map(tipo -> {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("tipoProspecto", tipo);
             var governing = applicable.stream()
@@ -250,7 +250,7 @@ final class BackofficeViews {
             row.put("sinPolitica", governing == null);
             return row;
         }).toList();
-        scoring.put("porTipoProspecto", porTipo);
+        scoring.put("porTipoProspecto", byType);
 
         // Lista plana (compatibilidad); el desglose por tipo de arriba es la vista principal.
         scoring.put("politicas", applicable.stream().map(BackofficeViews::scoringPolicy).toList());
@@ -309,7 +309,8 @@ final class BackofficeViews {
         // nombre interno —«WORST_ARREARS_BALANCE ≤ 5000»— y deja de ser explicable a un cliente,
         // que es justo para lo que existe esta traducción.
         String sujeto = switch (r.ruleType()) {
-            case "MORA_CHECK"     -> "Días de mora";
+            // Se aceptan los dos: la base puede no haber corrido aún el 014 que renombra la fila.
+            case "WORST_ARREARS_DAYS", "MORA_CHECK" -> "Días de mora";
             case "FICO_THRESHOLD" -> "Score de buró";
             case "CREDIT_COUNT"   -> "Número de créditos" + (r.creditType() != null ? " (" + r.creditType() + ")" : "");
             case "BALANCE_CHECK"  -> "Saldo vencido hoy";
@@ -334,11 +335,11 @@ final class BackofficeViews {
         String op = switch (r.operator()) {
             case "GT" -> ">"; case "GTE" -> "≥"; case "LT" -> "<"; case "LTE" -> "≤"; case "EQ" -> "="; default -> r.operator();
         };
-        String valor = trimNumber(r.thresholdValue());
-        String periodo = r.periodMonths() != null ? " en " + r.periodMonths() + " meses" : "";
+        String value = trimNumber(r.thresholdValue());
+        String period = r.periodMonths() != null ? " en " + r.periodMonths() + " meses" : "";
         String efecto = r.disqualifying() ? "descalifica"
                 : (r.scoreContribution() >= 0 ? "+" : "") + r.scoreContribution() + " pts";
-        return sujeto + " " + op + " " + valor + periodo + " → " + efecto;
+        return sujeto + " " + op + " " + value + period + " → " + efecto;
     }
 
     private static String decisionText(String decision) {
@@ -355,7 +356,7 @@ final class BackofficeViews {
         return v == Math.floor(v) ? String.valueOf((long) v) : String.valueOf(v);
     }
 
-    private static Map<String, Object> rango(Object min, Object def, Object max) {
+    private static Map<String, Object> range(Object min, Object def, Object max) {
         Map<String, Object> r = new LinkedHashMap<>();
         r.put("min", min);
         if (def != null) r.put("default", def);

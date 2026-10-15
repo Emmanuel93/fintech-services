@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * necesitan Redis, pero sí necesitan que el contexto levante.
  *
  * <p><b>No sirve para nada más.</b> Es exclusión dentro de una sola JVM: no coordina réplicas.
- * El reparto de verdad se prueba en {@code MotorDeCorridasIT} contra un Redis real, que es donde
+ * El reparto de verdad se prueba en {@code ClosingRunEngineIT} contra un Redis real, que es donde
  * salieron los dos fallos que los mocks no ven.
  */
 @TestConfiguration

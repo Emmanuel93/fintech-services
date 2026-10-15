@@ -1,5 +1,7 @@
 package com.fintech.scoring.application.service;
 
+import com.fintech.scoring.application.EvaluationNotReady;
+import com.fintech.scoring.application.port.out.BureauPrefetchRepository;
 import com.fintech.scoring.application.port.out.CirculoReportRepository;
 import com.fintech.scoring.application.port.out.PrequalificationSnapshotRepository;
 import com.fintech.scoring.application.port.out.ScoreEvaluationRepository;
@@ -38,13 +40,15 @@ class ScoringEvaluationServiceTest {
     final UUID prefetchId = UUID.randomUUID();
     final UUID applicationId = UUID.randomUUID();
 
+    @Mock BureauPrefetchRepository prefetchRepository;
+
     ScoringPolicy policy;
 
     @BeforeEach
     void setUp() {
         service = new ScoringEvaluationService(
-                policyRepository, evaluationRepository, reportRepository, eventPublisher,
-                snapshotRepository, 24L);
+                prefetchRepository, policyRepository, evaluationRepository, reportRepository,
+                eventPublisher, snapshotRepository, 24L);
         lenient().when(evaluationRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         policy = buildPolicy();
     }
@@ -52,24 +56,65 @@ class ScoringEvaluationServiceTest {
     // ── evaluateForApplication (Phase D — triggered by ScoreRequested) ──────────
 
     @Test
-    void evaluateForApplication_noReport_skips() {
+    @org.junit.jupiter.api.DisplayName("Sin prefetch: dice que nunca se pidió, y que esperar no sirve")
+    void evaluateForApplication_sinPrefetch_diceElMotivo() {
         given(reportRepository.findByProspectId(prospectId)).willReturn(Optional.empty());
+        given(prefetchRepository.existsActiveByProspectId(prospectId)).willReturn(false);
+        given(prefetchRepository.findLatestByProspectId(prospectId)).willReturn(Optional.empty());
 
-        var result = service.evaluateForApplication(applicationId, prospectId, "INDIVIDUAL", "PERSONAL_LOAN");
+        assertThatThrownBy(() -> service.evaluateForApplication(
+                applicationId, prospectId, "INDIVIDUAL", "PERSONAL_LOAN"))
+                .isInstanceOf(EvaluationNotReady.class)
+                .extracting(e -> ((EvaluationNotReady) e).reason())
+                .isEqualTo(EvaluationNotReady.Reason.NO_PREFETCH);
 
-        assertThat(result).isEmpty();
         then(evaluationRepository).should(never()).save(any());
         then(eventPublisher).should(never()).publishCompleted(any());
     }
 
     @Test
-    void evaluateForApplication_noPolicyFound_skipsWithoutSaving() {
+    @org.junit.jupiter.api.DisplayName("🔑 Prefetch en vuelo: es una carrera, y SÍ vale la pena esperar")
+    void evaluateForApplication_prefetchEnVuelo_esCarrera() {
+        // La distinción que antes no existía: esto y «el prefetch falló» salían por el mismo
+        // Optional.empty(). A uno se le espera; al otro, esperar sólo retrasa que alguien se entere.
+        given(reportRepository.findByProspectId(prospectId)).willReturn(Optional.empty());
+        given(prefetchRepository.existsActiveByProspectId(prospectId)).willReturn(true);
+
+        assertThatThrownBy(() -> service.evaluateForApplication(
+                applicationId, prospectId, "INDIVIDUAL", "PERSONAL_LOAN"))
+                .isInstanceOf(EvaluationNotReady.class)
+                .matches(e -> ((EvaluationNotReady) e).isTransient(), "va llegando");
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("Prefetch FALLIDO: no va a llegar, así que reintentar la evaluación no sirve")
+    void evaluateForApplication_prefetchFallido_noVaALlegar() {
+        given(reportRepository.findByProspectId(prospectId)).willReturn(Optional.empty());
+        given(prefetchRepository.existsActiveByProspectId(prospectId)).willReturn(false);
+        given(prefetchRepository.findLatestByProspectId(prospectId))
+                .willReturn(Optional.of(failedPrefetch()));
+
+        assertThatThrownBy(() -> service.evaluateForApplication(
+                applicationId, prospectId, "INDIVIDUAL", "PERSONAL_LOAN"))
+                .isInstanceOf(EvaluationNotReady.class)
+                .matches(e -> !((EvaluationNotReady) e).isTransient(), "NO va llegando")
+                .extracting(e -> ((EvaluationNotReady) e).reason())
+                .isEqualTo(EvaluationNotReady.Reason.PREFETCH_FAILED);
+    }
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("Sin política activa: es configuración, y esperar no la trae")
+    void evaluateForApplication_sinPolitica_noVaALlegar() {
         given(reportRepository.findByProspectId(prospectId)).willReturn(Optional.of(reportWithFico(720)));
         given(policyRepository.findActiveBy(any())).willReturn(Optional.empty());
 
-        var result = service.evaluateForApplication(applicationId, prospectId, "INDIVIDUAL", "PERSONAL_LOAN");
+        assertThatThrownBy(() -> service.evaluateForApplication(
+                applicationId, prospectId, "INDIVIDUAL", "PERSONAL_LOAN"))
+                .isInstanceOf(EvaluationNotReady.class)
+                .matches(e -> !((EvaluationNotReady) e).isTransient(), "NO va llegando")
+                .extracting(e -> ((EvaluationNotReady) e).reason())
+                .isEqualTo(EvaluationNotReady.Reason.NO_ACTIVE_POLICY);
 
-        assertThat(result).isEmpty();
         then(evaluationRepository).should(never()).save(any());
         then(eventPublisher).should(never()).publishCompleted(any());
     }
@@ -124,7 +169,7 @@ class ScoringEvaluationServiceTest {
     @Test
     void evaluateForApplication_disqualifyingMora_savesAltoRejected() {
         given(reportRepository.findByProspectId(prospectId))
-                .willReturn(Optional.of(reportWithFicoAndMora(750, BigDecimal.valueOf(120))));
+                .willReturn(Optional.of(reportWithFicoAndDelinquency(750, BigDecimal.valueOf(120))));
         given(policyRepository.findActiveBy("PERSONAL_LOAN")).willReturn(Optional.of(policy));
         service.evaluateForApplication(applicationId, prospectId, "INDIVIDUAL", "PERSONAL_LOAN");
 
@@ -193,7 +238,7 @@ class ScoringEvaluationServiceTest {
         return b.build();
     }
 
-    private CirculoReport reportWithFicoAndMora(int fico, BigDecimal peorAtraso) {
+    private CirculoReport reportWithFicoAndDelinquency(int fico, BigDecimal peorAtraso) {
         CirculoReport report = CirculoReport.builder(UUID.randomUUID(), prefetchId, prospectId)
                 .status(CirculoReportStatus.SUCCESS)
                 .ficoScoreValor(fico)
@@ -223,11 +268,20 @@ class ScoringEvaluationServiceTest {
                 RuleOperator.GTE, BigDecimal.valueOf(700), 100, false, null, null));
         p.addRule(ScoringRule.create(UUID.randomUUID(), p, RuleType.FICO_THRESHOLD, null,
                 RuleOperator.GTE, BigDecimal.valueOf(650), 50, false, null, null));
-        p.addRule(ScoringRule.create(UUID.randomUUID(), p, RuleType.MORA_CHECK, null,
+        p.addRule(ScoringRule.create(UUID.randomUUID(), p, RuleType.WORST_ARREARS_DAYS, null,
                 RuleOperator.GT, BigDecimal.valueOf(90), -500, true, null, null));
         p.addThreshold(RiskThreshold.create(UUID.randomUUID(), p, RiskLevel.BAJO, 200, ScoringDecision.AUTO_APPROVED));
         p.addThreshold(RiskThreshold.create(UUID.randomUUID(), p, RiskLevel.MEDIO, 100, ScoringDecision.MANUAL_REVIEW));
         p.addThreshold(RiskThreshold.create(UUID.randomUUID(), p, RiskLevel.ALTO, -9999, ScoringDecision.REJECTED));
+        return p;
+    }
+
+    /** Un prefetch que ya terminó mal. Lo que importa es su estado, no sus datos. */
+    private static com.fintech.scoring.domain.BureauPrefetch failedPrefetch() {
+        var p = com.fintech.scoring.domain.BureauPrefetch.create(
+                UUID.randomUUID(), UUID.randomUUID(), "CURP000000HDFXXX01", "consent-1",
+                "INDIVIDUAL", "PERSONAL_LOAN");
+        p.markFailed("Círculo no respondió");
         return p;
     }
 }

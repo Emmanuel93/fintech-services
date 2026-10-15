@@ -12,7 +12,7 @@ import java.util.UUID;
  */
 public class NoPayoutRouteException extends RuntimeException {
 
-    public NoPayoutRouteException(UUID companyId, PayoutRail rail, BigDecimal monto) {
-        super("Sin ruta de pago para empresa=" + companyId + " rail=" + rail + " monto=" + monto);
+    public NoPayoutRouteException(UUID companyId, PayoutRail rail, BigDecimal amount) {
+        super("Sin ruta de pago para empresa=" + companyId + " rail=" + rail + " monto=" + amount);
     }
 }

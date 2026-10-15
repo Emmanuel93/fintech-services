@@ -63,7 +63,7 @@ public class ServiceTokenProvider {
     public Optional<String> token() {
         Token vigente = token.get();
         if (vigente != null && vigente.sirveAhora()) {
-            return Optional.of(vigente.valor());
+            return Optional.of(vigente.value());
         }
         if (!config.isConfigured()) {
             return Optional.empty();   // sin secreto configurado no hay nada que intentar
@@ -71,7 +71,7 @@ public class ServiceTokenProvider {
         if (Instant.now().isBefore(noReintentarAntesDe.get())) {
             return Optional.empty();
         }
-        return solicitar();
+        return request();
     }
 
     /**
@@ -83,9 +83,9 @@ public class ServiceTokenProvider {
         token.set(null);
     }
 
-    private Optional<String> solicitar() {
+    private Optional<String> request() {
         try {
-            Map<?, ?> respuesta = identityWebClient.post()
+            Map<?, ?> response = identityWebClient.post()
                     .uri("/api/v1/auth/clients/token")
                     .bodyValue(Map.of("clientId", config.getClientId(),
                                       "clientSecret", config.getSecret()))
@@ -95,15 +95,15 @@ public class ServiceTokenProvider {
                     .bodyToMono(Map.class)
                     .block();
 
-            String acceso = respuesta == null ? null : String.valueOf(respuesta.get("accessToken"));
+            String acceso = response == null ? null : String.valueOf(response.get("accessToken"));
             if (acceso == null || acceso.isBlank() || "null".equals(acceso)) {
-                return fallo("identity no devolvió accessToken");
+                return failure("identity no devolvió accessToken");
             }
-            token.set(new Token(acceso, expiracion(respuesta)));
+            token.set(new Token(acceso, expiry(response)));
             log.info("credencial de servicio del canal renovada contra identity-service");
             return Optional.of(acceso);
         } catch (RuntimeException e) {
-            return fallo(e.toString());
+            return failure(e.toString());
         }
     }
 
@@ -112,12 +112,12 @@ public class ServiceTokenProvider {
      * se asume un minuto, que es lo bastante corto para no quedarse con un token muerto y lo
      * bastante largo para no pedir uno por request.
      */
-    private static Instant expiracion(Map<?, ?> respuesta) {
-        long segundos = respuesta.get("expiresIn") instanceof Number n ? n.longValue() : 60L;
+    private static Instant expiry(Map<?, ?> response) {
+        long segundos = response.get("expiresIn") instanceof Number n ? n.longValue() : 60L;
         return Instant.now().plusSeconds(Math.max(segundos, 1)).minus(MARGEN);
     }
 
-    private Optional<String> fallo(String motivo) {
+    private Optional<String> failure(String motivo) {
         noReintentarAntesDe.set(Instant.now().plus(ESPERA_TRAS_FALLO));
         token.set(null);
         log.warn("no se pudo obtener la credencial de servicio ({}); la bitácora guardará el "
@@ -125,7 +125,7 @@ public class ServiceTokenProvider {
         return Optional.empty();
     }
 
-    private record Token(String valor, Instant sirveHasta) {
+    private record Token(String value, Instant sirveHasta) {
         boolean sirveAhora() {
             return Instant.now().isBefore(sirveHasta);
         }

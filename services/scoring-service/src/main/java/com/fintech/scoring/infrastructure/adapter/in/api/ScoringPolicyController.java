@@ -44,15 +44,15 @@ public class ScoringPolicyController {
      */
     @GetMapping("/rule-types")
     public List<Map<String, Object>> ruleTypes() {
-        return RuleType.catalogo().stream().map(t -> {
+        return RuleType.catalog().stream().map(t -> {
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("tipo", t.name());
+            m.put("type", t.name());
             m.put("dimension", t.dimension().name());
-            m.put("etiqueta", t.etiqueta());
-            m.put("unidad", t.unidad().name());
-            m.put("explicacion", t.explicacion());
-            m.put("aplicaTipoCredito", t.aplicaTipoCredito());
-            m.put("aplicaPeriodo", t.aplicaPeriodo());
+            m.put("label", t.label());
+            m.put("unit", t.unit().name());
+            m.put("explanation", t.explanation());
+            m.put("appliesToCreditType", t.appliesToCreditType());
+            m.put("appliesToPeriod", t.appliesToPeriod());
             return m;
         }).toList();
     }

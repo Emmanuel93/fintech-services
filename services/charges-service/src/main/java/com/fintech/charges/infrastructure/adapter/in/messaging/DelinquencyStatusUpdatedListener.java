@@ -33,7 +33,7 @@ public class DelinquencyStatusUpdatedListener {
         log.debug("delinquency-status-updated recibido creditAccountId={} dpd={} capitalVencido={}",
                 event.creditAccountId(), event.daysDelinquent(), event.overduePrincipal());
 
-        scheduleService.actualizarMora(
+        scheduleService.updateMoratorium(
                 event.creditAccountId(), event.overduePrincipal(), event.oldestDueDate());
     }
 }

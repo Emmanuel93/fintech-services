@@ -74,47 +74,47 @@ class DistributorsController {
                              @RequestParam(defaultValue = "0") int page,
                              @RequestParam(defaultValue = "25") int size) {
 
-        List<Nodo> nodos = nodosDistribuidores();
+        List<Nodo> nodes = distributorNodes();
         if (active != null) {
-            nodos = nodos.stream().filter(n -> n.activo() == active).toList();
+            nodes = nodes.stream().filter(n -> n.activo() == active).toList();
         }
 
         // Los datos de persona se piden en lote, no uno por uno: son decenas de distribuidores y
         // una llamada por cada uno convierte una pantalla en una tormenta de peticiones.
-        Map<UUID, PartyClient.PartyResponse> personas = personasDe(
-                nodos.stream().map(Nodo::partyRef).collect(Collectors.toSet()));
+        Map<UUID, PartyClient.PartyResponse> people = peopleOf(
+                nodes.stream().map(Nodo::partyRef).collect(Collectors.toSet()));
 
         // El filtro de texto se aplica DESPUÉS de hidratar: la gente busca por nombre o por RFC, y
         // eso sólo se conoce al juntar el nodo con su party.
-        List<Map<String, Object>> filas = nodos.stream()
-                .map(n -> fila(n, personas.get(n.partyRef())))
+        List<Map<String, Object>> rows = nodes.stream()
+                .map(n -> row(n, people.get(n.partyRef())))
                 .filter(f -> coincide(f, q))
                 .sorted(Comparator.comparing(f -> String.valueOf(f.get("fullName"))))
                 .toList();
 
-        int desde = Math.min(page * size, filas.size());
-        int hasta = Math.min(desde + size, filas.size());
+        int desde = Math.min(page * size, rows.size());
+        int hasta = Math.min(desde + size, rows.size());
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("content", filas.subList(desde, hasta));
+        body.put("content", rows.subList(desde, hasta));
         body.put("number", page);
         body.put("size", size);
-        body.put("totalElements", filas.size());
-        body.put("totalPages", Math.max(1, (int) Math.ceil(filas.size() / (double) size)));
+        body.put("totalElements", rows.size());
+        body.put("totalPages", Math.max(1, (int) Math.ceil(rows.size() / (double) size)));
         return body;
     }
 
     @GetMapping("/{partyId}")
     @Operation(summary = "Ficha del distribuidor: su línea y los créditos que colocó")
     Map<String, Object> detail(@PathVariable UUID partyId) {
-        Nodo nodo = nodosDistribuidores().stream()
+        Nodo node = distributorNodes().stream()
                 .filter(n -> partyId.equals(n.partyRef()))
                 .findFirst()
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.NOT_FOUND, "No hay ningún distribuidor con partyId=" + partyId));
 
         Map<String, Object> ficha = new LinkedHashMap<>(
-                fila(nodo, personasDe(List.of(partyId)).get(partyId)));
+                row(node, peopleOf(List.of(partyId)).get(partyId)));
 
         // Los créditos colocados: de commission salen los ids, de cartera los saldos. Se hidratan
         // en lote por la misma razón que arriba.
@@ -125,7 +125,7 @@ class DistributorsController {
 
         List<Map<String, Object>> credits = ids.isEmpty() ? List.of()
                 : creditPortfolioClient.batch(ids).stream()
-                    .map(DistributorsController::credito)
+                    .map(DistributorsController::credit)
                     .sorted(Comparator.comparing(c -> String.valueOf(c.get("contractNumber"))))
                     .toList();
 
@@ -145,7 +145,7 @@ class DistributorsController {
      * configurable y un 5 incrustado aquí dejaría de significar «distribuidor» en cuanto alguien
      * insertara un nivel intermedio, sin que nada avisara.
      */
-    private List<Nodo> nodosDistribuidores() {
+    private List<Nodo> distributorNodes() {
         UUID nivelId = salesOrgClient.listLevels().stream()
                 .filter(l -> NIVEL_DISTRIBUIDOR.equals(String.valueOf(l.get("code"))))
                 .map(l -> UUID.fromString(String.valueOf(l.get("levelId"))))
@@ -184,26 +184,26 @@ class DistributorsController {
      * <p>Buscar por {@code partyId} devolvía cero personas y las filas salían con el nombre del
      * nodo en vez del de la persona — un fallo que no rompe la pantalla, sólo la vuelve mentira.
      */
-    private Map<UUID, PartyClient.PartyResponse> personasDe(Collection<UUID> refs) {
+    private Map<UUID, PartyClient.PartyResponse> peopleOf(Collection<UUID> refs) {
         if (refs.isEmpty()) return Map.of();
         return partyClient.batch(refs, "prospectId").stream()
                 .filter(p -> p.prospectId() != null)
                 .collect(Collectors.toMap(PartyClient.PartyResponse::prospectId, p -> p, (a, b) -> a));
     }
 
-    private Map<String, Object> fila(Nodo nodo, PartyClient.PartyResponse persona) {
+    private Map<String, Object> row(Nodo node, PartyClient.PartyResponse persona) {
         Map<String, Object> f = new LinkedHashMap<>();
         // `partyId` es lo que la consola usa como clave del distribuidor y lo que cruza con la
         // cartera: el prospectId. `expedientePartyId` es la clave del expediente en party-service,
         // que es otra y hace falta para los roles y las relaciones.
-        f.put("partyId",      nodo.partyRef().toString());
+        f.put("partyId",      node.partyRef().toString());
         f.put("expedientePartyId", persona != null && persona.partyId() != null
                 ? persona.partyId().toString() : null);
-        f.put("unitId",       nodo.unitId().toString());
-        f.put("promoterCode", nodo.code());
-        f.put("active",       nodo.activo());
+        f.put("unitId",       node.unitId().toString());
+        f.put("promoterCode", node.code());
+        f.put("active",       node.activo());
 
-        f.put("fullName", persona != null ? nombre(persona) : nodo.name());
+        f.put("fullName", persona != null ? name(persona) : node.name());
         f.put("partyType", persona != null ? persona.partyType() : null);
         f.put("rfc",       persona != null ? persona.rfc()   : null);
         f.put("curp",      persona != null ? persona.curp()  : null);
@@ -221,44 +221,44 @@ class DistributorsController {
 
         // Su propia línea revolvente. Un distribuidor puede además tener crédito de uso propio, así
         // que no vale tomar «la primera cuenta»: hay que quedarse con la DISTRIBUTOR_LINE.
-        List<CreditPortfolioClient.CreditAccountResponse> propias = seguro(
-                () -> creditPortfolioClient.listByParty(nodo.partyRef()), List.of());
-        CreditPortfolioClient.CreditAccountResponse linea = propias.stream()
+        List<CreditPortfolioClient.CreditAccountResponse> propias = safe(
+                () -> creditPortfolioClient.listByParty(node.partyRef()), List.of());
+        CreditPortfolioClient.CreditAccountResponse line = propias.stream()
                 .filter(a -> LINEA_DISTRIBUIDORA.equals(a.productType()))
                 .findFirst().orElse(null);
 
-        f.put("creditLineId",        linea != null ? linea.creditAccountId().toString() : null);
-        f.put("creditLineLimit",     linea != null ? linea.creditLimit()     : null);
-        f.put("creditLineAvailable", linea != null ? linea.availableCredit() : null);
-        f.put("creditLineStatus",    linea != null ? linea.status()          : null);
-        f.put("daysDelinquent",      linea != null ? linea.daysDelinquent()  : 0);
+        f.put("creditLineId",        line != null ? line.creditAccountId().toString() : null);
+        f.put("creditLineLimit",     line != null ? line.creditLimit()     : null);
+        f.put("creditLineAvailable", line != null ? line.availableCredit() : null);
+        f.put("creditLineStatus",    line != null ? line.status()          : null);
+        f.put("daysDelinquent",      line != null ? line.daysDelinquent()  : 0);
 
         // Lo colocado a terceros.
-        List<CommissionClient.PromoterCredit> colocados = seguro(
-                () -> commissionClient.creditsByPromoters(List.of(nodo.partyRef())), List.of());
+        List<CommissionClient.PromoterCredit> colocados = safe(
+                () -> commissionClient.creditsByPromoters(List.of(node.partyRef())), List.of());
         f.put("originatedCredits", colocados.size());
-        f.put("originatedAmount", montoColocado(colocados));
+        f.put("originatedAmount", placedAmount(colocados));
 
         // La comisión. Devengada = ACCRUED sin liquidar; pagada = el resto de lo que devolvió
         // commission. Se devenga contra el pago, no contra la colocación (CM-01).
-        List<CommissionClient.CommissionRecord> comisiones = commissionClient.pendingOf(nodo.partyRef());
-        f.put("commissionAccrued", suma(comisiones, "ACCRUED"));
-        f.put("commissionPaid",    suma(comisiones, "LIQUIDATED"));
+        List<CommissionClient.CommissionRecord> comisiones = commissionClient.pendingOf(node.partyRef());
+        f.put("commissionAccrued", sum(comisiones, "ACCRUED"));
+        f.put("commissionPaid",    sum(comisiones, "LIQUIDATED"));
 
         return f;
     }
 
-    private BigDecimal montoColocado(List<CommissionClient.PromoterCredit> colocados) {
+    private BigDecimal placedAmount(List<CommissionClient.PromoterCredit> colocados) {
         if (colocados.isEmpty()) return BigDecimal.ZERO;
         List<UUID> ids = colocados.stream()
                 .map(CommissionClient.PromoterCredit::creditAccountId).toList();
-        return seguro(() -> creditPortfolioClient.batch(ids), List.<CreditPortfolioClient.CreditAccountResponse>of())
+        return safe(() -> creditPortfolioClient.batch(ids), List.<CreditPortfolioClient.CreditAccountResponse>of())
                 .stream()
                 .map(a -> a.principalBalance() == null ? BigDecimal.ZERO : a.principalBalance())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    private static Map<String, Object> credito(CreditPortfolioClient.CreditAccountResponse a) {
+    private static Map<String, Object> credit(CreditPortfolioClient.CreditAccountResponse a) {
         Map<String, Object> c = new LinkedHashMap<>();
         c.put("creditAccountId", a.creditAccountId().toString());
         c.put("contractNumber",  a.contractNumber());
@@ -271,24 +271,24 @@ class DistributorsController {
         return c;
     }
 
-    private static BigDecimal suma(List<CommissionClient.CommissionRecord> rs, String estado) {
+    private static BigDecimal sum(List<CommissionClient.CommissionRecord> rs, String status) {
         return rs.stream()
-                .filter(r -> estado.equals(r.status()))
+                .filter(r -> status.equals(r.status()))
                 .map(r -> r.amount() == null ? BigDecimal.ZERO : r.amount())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    private static boolean coincide(Map<String, Object> fila, String q) {
+    private static boolean coincide(Map<String, Object> row, String q) {
         if (q == null || q.isBlank()) return true;
         String needle = q.toLowerCase();
         return Stream.of("fullName", "promoterCode", "rfc", "curp")
-                .map(fila::get)
+                .map(row::get)
                 .filter(Objects::nonNull)
                 .map(v -> String.valueOf(v).toLowerCase())
                 .anyMatch(v -> v.contains(needle));
     }
 
-    private static String nombre(PartyClient.PartyResponse p) {
+    private static String name(PartyClient.PartyResponse p) {
         return Stream.of(p.firstName(), p.lastName1(), p.lastName2())
                 .filter(s -> s != null && !s.isBlank())
                 .collect(Collectors.joining(" "));
@@ -301,7 +301,7 @@ class DistributorsController {
      * la de una vista normal. Si commission no contesta, lo honesto es enseñar el distribuidor con
      * su línea y un cero en lo colocado, no un 502 que sugiere que no existe.
      */
-    private static <T> T seguro(java.util.function.Supplier<T> llamada, T porDefecto) {
+    private static <T> T safe(java.util.function.Supplier<T> llamada, T porDefecto) {
         try {
             T v = llamada.get();
             return v == null ? porDefecto : v;

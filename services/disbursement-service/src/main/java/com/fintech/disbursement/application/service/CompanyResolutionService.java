@@ -47,7 +47,7 @@ public class CompanyResolutionService {
             // sembrado y habilitado, esperando una llamada que la guarda no dejaba llegar.
             //
             // Sigue sin adivinarse nada: si nadie sembró el comodín, esto lanza igual.
-            return comodin(command).orElseThrow(() -> new UnresolvedCompanyException(
+            return wildcard(command).orElseThrow(() -> new UnresolvedCompanyException(
                     "El evento de " + command.sourceSystem() + " no trae companyId ni sourceCompanyKey,"
                             + " y no hay comodín '" + COMODIN + "' habilitado para ese sistema"
                             + " (sourceEventId=" + command.sourceEventId() + ")"));
@@ -60,13 +60,13 @@ public class CompanyResolutionService {
                 // Es lo que evita que dar de alta una sucursal nueva rompa sus pagos en silencio,
                 // el día que alguien coloque el primer crédito ahí y nadie recuerde que había que
                 // mapearla. Un mapeo específico siempre gana; el comodín sólo cubre el hueco.
-                .or(() -> comodin(command))
+                .or(() -> wildcard(command))
                 .orElseThrow(() -> new UnresolvedCompanyException(
                         "No hay mapeo habilitado para sourceSystem=" + command.sourceSystem()
                                 + " sourceKey=" + key + " (ni comodín '" + COMODIN + "')"));
     }
 
-    private java.util.Optional<UUID> comodin(RequestDisbursementCommand command) {
+    private java.util.Optional<UUID> wildcard(RequestDisbursementCommand command) {
         return mappings.find(command.sourceSystem(), COMODIN)
                 .filter(CompanyMapping::isEnabled)
                 .map(CompanyMapping::getCompanyId);

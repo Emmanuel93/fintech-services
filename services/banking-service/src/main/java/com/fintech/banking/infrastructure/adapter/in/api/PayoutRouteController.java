@@ -3,7 +3,7 @@ package com.fintech.banking.infrastructure.adapter.in.api;
 import com.fintech.banking.application.port.in.ManagePayoutRoutesUseCase;
 import com.fintech.banking.application.port.in.ManagePayoutRoutesUseCase.AltaDeRuta;
 import com.fintech.banking.application.port.in.ResolvePayoutRouteUseCase;
-import com.fintech.banking.application.port.in.ResolvePayoutRouteUseCase.Peticion;
+import com.fintech.banking.application.port.in.ResolvePayoutRouteUseCase.Request;
 import com.fintech.banking.domain.PayoutDecision;
 import com.fintech.banking.domain.PayoutProvider;
 import com.fintech.banking.domain.PayoutRail;
@@ -46,24 +46,24 @@ class PayoutRouteController {
      */
     @PostMapping("/payouts/route")
     PayoutDecision resolver(@Valid @RequestBody ResolveRouteRequest req) {
-        return resolver.resolver(new Peticion(req.companyId(), req.rail(), req.amount()));
+        return resolver.resolve(new Request(req.companyId(), req.rail(), req.amount()));
     }
 
     @PostMapping("/payout-routes")
-    ResponseEntity<PayoutRouteResponse> alta(@Valid @RequestBody CreatePayoutRouteRequest req) {
-        PayoutRoute r = admin.alta(new AltaDeRuta(req.companyId(), req.rail(), req.provider(),
+    ResponseEntity<PayoutRouteResponse> register(@Valid @RequestBody CreatePayoutRouteRequest req) {
+        PayoutRoute r = admin.register(new AltaDeRuta(req.companyId(), req.rail(), req.provider(),
                 req.bankAccountId(), req.minAmount(), req.maxAmount(), req.priority()));
-        return ResponseEntity.status(HttpStatus.CREATED).body(PayoutRouteResponse.de(r));
+        return ResponseEntity.status(HttpStatus.CREATED).body(PayoutRouteResponse.from(r));
     }
 
     @GetMapping("/payout-routes")
-    List<PayoutRouteResponse> listar() {
-        return admin.listar().stream().map(PayoutRouteResponse::de).toList();
+    List<PayoutRouteResponse> list() {
+        return admin.list().stream().map(PayoutRouteResponse::from).toList();
     }
 
     @DeleteMapping("/payout-routes/{id}")
-    PayoutRouteResponse deshabilitar(@PathVariable UUID id) {
-        return PayoutRouteResponse.de(admin.deshabilitar(id));
+    PayoutRouteResponse disable(@PathVariable UUID id) {
+        return PayoutRouteResponse.from(admin.disable(id));
     }
 
     record ResolveRouteRequest(UUID companyId,

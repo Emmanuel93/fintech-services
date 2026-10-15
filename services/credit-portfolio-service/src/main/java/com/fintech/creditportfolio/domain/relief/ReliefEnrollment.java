@@ -50,12 +50,12 @@ public class ReliefEnrollment {
 
     protected ReliefEnrollment() {}
 
-    public static ReliefEnrollment de(UUID programa, UUID cuenta, int dpd, int cuotasMovidas,
+    public static ReliefEnrollment from(UUID program, UUID account, int dpd, int cuotasMovidas,
                                       LocalDate antes, LocalDate despues) {
         ReliefEnrollment e = new ReliefEnrollment();
         e.id                         = UUID.randomUUID();
-        e.reliefProgramId            = programa;
-        e.creditAccountId            = cuenta;
+        e.reliefProgramId            = program;
+        e.creditAccountId            = account;
         e.daysDelinquentAtEnrollment = dpd;
         e.installmentsMoved          = cuotasMovidas;
         e.firstDueBefore             = antes;
@@ -65,9 +65,9 @@ public class ReliefEnrollment {
     }
 
     /** Al vencer la vigencia el calendario retoma y el DPD vuelve a correr. */
-    public void liberar() { this.releasedAt = Instant.now(); }
+    public void release() { this.releasedAt = Instant.now(); }
 
-    public boolean estaVigente() { return releasedAt == null; }
+    public boolean isActive() { return releasedAt == null; }
 
     public UUID getId()                     { return id; }
     public UUID getReliefProgramId()        { return reliefProgramId; }

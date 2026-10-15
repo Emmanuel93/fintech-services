@@ -15,9 +15,9 @@ class NotificationTemplateTest {
     void renderBody_substitutesKnownPlaceholders() {
         NotificationTemplate t = NotificationTemplate.create(EventType.OFFER_PRESENTED,
                 NotificationChannel.WHATSAPP, "es-MX", null,
-                "{{nombre}}, tu oferta de {{offeredAmount}} está lista");
+                "{{firstName}}, tu oferta de {{offeredAmount}} está lista");
 
-        String rendered = t.renderBody(Map.of("nombre", "Ana", "offeredAmount", "$10,000.00"));
+        String rendered = t.renderBody(Map.of("firstName", "Ana", "offeredAmount", "$10,000.00"));
 
         assertThat(rendered).isEqualTo("Ana, tu oferta de $10,000.00 está lista");
     }
@@ -25,11 +25,11 @@ class NotificationTemplateTest {
     @Test
     void renderBody_leavesPlaceholderWhenVariableMissing() {
         NotificationTemplate t = NotificationTemplate.create(EventType.WELCOME_ACTIVATED,
-                NotificationChannel.PUSH_NOTIFICATION, "es-MX", null, "Hola {{nombre}}");
+                NotificationChannel.PUSH_NOTIFICATION, "es-MX", null, "Hola {{firstName}}");
 
         String rendered = t.renderBody(Map.of());
 
-        assertThat(rendered).isEqualTo("Hola {{nombre}}");
+        assertThat(rendered).isEqualTo("Hola {{firstName}}");
     }
 
     @Test

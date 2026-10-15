@@ -20,9 +20,10 @@ import com.fintech.creditportfolio.domain.CreditAccountStatus;
 import com.fintech.creditportfolio.domain.Disposition;
 import com.fintech.creditportfolio.domain.DispositionStatus;
 import com.fintech.creditportfolio.domain.DispositionType;
+import com.fintech.creditportfolio.domain.PartyVerification;
 import com.fintech.creditportfolio.domain.Installment;
 import com.fintech.creditportfolio.domain.config.Capabilities;
-import com.fintech.creditportfolio.domain.config.OpcionesDePago;
+import com.fintech.creditportfolio.domain.config.PaymentOptions;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import com.fintech.creditportfolio.domain.event.BalanceUpdatedEvent;
 import com.fintech.creditportfolio.domain.event.CreditAccountActivatedEvent;
@@ -54,6 +55,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
     private final DispositionRepository dispositionRepository;
     private final InstallmentRepository installmentRepository;
     private final BalanceEventRepository balanceEventRepository;
+    private final com.fintech.creditportfolio.application.port.out.PartyVerificationRepository partyVerificationRepository;
     private final AmortizationEngine amortizationEngine;
 
     /** IVA nacional, para los créditos cuya sucursal todavía no se resuelve al originar. */
@@ -78,6 +80,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                                  AmortizationEngine amortizationEngine,
                                  CreditPortfolioEventPublisher eventPublisher,
                                  ProductConfigResolver configResolver,
+                                 com.fintech.creditportfolio.application.port.out.PartyVerificationRepository partyVerificationRepository,
                                  @org.springframework.beans.factory.annotation.Value(
                                      "${fintech.credit-portfolio.default-disposition-term:12}")
                                  int defaultDispositionTerm) {
@@ -89,6 +92,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         this.amortizationEngine     = amortizationEngine;
         this.eventPublisher         = eventPublisher;
         this.configResolver         = configResolver;
+        this.partyVerificationRepository = partyVerificationRepository;
     }
 
     /**
@@ -138,7 +142,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         // Correr sólo el devengo y dejar el plan quieto es el error obvio y silencioso: el cliente
         // no pagaría interés pero su primera cuota vencería igual, así que el «compra ahora, paga
         // después» le llegaría con una cuota exigible antes de haber empezado a pagar.
-        LocalDate arranqueBnpl = arranqueDeBnpl(caps.opciones(), cmd.bnplDeferralDays());
+        LocalDate arranqueBnpl = bnplStartDate(caps.options(), cmd.bnplDeferralDays());
 
         // 2. Generate amortisation schedule when the config enables it (AE-01)
         if (caps.hasAmortizationSchedule() && cmd.assignedTerm() != null) {
@@ -289,8 +293,8 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
      * {@code bnplMaxDeferralDays}: un tope que no se aplica no es un tope.
      */
     /** Delega en la configuración, que es quien sabe qué significa cada uno de sus campos. */
-    private LocalDate arranqueDeBnpl(OpcionesDePago opciones, Integer solicitados) {
-        LocalDate arranque = opciones.arranqueDeBnpl(LocalDate.now(), solicitados);
+    private LocalDate bnplStartDate(PaymentOptions opciones, Integer solicitados) {
+        LocalDate arranque = opciones.bnplStartDate(LocalDate.now(), solicitados);
         if (solicitados != null && solicitados > 0 && arranque.equals(LocalDate.now())) {
             log.warn("BNPL pedido ({} días) sobre un producto que no lo admite — se ignora", solicitados);
         }
@@ -298,15 +302,15 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
     }
 
     /** Las opciones de pago del producto de esta cuenta. Nunca nulas: sin configuración, ninguna. */
-    private OpcionesDePago opciones(CreditAccount account) {
+    private PaymentOptions options(CreditAccount account) {
         return configResolver
                 .resolveForAccount(account.getProductCode(), account.getProductVersion())
                 .map(ProductConfigVersion::getCapabilities)
-                .map(Capabilities::opciones)
-                .orElseGet(OpcionesDePago::ninguna);
+                .map(Capabilities::options)
+                .orElseGet(PaymentOptions::none);
     }
 
-    private DispositionType tipoDelProducto(CreditAccount account) {
+    private DispositionType productType(CreditAccount account) {
         return configResolver
                 .resolveForAccount(account.getProductCode(), account.getProductVersion())
                 .map(ProductConfigVersion::getCapabilities)
@@ -324,18 +328,18 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
      * monedero está fuera de alcance. En uso propio el destino es el titular —cuya CLABE ya
      * guarda la cuenta— y en una línea de distribuidor, la beneficiaria.
      */
-    private Destino destinoDe(CreditAccount account,
+    private Destino destinationOf(CreditAccount account,
                               ProcessDispositionCommand cmd,
                               DispositionType type) {
         boolean aTercero = type != DispositionType.SELF_USE;
-        String cuenta = aTercero && cmd.payeeAccount() != null
+        String payeeClabe = aTercero && cmd.payeeAccount() != null
                 ? cmd.payeeAccount()
                 : account.getClabeAccount();
-        if (cuenta == null || cuenta.isBlank()) {
+        if (payeeClabe == null || payeeClabe.isBlank()) {
             throw new IllegalStateException("La disposición " + account.getCreditAccountId()
                     + " no tiene cuenta de destino: no hay adónde mandar el dinero");
         }
-        return new Destino(account.getBeneficiaryName(), cuenta, "40",
+        return new Destino(account.getBeneficiaryName(), payeeClabe, "40",
                 account.getBeneficiaryTaxId());
     }
 
@@ -364,6 +368,12 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         if (rejectionReason == null) {
             rejectionReason = validateBeneficiary(account, cmd);
         }
+        // El AML devuelve además el veredicto que LEYÓ del receptor, para que la constancia sea
+        // exactamente la fila con la que se decidió y no una segunda lectura que podría diferir.
+        AmlCheck aml = rejectionReason == null ? checkAml(account, cmd) : AmlCheck.notRun();
+        if (rejectionReason == null) {
+            rejectionReason = aml.rejectionReason();
+        }
         if (rejectionReason != null) {
             log.warn("Disposition rejected creditAccountId={} amount={} reason={}",
                     cmd.creditAccountId(), cmd.amount(), rejectionReason);
@@ -377,10 +387,16 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         // al mismo default silencioso— acreditaba el dinero a la distribuidora en vez de mandarlo a
         // la beneficiaria. No era un detalle de modelado: era dinero saliendo a la persona
         // equivocada, alcanzable sin siquiera mentir a propósito.
-        DispositionType type = tipoDelProducto(account);
+        DispositionType type = productType(account);
         Disposition disposition = Disposition.create(
                 cmd.creditAccountId(), type, cmd.amount(), cmd.beneficiaryPartyId(), cmd.sourceEventId());
         disposition.markProcessing();
+
+        // La foto de lo que se sabía de listas en este instante. Se guarda aunque el veredicto sea
+        // limpio —sobre todo si es limpio—: es lo que permite decir después «a las 10:06 su
+        // veredicto era CLEARED contra la lista del día 3» en vez de tener que reconstruirlo.
+        recordAmlSnapshot(disposition, aml);
+
         dispositionRepository.save(disposition);
 
         // BK-11 · Aquí NO sale dinero. La disposición queda PROCESSING y se publica el hecho:
@@ -390,7 +406,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         // activo crecía y el banco bajaba contra nada.
         //
         // Se completa en `onDisbursementCompleted`, cuando hay evidencia del proveedor.
-        Destino destino = destinoDe(account, cmd, type);
+        Destino destino = destinationOf(account, cmd, type);
         eventPublisher.publishDispositionAuthorized(new DispositionAuthorizedEvent(
                 disposition.getDispositionId(), account.getCreditAccountId(), null,
                 // La unidad de origen es la clave con la que el orquestador resuelve la empresa.
@@ -410,13 +426,13 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         //
         // Generarlo siempre hacía que una compra con tarjeta naciera ya parcializada al plazo por
         // defecto del producto: ni lo que el cliente pidió ni lo que el corte debía exigirle.
-        if (opciones(account).planPosterior()) {
-            disposition.comoRevolventePura();
+        if (options(account).planPosterior()) {
+            disposition.asPureRevolving();
             dispositionRepository.save(disposition);
             log.info("Disposición REVOLVENTE PURA (sin calendario) dispositionId={} — exigible en el corte",
                     disposition.getDispositionId());
         } else {
-            generarCalendarioDeDisposicion(account, disposition, cmd.termPeriods());
+            generateDispositionSchedule(account, disposition, cmd.termPeriods());
         }
 
         account.applyDisposition(cmd.amount());
@@ -499,7 +515,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         dispositionRepository.save(disposition);
         // El saldo subió al autorizar. Si el pago no salió, tiene que bajar: sin esto el cliente
         // queda debiendo un dinero que nunca recibió.
-        deshacerSaldo(disposition, "DISPOSITION_FAILED");
+        undoBalance(disposition, "DISPOSITION_FAILED");
         log.warn("Disposición FALLIDA y saldo revertido dispositionId={} code={} reason={}",
                 dispositionId, failureCode, failureReason);
     }
@@ -524,13 +540,13 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
 
         disposition.reverse();
         dispositionRepository.save(disposition);
-        deshacerSaldo(disposition, "DISPOSITION_RETURNED");
+        undoBalance(disposition, "DISPOSITION_RETURNED");
         log.warn("Disposición DEVUELTA por el banco receptor y saldo revertido dispositionId={} motivo={}",
                 dispositionId, reason);
     }
 
     /** Devuelve el saldo y el cupo, y publica el hecho para que el resto se entere. */
-    private void deshacerSaldo(Disposition disposition, String motivo) {
+    private void undoBalance(Disposition disposition, String motivo) {
         CreditAccount account = accountRepository.findById(disposition.getCreditAccountId()).orElse(null);
         if (account == null) {
             log.error("No se pudo revertir el saldo: cuenta ausente creditAccountId={}",
@@ -568,7 +584,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
      * </ul>
      */
     private String validateBeneficiary(CreditAccount account, ProcessDispositionCommand cmd) {
-        if (tipoDelProducto(account) != DispositionType.THIRD_PARTY_CREDIT) {
+        if (productType(account) != DispositionType.THIRD_PARTY_CREDIT) {
             return null;
         }
         if (cmd.beneficiaryPartyId() == null) {
@@ -589,7 +605,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
      * <p>No aplica a los amortizables: ésos generan su calendario una vez, al activarse, y su
      * disposición es el desembolso inicial. Generarles otro aquí duplicaría la deuda.
      */
-    private void generarCalendarioDeDisposicion(CreditAccount account, Disposition disposition,
+    private void generateDispositionSchedule(CreditAccount account, Disposition disposition,
                                                  Integer termPeriods) {
         if (!account.isRevolving()) return;
 
@@ -687,5 +703,159 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
             log.warn("Unknown CollectionAgreement type '{}' for creditAccountId={} — ignored",
                     cmd.type(), cmd.creditAccountId());
         }
+    }
+
+    /**
+     * AML en <b>cada</b> disposición. No es lo mismo que el control de originación.
+     *
+     * <h2>Por qué se repite aquí y no basta con haberlo hecho al abrir la línea</h2>
+     *
+     * Porque el AML no depende de la persona sino de la <b>lista</b>, y la lista cambia. Alguien
+     * limpio al abrir su línea puede aparecer publicado seis meses después. Originar ocurre una vez;
+     * <b>disponer ocurre decenas de veces durante años</b> —una revolvente dispone cada mes, una de
+     * distribuidor en cada colocación—. Así que la originación es un control de punto en el tiempo y
+     * ésta es la comprobación recurrente: la última antes de que el dinero salga.
+     *
+     * <h2>El KYC NO se vuelve a exigir</h2>
+     *
+     * La identidad se estableció una vez al originar; en cada disposición lo que demuestra que es él
+     * es la <b>autenticación</b> —NIP y OTP al teléfono registrado—, no repetir la biometría. Lo
+     * único de identidad que bloquea aquí es una revocación posterior, que es un hecho distinto de
+     * «no verificada». Ver {@code PartyVerification#allowsDisposition()}.
+     *
+     * <h2>A quién se comprueba: a los dos papeles, porque son dos</h2>
+     *
+     * Una disposición tiene <b>quien responde</b> por la línea y <b>quien recibe</b> el dinero, y
+     * según el producto son la misma persona o no:
+     *
+     * <table border="1">
+     *   <caption>Los dos papeles por tipo de producto</caption>
+     *   <tr><th>Producto</th><th>Responsable de la línea</th><th>Quien recibe</th></tr>
+     *   <tr><td>Uso propio / nómina</td><td>el titular</td><td><b>el mismo titular</b></td></tr>
+     *   <tr><td>Línea de distribuidor</td><td>la distribuidora</td>
+     *       <td><b>la beneficiaria — nunca la distribuidora</b></td></tr>
+     * </table>
+     *
+     * <p>Se comprueban <b>los dos</b>, y por razones distintas: al receptor porque es a quien se le
+     * va a pagar, y al responsable porque no tiene sentido mover dinero de la línea de alguien que
+     * está en listas aunque el destino sea otro. En uso propio las dos comprobaciones caen sobre la
+     * misma persona y se hace una.
+     *
+     * <h2>Y falla cerrado</h2>
+     *
+     * Sin veredicto no se dispone. Un party del que no se ha recibido veredicto es uno del que no se
+     * sabe, y no saber no es estar limpio — es exactamente el hueco por el que saldría dinero a
+     * alguien sin comprobar.
+     */
+    private AmlCheck checkAml(CreditAccount account, ProcessDispositionCommand cmd) {
+        // El RESPONSABLE de la línea: quien debe el dinero y quien autoriza la disposición.
+        //
+        // Se comprueba siempre, aunque no sea él quien recibe: no tiene sentido mover dinero de la
+        // línea de alguien que está en listas, por mucho que el destino sea otra persona.
+        UUID lineHolder = account.getObligorPartyId();
+        if (lineHolder == null) {
+            // La columna es NOT NULL, así que esto no debería ocurrir. Se escribe explícito porque
+            // la alternativa —el null callado— era «no hay a quién comprobar, adelante», y eso es
+            // un fallo-abierto esperando un dato corrupto.
+            return new AmlCheck(
+                    "AML_RESPONSABLE: la cuenta no tiene responsable identificado — no se dispone",
+                    null);
+        }
+
+        PartyVerification holderVerification = verificationOf(lineHolder);
+        String motivo = amlReasonFor(holderVerification, lineHolder, "responsable");
+        if (motivo != null) return new AmlCheck(motivo, null);
+
+        // Y QUIEN RECIBE el dinero, que no siempre es el mismo.
+        UUID recipient = recipientOf(account, cmd);
+        if (recipient.equals(lineHolder)) {
+            // Uso propio: la misma persona en los dos papeles. Una lectura, un veredicto.
+            return new AmlCheck(null, holderVerification);
+        }
+
+        PartyVerification recipientVerification = verificationOf(recipient);
+        return new AmlCheck(amlReasonFor(recipientVerification, recipient, "receptor"), recipientVerification);
+    }
+
+    /**
+     * Lo que el AML comprobó y con qué dato.
+     *
+     * @param rejectionReason        por qué no se dispone, o {@code null} si pasa
+     * @param recipientVerification  el veredicto <b>de quien recibe</b>, tal como se leyó para
+     *                               decidir. Viaja hasta la constancia para que el expediente diga
+     *                               la fila exacta con la que se dejó salir el dinero — leerla otra
+     *                               vez podría devolver algo distinto y entonces el expediente
+     *                               hablaría de una comprobación que no fue la que ocurrió
+     */
+    private record AmlCheck(String rejectionReason, PartyVerification recipientVerification) {
+        static AmlCheck notRun() { return new AmlCheck(null, null); }
+    }
+
+    private PartyVerification verificationOf(UUID partyId) {
+        return partyVerificationRepository.findByPartyId(partyId).orElse(null);
+    }
+
+    /**
+     * Quién <b>recibe</b> el dinero de esta disposición.
+     *
+     * <h2>La regla, que es una sola y conviene no repetirla</h2>
+     *
+     * <b>Toda disposición tiene un beneficiario.</b> Lo que cambia con el producto es quién es:
+     *
+     * <ul>
+     *   <li><b>Uso propio</b> ({@code SELF_USE}, {@code PAYROLL}): el beneficiario <b>es</b> el
+     *       responsable de la línea. No es que «no haya beneficiario» — es que es la misma persona,
+     *       y por eso la petición no lo manda.</li>
+     *   <li><b>Línea de distribuidor</b> ({@code THIRD_PARTY_CREDIT}): el beneficiario es la
+     *       persona a la que se le colocó, y <b>nunca</b> el responsable de la línea. Lo garantiza
+     *       {@link #validateBeneficiary}, que exige beneficiario y prohíbe que sea el obligado — así
+     *       que cuando llega aquí, hay receptor y es distinto.</li>
+     * </ul>
+     *
+     * <p>Escrito así una vez, el AML y la foto del veredicto comprueban <b>exactamente</b> a la
+     * misma persona. Cuando cada uno lo resolvía por su cuenta, podían discrepar sin que nada
+     * fallara: se bloquearía mirando a uno y se guardaría constancia del otro.
+     *
+     * @return nunca nulo — en el peor caso, el responsable de la línea
+     */
+    private static UUID recipientOf(CreditAccount account, ProcessDispositionCommand cmd) {
+        return cmd.beneficiaryPartyId() != null
+                ? cmd.beneficiaryPartyId()
+                : account.getObligorPartyId();
+    }
+
+    /**
+     * El motivo por el que una persona no deja pasar la disposición, o {@code null} si la deja.
+     *
+     * <p>Recibe la verificación <b>ya leída</b> en vez de leerla: así la compuerta y la constancia
+     * comparten la fila, y una lectura doble no puede decidir con un dato y archivar otro.
+     *
+     * <p>Y sin {@code Optional.map} a propósito: el resultado «todo bien» es {@code null}, y un
+     * {@code map} que devuelve null produce un {@code Optional.empty()} indistinguible de «no había
+     * fila». Escrito así, toda persona LIMPIA caía en la rama de «sin veredicto» y quedaba
+     * bloqueada — un fallo-cerrado que parece prudente y en realidad detiene a todo el mundo.
+     */
+    private static String amlReasonFor(PartyVerification verification, UUID partyId, String papel) {
+        if (partyId == null) return null;   // no hay a quién comprobar; lo cubren otras validaciones
+        if (verification == null) {
+            return "AML_" + papel.toUpperCase() + ": sin veredicto de verificación — no se dispone";
+        }
+        return verification.allowsDisposition() ? null
+                : "AML_" + papel.toUpperCase() + ": " + verification.dispositionBlockReason();
+    }
+
+    /**
+     * Copia a la disposición el veredicto de listas que la gobernó.
+     *
+     * <p>Se toma el de <b>quien recibe el dinero</b> — en una colocación de distribuidor, la
+     * beneficiaria—, porque es sobre esa persona sobre la que importa haber comprobado que no está
+     * en listas antes de pagarle.
+     */
+    private void recordAmlSnapshot(Disposition disposition, AmlCheck aml) {
+        PartyVerification v = aml.recipientVerification();
+        if (v == null) return;
+
+        disposition.recordAmlSnapshot(v.getScreeningStatus(),
+                v.getScreenedListVersions(), v.getVerdictAt());
     }
 }

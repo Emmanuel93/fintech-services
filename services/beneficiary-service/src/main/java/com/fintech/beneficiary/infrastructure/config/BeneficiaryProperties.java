@@ -1,6 +1,5 @@
 package com.fintech.beneficiary.infrastructure.config;
 
-import com.fintech.beneficiary.domain.IdentityVerificationMode;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.math.BigDecimal;
@@ -80,12 +79,6 @@ public class BeneficiaryProperties {
     public static class IdentityVerification {
 
         /**
-         * {@code MANUAL} (hoy) = todo lo revisa un analista, no se llama a nadie.
-         * {@code AUTOMATIC} = el proveedor evalúa y el analista recibe sólo las excepciones.
-         */
-        private IdentityVerificationMode mode = IdentityVerificationMode.MANUAL;
-
-        /**
          * Mínimos por métrica para dar por buena una identidad sin intervención humana.
          *
          * <p>Una métrica declarada aquí y **no reportada** por el proveedor cuenta como no
@@ -98,8 +91,6 @@ public class BeneficiaryProperties {
         private java.util.Map<String, Double> thresholds = new java.util.LinkedHashMap<>(
                 java.util.Map.of("facialMatch", 0.90, "liveness", 0.90, "documentAuthenticity", 0.85));
 
-        public IdentityVerificationMode getMode() { return mode; }
-        public void setMode(IdentityVerificationMode mode) { this.mode = mode; }
         public java.util.Map<String, Double> getThresholds() { return thresholds; }
         public void setThresholds(java.util.Map<String, Double> thresholds) { this.thresholds = thresholds; }
     }

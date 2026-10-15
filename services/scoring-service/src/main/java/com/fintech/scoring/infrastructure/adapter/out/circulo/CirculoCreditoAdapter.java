@@ -76,7 +76,7 @@ class CirculoCreditoAdapter implements CirculoGateway {
     // ── Request ──────────────────────────────────────────────────────────────
 
     private CdcPersonaPeticion buildRequest(CirculoQueryRequest req) {
-        String direccion = buildDireccion(req);
+        String direccion = buildAddress(req);
         String municipio = (req.municipality() != null && !req.municipality().isBlank())
                 ? req.municipality().toUpperCase()
                 : req.city().toUpperCase();
@@ -102,7 +102,7 @@ class CirculoCreditoAdapter implements CirculoGateway {
                 domicilio);
     }
 
-    private String buildDireccion(CirculoQueryRequest req) {
+    private String buildAddress(CirculoQueryRequest req) {
         StringBuilder sb = new StringBuilder(req.street());
         if (req.exteriorNumber() != null && !req.exteriorNumber().isBlank()) {
             sb.append(" ").append(req.exteriorNumber());

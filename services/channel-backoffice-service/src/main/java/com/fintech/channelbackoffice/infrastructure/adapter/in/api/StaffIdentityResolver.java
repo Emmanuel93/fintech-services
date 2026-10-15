@@ -64,7 +64,7 @@ public class StaffIdentityResolver {
             // aunque haya caducado: un nombre de hace un rato identifica mejor que ninguno.
             return hit != null ? Optional.ofNullable(hit.identity()) : Optional.empty();
         }
-        return Optional.ofNullable(consultar(id, token.get(), true));
+        return Optional.ofNullable(query(id, token.get(), true));
     }
 
     /**
@@ -75,7 +75,7 @@ public class StaffIdentityResolver {
      * Se tira y se pide uno nuevo. Un único reintento, porque si el segundo también falla el
      * problema no es el token y insistir sólo añade latencia al camino de la auditoría.
      */
-    private StaffIdentity consultar(UUID id, String token, boolean puedeReintentar) {
+    private StaffIdentity query(UUID id, String token, boolean puedeReintentar) {
         try {
             var staff = identityClient.getStaff(token, id);
             StaffIdentity identity = staff == null ? null
@@ -85,18 +85,18 @@ public class StaffIdentityResolver {
         } catch (ResponseStatusException e) {
             if (puedeReintentar && e.getStatusCode().isSameCodeAs(HttpStatus.UNAUTHORIZED)) {
                 serviceTokens.invalidate();
-                Optional<String> nuevo = serviceTokens.token();
-                if (nuevo.isPresent()) {
-                    return consultar(id, nuevo.get(), false);
+                Optional<String> updated = serviceTokens.token();
+                if (updated.isPresent()) {
+                    return query(id, updated.get(), false);
                 }
             }
-            return noResuelto(id, e);
+            return unresolved(id, e);
         } catch (RuntimeException e) {
-            return noResuelto(id, e);
+            return unresolved(id, e);
         }
     }
 
-    private StaffIdentity noResuelto(UUID id, RuntimeException e) {
+    private StaffIdentity unresolved(UUID id, RuntimeException e) {
         log.debug("no se pudo resolver identidad de staff {}: {}", id, e.toString());
         cache.put(id, new Cached(null, Instant.now().plus(TTL_NEG)));
         return null;

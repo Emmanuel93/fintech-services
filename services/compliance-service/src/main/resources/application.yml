@@ -1,0 +1,80 @@
+spring:
+  application:
+    name: compliance-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fintech}
+    username: ${SPRING_DATASOURCE_USERNAME:fintech}
+    password: ${SPRING_DATASOURCE_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:8}
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    open-in-view: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        jdbc:
+          time_zone: UTC
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${KAFKA_GROUP_ID:compliance-service}
+      auto-offset-reset: earliest
+    producer:
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 1
+        delivery.timeout.ms: 30000
+
+  liquibase:
+    change-log: classpath:db/changelog/compliance/db.changelog-compliance.xml
+    enabled: true
+
+server:
+  port: ${SERVER_PORT:8105}
+  error:
+    include-message: always
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+fintech:
+  compliance:
+    # Cada lista con su cadencia. Se declara aquí y no se descubre: una lista que deja de
+    # sincronizarse sin que nadie lo note es un control apagado que parece encendido.
+    watchlists:
+      - source-code: OFAC-SDN
+        kind: SANCTIONS
+      - source-code: PEP-MX
+        kind: PEP
+      - source-code: SAT-69B
+        kind: TAX_BLACKLIST
+
+    # El re-cruce corre en ventana de mantenimiento. La zona se declara: «las tres» tiene que ser
+    # las tres donde está la operación, no donde está el contenedor.
+    rescreen:
+      enabled: ${COMPLIANCE_RESCREEN_ENABLED:true}
+      cron: ${COMPLIANCE_RESCREEN_CRON:0 0 3 * * *}
+
+    screening:
+      # El umbral de parecido: demasiado bajo bloquea a media cartera por homonimia, demasiado alto
+      # vuelve decorativo el control. Se configura porque se calibra con datos reales.
+      min-similarity: ${COMPLIANCE_MIN_SIMILARITY:0.85}

@@ -20,10 +20,10 @@ public record BankAccountResponse(UUID bankAccountId,
                                   String suspenseDebitAccount,
                                   String status) {
 
-    static BankAccountResponse de(BankAccount c) {
+    static BankAccountResponse from(BankAccount c) {
         return new BankAccountResponse(
                 c.getId(), c.getCompanyId(), c.getInstitutionCode(), c.getInstitutionName(),
-                c.getClabeEnmascarada(), c.getHolderName(), c.getCurrency(),
+                c.getMaskedClabe(), c.getHolderName(), c.getCurrency(),
                 c.getLedgerAccount(), c.getSuspenseCreditAccount(), c.getSuspenseDebitAccount(),
                 c.getStatus().name());
     }

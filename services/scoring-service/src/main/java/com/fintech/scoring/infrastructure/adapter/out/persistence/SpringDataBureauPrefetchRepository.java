@@ -6,6 +6,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Optional;
 import java.util.UUID;
 
 interface SpringDataBureauPrefetchRepository extends JpaRepository<BureauPrefetch, UUID> {
@@ -13,4 +14,7 @@ interface SpringDataBureauPrefetchRepository extends JpaRepository<BureauPrefetc
     @Query("SELECT COUNT(p) > 0 FROM BureauPrefetch p WHERE p.prospectId = :prospectId " +
            "AND p.status NOT IN ('COMPLETED', 'PARTIAL', 'FAILED')")
     boolean existsActiveByProspectId(@Param("prospectId") UUID prospectId);
+
+    /** El más reciente, sea cual sea su estado. Un prospecto puede acumular intentos. */
+    Optional<BureauPrefetch> findFirstByProspectIdOrderByRequestedAtDesc(UUID prospectId);
 }

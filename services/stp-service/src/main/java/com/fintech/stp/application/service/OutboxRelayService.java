@@ -146,11 +146,11 @@ public class OutboxRelayService implements RelayOutboxUseCase {
         // Releerla por id abría una ventana real: entre registrar y firmar pueden pasar minutos, y
         // cambiar la cuenta ordenante de la empresa en ese hueco alteraba la cadena original de una
         // orden ya registrada. El id además viene de `banking` y no resuelve contra nada de aquí.
-        CuentaOrdenante ordering = CuentaOrdenante.deLaOrdenRegistrada(order);
+        CuentaOrdenante ordering = CuentaOrdenante.fromRegisteredOrder(order);
         StpCompanyKey keyMetadata = signingKeyProvider.activeKeyMetadata(
                 company.getCompanyId(), com.fintech.stp.domain.KeyPurpose.SIGNING);
 
-        OrdenPagoFirma firma = buildFirma(order, company, ordering);
+        OrdenPagoFirma firma = buildSignature(order, company, ordering);
         String cadenaOriginal = CadenaOriginalBuilder.build(firma);
         String sello = StpSigner.sign(cadenaOriginal,
                 signingKeyProvider.activeSigningKey(company.getCompanyId()),
@@ -253,7 +253,7 @@ public class OutboxRelayService implements RelayOutboxUseCase {
         outboxRepository.save(message);
     }
 
-    private OrdenPagoFirma buildFirma(StpPaymentOrder order, StpCompany company, CuentaOrdenante ordering) {
+    private OrdenPagoFirma buildSignature(StpPaymentOrder order, StpCompany company, CuentaOrdenante ordering) {
         return OrdenPagoFirma.builder()
                 .institucionContraparte(order.getBeneficiaryInstitution())
                 .empresa(company.getStpEmpresa())

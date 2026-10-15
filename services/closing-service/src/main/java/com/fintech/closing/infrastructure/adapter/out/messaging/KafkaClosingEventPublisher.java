@@ -36,7 +36,7 @@ public class KafkaClosingEventPublisher implements ClosingEventPublisher {
                                          LocalDate businessDate, String productType) {
         var payload = new UnitWindowOpenedPayload(UUID.randomUUID().toString(), runId, creditAccountId,
                 phase.name(), businessDate, productType, Instant.now());
-        enviar(TOPIC_WINDOW_OPENED, creditAccountId.toString(), payload);
+        send(TOPIC_WINDOW_OPENED, creditAccountId.toString(), payload);
     }
 
     @Override
@@ -44,7 +44,7 @@ public class KafkaClosingEventPublisher implements ClosingEventPublisher {
         var payload = new CutoffClosedPayload(UUID.randomUUID().toString(), c.getCreditAccountId(),
                 obligorPartyId, productType, c.getCycleNumber(), c.getCutoffDate(), c.getPaymentDueDate(),
                 c.getBalanceAtCutoff(), c.getAmountDue(), c.getMinimumPayment(), Instant.now());
-        enviar(TOPIC_CUTOFF_CLOSED, c.getCreditAccountId().toString(), payload);
+        send(TOPIC_CUTOFF_CLOSED, c.getCreditAccountId().toString(), payload);
     }
 
     @Override
@@ -52,10 +52,10 @@ public class KafkaClosingEventPublisher implements ClosingEventPublisher {
         var payload = new DaySealedPayload(s.getSealId().toString(), s.getBusinessDate(),
                 s.phase().name(), s.getScopeKey(), s.getUnitCount(), s.getTotalPrincipal(),
                 s.getTotalInterest(), s.getTotalDebt(), s.getContentHash(), s.getSealedAt());
-        enviar(TOPIC_DAY_SEALED, s.getBusinessDate() + ":" + s.phase(), payload);
+        send(TOPIC_DAY_SEALED, s.getBusinessDate() + ":" + s.phase(), payload);
     }
 
-    private void enviar(String topic, String key, Object payload) {
+    private void send(String topic, String key, Object payload) {
         kafka.send(topic, key, payload).whenComplete((r, ex) -> {
             if (ex != null) log.error("Publicación fallida topic={} key={}: {}", topic, key, ex.getMessage());
             else log.debug("Publicado topic={} key={}", topic, key);

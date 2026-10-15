@@ -13,7 +13,7 @@ interface SpringDataCutoffScheduleRepository extends JpaRepository<CutoffSchedul
 
     /** La pregunta diaria del cierre. Sólo los que siguen agendados: un corte sellado no se repite. */
     @Query("SELECT c FROM CutoffSchedule c WHERE c.cutoffDate = :fecha AND c.status = 'SCHEDULED'")
-    List<CutoffSchedule> findDueOn(@Param("fecha") LocalDate fecha);
+    List<CutoffSchedule> findDueOn(@Param("fecha") LocalDate date);
 
     @Query("SELECT c FROM CutoffSchedule c WHERE c.creditAccountId = :id ORDER BY c.cycleNumber")
     List<CutoffSchedule> findByAccount(@Param("id") UUID creditAccountId);

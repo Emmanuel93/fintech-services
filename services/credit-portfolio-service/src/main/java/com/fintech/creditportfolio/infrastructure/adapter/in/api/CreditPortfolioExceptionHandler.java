@@ -41,8 +41,8 @@ class CreditPortfolioExceptionHandler {
     }
 
     /** Producto que no admite saltos, tope agotado, cuota ya pagada o de otra cuenta. */
-    @ExceptionHandler(SkipPaymentUseCase.NoSePuedeSaltarException.class)
-    ProblemDetail noSePuedeSaltar(SkipPaymentUseCase.NoSePuedeSaltarException e) {
+    @ExceptionHandler(SkipPaymentUseCase.SkipNotAllowedException.class)
+    ProblemDetail noSePuedeSaltar(SkipPaymentUseCase.SkipNotAllowedException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
     }
 }

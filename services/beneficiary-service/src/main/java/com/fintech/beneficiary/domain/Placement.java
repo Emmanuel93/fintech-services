@@ -44,6 +44,16 @@ public class Placement {
     @Column(name = "distributor_credit_account_id", nullable = false, updatable = false)
     private UUID distributorCreditAccountId;
 
+    /**
+     * El producto de esa línea (F3b). Fija qué KYC se exige y cómo se resuelve.
+     *
+     * <p>Se guarda y no se vuelve a preguntar: la política que se aplicó tiene que poder
+     * reconstruirse meses después. Nulo en las colocaciones anteriores a F3b — el resolvedor cae
+     * entonces al default seguro, que es exigir KYC manual.
+     */
+    @Column(name = "product_code", length = 50, updatable = false)
+    private String productCode;
+
     // ── Alta previa — los tres campos de la pantalla 18 ───────────────────────────────────────
 
     @Column(name = "beneficiary_full_name", nullable = false)
@@ -169,6 +179,7 @@ public class Placement {
      * {@code PlacementInvite}) y la línea no se toca.
      */
     public static Placement draft(UUID distributorPartyId, UUID distributorCreditAccountId,
+                                  String productCode,
                                   String beneficiaryFullName, String beneficiaryPhone,
                                   String beneficiaryRelationship, BigDecimal amount,
                                   int termFortnights, BigDecimal fortnightlyPayment,
@@ -202,6 +213,7 @@ public class Placement {
         p.placementId                 = UUID.randomUUID();
         p.distributorPartyId          = distributorPartyId;
         p.distributorCreditAccountId  = distributorCreditAccountId;
+        p.productCode                 = productCode;
         p.beneficiaryFullName         = beneficiaryFullName.trim();
         p.beneficiaryPhone            = beneficiaryPhone;
         p.beneficiaryRelationship     = beneficiaryRelationship == null ? null : beneficiaryRelationship.trim();
@@ -254,8 +266,17 @@ public class Placement {
      * <p>La firma exige {@code riskAcknowledged} explícito porque Kredius no aprueba ni rechaza: la
      * decisión y el riesgo son suyos, y la casilla de la pantalla 25 es la evidencia de que lo
      * aceptó. Una aprobación sin esa casilla no es una aprobación incompleta, es una que no existe.
+     *
+     * <p>Y exige el {@code screening} <b>por parámetro</b>, no leído de un campo de esta entidad: el
+     * veredicto de listas no es de la colocación, es <b>de la persona</b>, y la lista cambia. Tenerlo
+     * copiado aquí significaría aprobar contra una foto de ayer; pedirlo en la firma obliga a que
+     * quien aprueba lo haya consultado en ese momento — y hace imposible llamar a este método sin
+     * haberlo mirado, que es la propiedad que un control necesita.
+     *
+     * @param screening el veredicto de cumplimiento sobre la beneficiaria; nunca nulo, y
+     *                  {@link ScreeningVerdict#unavailable(String)} cuando no se pudo consultar
      */
-    public void approve(boolean riskAcknowledged) {
+    public void approve(boolean riskAcknowledged, ScreeningVerdict screening) {
         // La arista se valida ANTES que las precondiciones de negocio. Aprobar una colocación
         // vencida es un error de flujo, y decirle a quien lo intenta «falta verificar la identidad»
         // lo mandaría a resolver algo que no arregla nada.
@@ -273,6 +294,21 @@ public class Placement {
         // un fallo mudo en vez de un motivo.
         if (identityDecision != IdentityDecision.VERIFIED) {
             throw new IdentityNotVerifiedException(placementId, identityDecision);
+        }
+        // Y la otra mitad de la regla, que hasta hoy no se comprobaba: **no estar en listas**.
+        //
+        // «La decisión es del distribuidor si y sólo si se pudo validar la identidad Y no se
+        // encuentra en listas negras.» Lo primero lo cubre el dictamen de arriba; lo segundo no lo
+        // cubría nada, así que una beneficiaria sancionada con su INE en orden se aprobaba y se le
+        // depositaba. Son dos comprobaciones de preguntas distintas y ninguna sustituye a la otra.
+        //
+        // Va DESPUÉS de la identidad a propósito: si faltan las dos, el motivo que se devuelve es el
+        // que la distribuidora puede ayudar a resolver.
+        if (screening == null || !screening.allowsPlacement()) {
+            throw new BeneficiaryScreeningBlockedException(placementId,
+                    screening == null
+                            ? ScreeningVerdict.unavailable("no se consultó el veredicto")
+                            : screening);
         }
         this.decidedAt = Instant.now();
         transitionTo(PlacementStatus.APPROVED, null);
@@ -444,6 +480,7 @@ public class Placement {
     public UUID getPlacementId()                { return placementId; }
     public UUID getDistributorPartyId()         { return distributorPartyId; }
     public UUID getDistributorCreditAccountId() { return distributorCreditAccountId; }
+    public String getProductCode()              { return productCode; }
     public String getBeneficiaryFullName()      { return beneficiaryFullName; }
     public String getBeneficiaryPhone()         { return beneficiaryPhone; }
     public String getBeneficiaryRelationship()  { return beneficiaryRelationship; }

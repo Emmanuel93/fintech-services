@@ -33,7 +33,7 @@ public record RegisterPaymentOrderCommand(
         String orderingClientNumber
 ) {
     /** Si tesorería mandó la cuenta, este conector no tiene nada que elegir. */
-    public boolean traeCuentaOrdenante() {
+    public boolean fetchesOrderingAccount() {
         return orderingClabe != null && !orderingClabe.isBlank();
     }
 }

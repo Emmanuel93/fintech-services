@@ -10,5 +10,5 @@ import com.fintech.banking.domain.InternalMovement;
  */
 public interface InternalMovementProjector {
 
-    void proyectar(InternalMovement movimiento);
+    void project(InternalMovement movimiento);
 }

@@ -37,17 +37,17 @@ public class ScoringPolicyService {
         int siguienteVersion = 1;
         var vigente = policyRepository.findActiveBy(productTypeIntent);
         if (vigente.isPresent()) {
-            ScoringPolicy anterior = vigente.get();
+            ScoringPolicy previous = vigente.get();
             log.info("Sustituyendo política policyId={} v{} de {} (escrita para {})",
-                    anterior.getPolicyId(), anterior.getVersion(), productTypeIntent,
-                    anterior.getProspectType());
+                    previous.getPolicyId(), previous.getVersion(), productTypeIntent,
+                    previous.getProspectType());
             // La anterior no se borra: queda inactiva y con su historia. Una evaluación pasada
             // apunta a la política con que se decidió, y borrarla dejaría decisiones sin
             // justificación — que es justo lo que un auditor viene a pedir.
-            anterior.deactivate();
-            policyRepository.save(anterior);
+            previous.deactivate();
+            policyRepository.save(previous);
             policyRepository.flush();
-            siguienteVersion = anterior.getVersion() + 1;
+            siguienteVersion = previous.getVersion() + 1;
         }
 
         ScoringPolicy policy = ScoringPolicy.create(

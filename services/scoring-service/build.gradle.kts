@@ -26,6 +26,11 @@ dependencies {
 
     // ── Spring Boot Starters ───────────────────────────────────────────────
     implementation("org.springframework.boot:spring-boot-starter-web")
+
+    // Reintento con backoff exponencial, sin bloquear el hilo del listener. Antes era un
+    // `Thread.sleep` dentro del @KafkaListener, que retiene la partición mientras espera.
+    implementation("org.springframework.retry:spring-retry")
+    implementation("org.springframework:spring-aspects")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("io.micrometer:micrometer-registry-prometheus")
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")

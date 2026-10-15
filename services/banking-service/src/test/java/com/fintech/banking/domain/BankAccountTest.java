@@ -12,20 +12,20 @@ class BankAccountTest {
 
     private static Clabe clabe() {
         String base = "01218000123456789";
-        return Clabe.of(base + Clabe.digitoVerificador(base));
+        return Clabe.of(base + Clabe.checkDigit(base));
     }
 
-    private static BankAccount cuenta() {
-        return BankAccount.alta(UUID.randomUUID(), "012", "BBVA", clabe(),
+    private static BankAccount account() {
+        return BankAccount.register(UUID.randomUUID(), "012", "BBVA", clabe(),
                 "FINTECH SA DE CV", "FIN200101ABC", "MXN", "1101", "2109", "1109", "CL-001");
     }
 
     @Test
     @DisplayName("nace ACTIVE y declara sus TRES cuentas del mayor")
     void naceOperando() {
-        BankAccount c = cuenta();
+        BankAccount c = account();
         assertThat(c.getStatus()).isEqualTo(BankAccountStatus.ACTIVE);
-        assertThat(c.puedeOperar()).isTrue();
+        assertThat(c.canOperate()).isTrue();
         // Las tres son necesarias para que el sello cuadre: saldo + partidas == estado de cuenta.
         assertThat(c.getLedgerAccount()).isEqualTo("1101");
         assertThat(c.getSuspenseCreditAccount()).isEqualTo("2109");
@@ -35,36 +35,36 @@ class BankAccountTest {
     @Test
     @DisplayName("suspender saca la cuenta del ruteo SIN borrar su historia")
     void suspenderNoBorra() {
-        BankAccount c = cuenta();
+        BankAccount c = account();
         c.suspender();
 
-        assertThat(c.puedeOperar()).isFalse();
+        assertThat(c.canOperate()).isFalse();
         // Lo que ya salió por ella se sigue conciliando durante meses: el id y la CLABE se quedan.
         assertThat(c.getId()).isNotNull();
         assertThat(c.getClabe()).hasSize(18);
 
-        c.reactivar();
-        assertThat(c.puedeOperar()).isTrue();
+        c.reactivate();
+        assertThat(c.canOperate()).isTrue();
     }
 
     @Test
     @DisplayName("una cuenta CLOSED no vuelve: reabrirla sería otra cuenta")
     void cerradaNoVuelve() {
-        BankAccount c = cuenta();
-        c.cerrar();
+        BankAccount c = account();
+        c.close();
 
-        assertThatThrownBy(c::reactivar).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(c::reactivate).isInstanceOf(IllegalStateException.class);
         assertThatThrownBy(c::suspender).isInstanceOf(IllegalStateException.class);
     }
 
     @Test
     @DisplayName("sin titular o sin cuenta contable el alta no procede")
     void exigeLoIndispensable() {
-        assertThatThrownBy(() -> BankAccount.alta(null, "012", "BBVA", clabe(),
+        assertThatThrownBy(() -> BankAccount.register(null, "012", "BBVA", clabe(),
                 "  ", null, "MXN", "1101", "2109", "1109", null))
                 .hasMessageContaining("titular");
 
-        assertThatThrownBy(() -> BankAccount.alta(null, "012", "BBVA", clabe(),
+        assertThatThrownBy(() -> BankAccount.register(null, "012", "BBVA", clabe(),
                 "FINTECH", null, "MXN", null, "2109", "1109", null))
                 .hasMessageContaining("cuenta contable");
     }
@@ -72,7 +72,7 @@ class BankAccountTest {
     @Test
     @DisplayName("la CLABE sólo se expone enmascarada")
     void clabeEnmascarada() {
-        BankAccount c = cuenta();
-        assertThat(c.getClabeEnmascarada()).hasSize(8).startsWith("****");
+        BankAccount c = account();
+        assertThat(c.getMaskedClabe()).hasSize(8).startsWith("****");
     }
 }

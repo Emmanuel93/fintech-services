@@ -163,7 +163,7 @@ public class PostingService {
         // de un crédito recién nacido ya llega en 1 y una guarda por versión marcaría como
         // incorporación a todos los créditos nuevos.
         boolean shadowConocido = shadowRepository.findById(creditAccountId).isPresent();
-        boolean incorporacion = !shadowConocido && !abreLaVidaContable(triggerEvent);
+        boolean incorporacion = !shadowConocido && !opensAccountingLife(triggerEvent);
 
         AccountBalanceShadow shadow = shadowRepository.findById(creditAccountId)
                 .orElseGet(() -> AccountBalanceShadow.init(creditAccountId, obligorPartyId));
@@ -273,7 +273,7 @@ public class PostingService {
      * <p>La disposición del dinero es lo primero que mueve saldo de verdad. Ver una disposición sobre
      * una cuenta desconocida no es haberse perdido nada: es el principio.
      */
-    private static boolean abreLaVidaContable(String triggerEvent) {
+    private static boolean opensAccountingLife(String triggerEvent) {
         return triggerEvent != null
                 && (triggerEvent.startsWith("DISPOSITION") || ACTIVATED.equals(triggerEvent));
     }

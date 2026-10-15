@@ -110,9 +110,9 @@ public class OrgUnit {
      * La unidad conserva su identidad y su código: reasignar una sucursal de zona no la convierte
      * en otra sucursal, y perder el id rompería sus asignaciones y su historia.
      */
-    public void moveTo(UUID nuevoPadre, String nuevoPath) {
+    public void moveTo(UUID nuevoPadre, String newPath) {
         this.parentUnitId = nuevoPadre;
-        this.path = nuevoPath;
+        this.path = newPath;
     }
 
     public String getPath()       { return path; }

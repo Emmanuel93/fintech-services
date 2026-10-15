@@ -9,6 +9,7 @@ import com.fintech.origination.application.port.out.ApplicationEventPublisher;
 import com.fintech.origination.application.port.out.CreditApplicationRepository;
 import com.fintech.origination.application.port.out.ProspectRepository;
 import com.fintech.origination.application.port.out.ScoreRequestPublisher;
+import com.fintech.origination.application.port.out.PartyReader;
 import com.fintech.origination.application.service.CreditApplicationService;
 import com.fintech.origination.domain.ApplicationStatus;
 import com.fintech.origination.domain.ApprovalFlow;
@@ -56,6 +57,9 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.*;
 
 @ExtendWith(MockitoExtension.class)
+// El veredicto se declara una vez en setUp y no todas las pruebas llaman a `start()`:
+// lenient evita que Mockito repruebe un stub que sólo usan algunas.
+@org.mockito.junit.jupiter.MockitoSettings(strictness = org.mockito.quality.Strictness.LENIENT)
 class CreditApplicationServiceTest {
 
     @Mock CreditApplicationRepository applicationRepository;
@@ -67,15 +71,25 @@ class CreditApplicationServiceTest {
     OriginationProperties properties;
     CreditApplicationService service;
 
+    @Mock PartyReader partyReader;
+
     final UUID prospectId = UUID.randomUUID();
 
     @BeforeEach
     void setUp() {
         properties = new OriginationProperties();
         // default committeeAmountThreshold = 500,000; cooldownDays = 90
+        // La persona llega verificada salvo que la prueba diga lo contrario: estas pruebas son de
+        // la lógica de la solicitud, no de la compuerta —esa tiene las suyas en
+        // `KycGateOnApplicationTest`—. Dejarla bloqueada por omisión haría fallar a todas por un
+        // motivo que no es el que examinan.
+        given(partyReader.verificationOf(org.mockito.ArgumentMatchers.any()))
+                .willReturn(new PartyReader.Verification("VERIFIED", "CLEARED", true, null));
+
         service = new CreditApplicationService(
                 applicationRepository, prospectRepository,
-                scoreRequestPublisher, applicationEventPublisher, promoterResolver, properties);
+                scoreRequestPublisher, applicationEventPublisher, promoterResolver,
+                partyReader, properties);
     }
 
     private Prospect onboardedProspect() {

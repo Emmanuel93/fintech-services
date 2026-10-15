@@ -73,7 +73,7 @@ public class MovementTrace {
 
     protected MovementTrace() {}
 
-    public static MovementTrace abrir(UUID payoutId, String sourceSystem, String sourceReference,
+    public static MovementTrace open(UUID payoutId, String sourceSystem, String sourceReference,
                                       UUID creditAccountId, BigDecimal amount, String eventId) {
         MovementTrace t = new MovementTrace();
         t.id              = UUID.randomUUID();
@@ -90,39 +90,39 @@ public class MovementTrace {
     }
 
     /** Tesorería eligió cuenta: el pago ya sabe por dónde sale. */
-    public void ruteado(UUID bankAccountId, String eventId) {
+    public void routed(UUID bankAccountId, String eventId) {
         this.bankAccountId = bankAccountId;
         this.status        = "ROUTED";
-        avanzar(eventId);
+        advance(eventId);
     }
 
     /** El conector le asignó clave de rastreo: el pago salió a la red. */
-    public void despachado(String trackingKey, LocalDate businessDate, String eventId) {
+    public void dispatched(String trackingKey, LocalDate businessDate, String eventId) {
         this.trackingKey  = trackingKey;
         this.businessDate = businessDate;
         this.status       = "DISPATCHED";
-        avanzar(eventId);
+        advance(eventId);
     }
 
     /** El banco lo reporta en el estado de cuenta: el dinero existe fuera de nuestros registros. */
-    public void conciliado(UUID lineId, String eventId) {
+    public void reconciled(UUID lineId, String eventId) {
         this.lineId = lineId;
         this.status = "RECONCILED";
-        avanzar(eventId);
+        advance(eventId);
     }
 
     /** El mayor lo asentó. Es el último eslabón: de aquí sale el número que va a un estado financiero. */
-    public void asentado(String voucherRef, String eventId) {
+    public void posted(String voucherRef, String eventId) {
         this.voucherRef = voucherRef;
-        avanzar(eventId);
+        advance(eventId);
     }
 
-    public void devuelto(String eventId) {
+    public void returned(String eventId) {
         this.status = "RETURNED";
-        avanzar(eventId);
+        advance(eventId);
     }
 
-    private void avanzar(String eventId) {
+    private void advance(String eventId) {
         this.lastEventId = eventId;
         this.updatedAt   = OffsetDateTime.now();
     }
@@ -133,13 +133,13 @@ public class MovementTrace {
      * <p>Lo que hace útil esta pregunta no es el sí, es el <b>no</b>: una traza incompleta señala
      * exactamente en qué eslabón se detuvo.
      */
-    public boolean estaCompleta() {
+    public boolean isComplete() {
         return payoutId != null && bankAccountId != null && trackingKey != null
                 && lineId != null && voucherRef != null;
     }
 
     /** En qué eslabón se detuvo. Nulo si está completa. */
-    public String eslabonFaltante() {
+    public String missingLink() {
         if (bankAccountId == null) return "SIN_RUTEAR";
         if (trackingKey == null)   return "SIN_DESPACHAR";
         if (lineId == null)        return "SIN_CONCILIAR";

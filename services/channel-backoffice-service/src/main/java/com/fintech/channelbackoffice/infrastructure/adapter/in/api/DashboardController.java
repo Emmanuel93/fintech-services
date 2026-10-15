@@ -82,7 +82,7 @@ class DashboardController {
         // Cartera vencida OFICIAL (CNBV/IFRS-9): 90+ días = stage3. El tramo 31–90 (stage2) es atraso
         // temprano (SICR), NO cartera vencida — mezclarlos era la causa de que la mora no cuadrara con
         // la vista de red. El IMOR (índice de morosidad) se calcula contra la vencida oficial.
-        BigDecimal carteraVencida = stage3;
+        BigDecimal overduePortfolio = stage3;
         BigDecimal atrasoTemprano = stage2;
 
         // Provisión por tramo, con la misma escala que la ficha de la cuenta.
@@ -93,14 +93,14 @@ class DashboardController {
 
         // IMOR en porcentaje (0-100): cartera vencida oficial / cartera total.
         BigDecimal delinquencyRate = principal.signum() == 0 ? BigDecimal.ZERO
-                : carteraVencida.multiply(BigDecimal.valueOf(100))
+                : overduePortfolio.multiply(BigDecimal.valueOf(100))
                          .divide(principal, 2, RoundingMode.HALF_UP);
 
         // Cobranza del periodo (del calendario, agregada en cartera): a cobrar el próximo periodo y
         // qué % de lo esperado del periodo actual ya se cobró.
         BigDecimal esperado = nz(s == null ? null : s.esperadoPeriodoActual());
         BigDecimal cobrado = nz(s == null ? null : s.cobradoPeriodoActual());
-        BigDecimal porcentajePagoPeriodo = esperado.signum() == 0 ? BigDecimal.ZERO
+        BigDecimal periodPaymentPercent = esperado.signum() == 0 ? BigDecimal.ZERO
                 : cobrado.multiply(BigDecimal.valueOf(100)).divide(esperado, 2, RoundingMode.HALF_UP);
 
         List<Map<String, Object>> byProduct = new ArrayList<>();
@@ -123,7 +123,7 @@ class DashboardController {
         body.put("capitalColocado", principal);
         body.put("totalDebt", nz(s == null ? null : s.totalDebt()));
         body.put("carteraSana", stage1);
-        body.put("carteraVencida", carteraVencida);
+        body.put("carteraVencida", overduePortfolio);
         body.put("carteraAtrasoTemprano", atrasoTemprano);
         body.put("provisionTotal", provision);
         // EAD: exposición al incumplimiento. Sin factores de conversión por
@@ -136,7 +136,7 @@ class DashboardController {
         body.put("aCobrarProximoPeriodo", nz(s == null ? null : s.aCobrarProximoPeriodo()));
         body.put("aCobrarPeriodoActual", esperado);
         body.put("cobradoPeriodoActual", cobrado);
-        body.put("porcentajePagoPeriodo", porcentajePagoPeriodo);
+        body.put("porcentajePagoPeriodo", periodPaymentPercent);
         body.put("disbursedThisMonth", BigDecimal.ZERO);
         body.put("byProduct", byProduct);
         body.put("health", health);
@@ -292,7 +292,7 @@ class DashboardController {
         body.put("portfolio", rollup.total());
         body.put("byChildUnit", rollup.byChildUnit());
         body.put("byUnit", rollup.byUnit());
-        body.put("unassigned", carteraSinTitular(targetUnitId, rollup.total()));
+        body.put("unassigned", portfolioWithoutOwner(targetUnitId, rollup.total()));
 
         // Cada asignado con lo suyo: es «cartera por ejecutivo», que hasta ahora era una tarjeta
         // vacía en el tablero remitiendo a esta pantalla.
@@ -393,7 +393,7 @@ class DashboardController {
      * <p>Cuesta una consulta agregada, no un recorrido: el total de la red ya lo calcula la base
      * en una pasada para el tablero general.
      */
-    private Map<String, Object> carteraSinTitular(UUID unitId, Map<String, Object> enElArbol) {
+    private Map<String, Object> portfolioWithoutOwner(UUID unitId, Map<String, Object> enElArbol) {
         Map<String, Object> unidad = salesOrgClient.getUnit(unitId);
         if (unidad == null || unidad.get("parentUnitId") != null) return null;
 

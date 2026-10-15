@@ -84,11 +84,21 @@ class UnderwritingApprovalFlowIT {
 
     @MockBean KafkaTemplate<String, Object> kafkaTemplate;
 
+    /**
+     * La compuerta de KYC/AML consulta a party, que aquí no existe. Se sustituye por un veredicto
+     * limpio: lo que estas pruebas examinan es el ciclo de aprobación, no la compuerta — ésa tiene
+     * las suyas en {@code KycGateOnApplicationTest}.
+     */
+    @MockBean com.fintech.origination.application.port.out.PartyReader partyReader;
+
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
     private UUID onboardProspect(String curp, String phone) throws Exception {
+        given(partyReader.verificationOf(any()))
+                .willReturn(new com.fintech.origination.application.port.out.PartyReader
+                        .Verification("VERIFIED", "CLEARED", true, null));
         given(kafkaTemplate.send(any(), any(), any()))
                 .willReturn(CompletableFuture.completedFuture(null));
 

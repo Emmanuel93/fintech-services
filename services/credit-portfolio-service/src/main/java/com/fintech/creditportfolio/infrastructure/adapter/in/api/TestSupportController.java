@@ -105,17 +105,17 @@ class TestSupportController {
     @Transactional
     ResponseEntity<Map<String, Object>> ageDispositionSchedule(@PathVariable UUID dispositionId,
                                                                 @RequestParam int daysAgo) {
-        var cuotas = installmentRepository.findByScheduleIdOrdered(dispositionId);
-        for (var cuota : cuotas) {
-            installmentRepository.shiftDueDate(dispositionId, cuota.getInstallmentNumber(),
-                    cuota.getDueDate().minusDays(daysAgo));
+        var installments = installmentRepository.findByScheduleIdOrdered(dispositionId);
+        for (var installment : installments) {
+            installmentRepository.shiftDueDate(dispositionId, installment.getInstallmentNumber(),
+                    installment.getDueDate().minusDays(daysAgo));
         }
         log.info("[test-support] calendario de la disposición {} envejecido {} días ({} cuotas)",
-                dispositionId, daysAgo, cuotas.size());
+                dispositionId, daysAgo, installments.size());
         return ResponseEntity.ok(Map.of(
                 "dispositionId", dispositionId.toString(),
                 "daysAgo", daysAgo,
-                "installmentsShifted", cuotas.size()));
+                "installmentsShifted", installments.size()));
     }
 
     @PostMapping("/run-delinquency-job")

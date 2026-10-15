@@ -46,30 +46,30 @@ class ReliefProgramsController {
 
     @PostMapping("/relief-programs")
     @Operation(summary = "Proponer un programa de apoyo (maker)")
-    ResponseEntity<Map<String, Object>> proponer(@RequestBody Map<String, Object> cuerpo) {
+    ResponseEntity<Map<String, Object>> propose(@RequestBody Map<String, Object> cuerpo) {
         log.info("POST /relief-programs motivo={}", cuerpo.get("reason"));
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(creditPortfolioClient.proponerPrograma(cuerpo));
+                .body(creditPortfolioClient.proposeProgram(cuerpo));
     }
 
-    @GetMapping("/relief-programs/{programId}/padron")
+    @GetMapping("/relief-programs/{programId}/roster")
     @Operation(summary = "A cuántas cuentas alcanzaría, sin tocar ninguna")
-    ResponseEntity<Map<String, Object>> padron(@PathVariable UUID programId) {
-        log.info("GET /relief-programs/{}/padron", programId);
-        return ResponseEntity.ok(creditPortfolioClient.padronDelPrograma(programId));
+    ResponseEntity<Map<String, Object>> roster(@PathVariable UUID programId) {
+        log.info("GET /relief-programs/{}/roster", programId);
+        return ResponseEntity.ok(creditPortfolioClient.programRoster(programId));
     }
 
     @PostMapping("/relief-programs/{programId}/approve")
     @Operation(summary = "Autorizar el programa (checker) — no puede ser quien lo propuso")
-    ResponseEntity<Map<String, Object>> autorizar(@PathVariable UUID programId) {
+    ResponseEntity<Map<String, Object>> authorize(@PathVariable UUID programId) {
         log.info("POST /relief-programs/{}/approve", programId);
-        return ResponseEntity.ok(creditPortfolioClient.autorizarPrograma(programId));
+        return ResponseEntity.ok(creditPortfolioClient.authorizeProgram(programId));
     }
 
     @PostMapping("/relief-programs/{programId}/grant")
     @Operation(summary = "Otorgar: corre los vencimientos de todo el padrón")
-    ResponseEntity<Map<String, Object>> otorgar(@PathVariable UUID programId) {
+    ResponseEntity<Map<String, Object>> grant(@PathVariable UUID programId) {
         log.info("POST /relief-programs/{}/grant", programId);
-        return ResponseEntity.accepted().body(creditPortfolioClient.otorgarPrograma(programId));
+        return ResponseEntity.accepted().body(creditPortfolioClient.grantProgram(programId));
     }
 }

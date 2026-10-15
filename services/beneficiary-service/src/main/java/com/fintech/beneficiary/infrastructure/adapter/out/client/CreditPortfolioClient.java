@@ -87,9 +87,9 @@ public class CreditPortfolioClient {
      * más. El resumen se deriva aquí, que es donde se necesita.
      */
     public Optional<DispositionSchedule> scheduleOf(UUID creditAccountId, UUID dispositionId) {
-        List<Installment> cuotas;
+        List<Installment> installments;
         try {
-            cuotas = webClient.get()
+            installments = webClient.get()
                     .uri("/api/v1/portfolio/accounts/{a}/dispositions/{d}/schedule",
                             creditAccountId, dispositionId)
                     .header("X-User-Id", creditAccountId.toString())
@@ -106,41 +106,41 @@ public class CreditPortfolioClient {
             throw e;
         }
         // Sin cuotas sí es un vacío legítimo: la disposición existe pero aún no tiene calendario.
-        if (cuotas == null || cuotas.isEmpty()) {
+        if (installments == null || installments.isEmpty()) {
             log.warn("la disposición {} todavía no tiene calendario", dispositionId);
             return Optional.empty();
         }
-        return Optional.of(resumir(dispositionId, cuotas));
+        return Optional.of(summarize(dispositionId, installments));
     }
 
     /** Deriva el resumen que consume la fila de la colocación a partir de las cuotas reales. */
-    private static DispositionSchedule resumir(UUID dispositionId, List<Installment> cuotas) {
+    private static DispositionSchedule summarize(UUID dispositionId, List<Installment> installments) {
         LocalDate hoy = LocalDate.now();
-        int pagadas = (int) cuotas.stream().filter(Installment::pagada).count();
+        int paid = (int) installments.stream().filter(Installment::pagada).count();
 
         // El atraso es el de la cuota vencida más antigua sin pagar: es el criterio con el que
         // cartera calcula `days_delinquent`, y las dos cifras tienen que contar lo mismo.
-        int diasAtraso = cuotas.stream()
+        int daysPastDue = installments.stream()
                 .filter(c -> !c.pagada() && c.dueDate() != null && c.dueDate().isBefore(hoy))
                 .mapToInt(c -> (int) java.time.temporal.ChronoUnit.DAYS.between(c.dueDate(), hoy))
                 .max().orElse(0);
 
-        LocalDate proxima = cuotas.stream()
+        LocalDate nextDueDate = installments.stream()
                 .filter(c -> !c.pagada() && c.dueDate() != null)
                 .map(Installment::dueDate)
                 .min(LocalDate::compareTo).orElse(null);
 
-        BigDecimal montoCuota = cuotas.stream()
+        BigDecimal installmentAmount = installments.stream()
                 .map(Installment::totalAmount).filter(java.util.Objects::nonNull)
                 .findFirst().orElse(BigDecimal.ZERO);
 
-        BigDecimal saldo = cuotas.stream()
+        BigDecimal balance = installments.stream()
                 .filter(c -> !c.pagada())
                 .map(Installment::totalAmount).filter(java.util.Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        return new DispositionSchedule(dispositionId, pagadas, cuotas.size(),
-                proxima, montoCuota, diasAtraso, saldo);
+        return new DispositionSchedule(dispositionId, paid, installments.size(),
+                nextDueDate, installmentAmount, daysPastDue, balance);
     }
 
     /** Una cuota tal como la publica credit-portfolio. */

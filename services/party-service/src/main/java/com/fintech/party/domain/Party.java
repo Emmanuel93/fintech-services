@@ -28,6 +28,25 @@ public class Party {
     @Column(nullable = false, length = 20)
     private PartyStatus status;
 
+    // ── El veredicto de verificación, proyectado desde compliance (D16) ──────────────────────
+    //
+    // Dos campos y no una bandera «verificado» porque no se resuelven igual: si el KYC falla, lo
+    // arregla la persona con mejor evidencia; si el screening sale con candidato, la persona no
+    // puede hacer nada y lo adjudica cumplimiento. Mandarle «vuelve a intentarlo» a quien coincidió
+    // con una lista es absurdo, y con una sola bandera no se podría distinguir.
+
+    @Column(name = "identity_status", nullable = false, length = 20)
+    private String identityStatus = "PENDING";
+
+    @Column(name = "screening_status", nullable = false, length = 20)
+    private String screeningStatus = "PENDING";
+
+    @Column(name = "verification_block_reason", length = 200)
+    private String verificationBlockReason;
+
+    @Column(name = "verified_at")
+    private java.time.Instant verifiedAt;
+
     @Column(updatable = false, length = 100)
     private String firstName;
 
@@ -157,4 +176,32 @@ public class Party {
     public UUID getAssignedExecutiveId()       { return assignedExecutiveId; }
     public String getAssignedExecutiveName()   { return assignedExecutiveName; }
     public Instant getCreatedAt()       { return createdAt; }
+
+    /**
+     * Guarda el veredicto que emitió compliance.
+     *
+     * <p>Es una proyección: `party` no decide la verificación, la registra. Quien decide es D16,
+     * que es quien habla con los proveedores y tiene las listas.
+     */
+    public void applyVerification(String identityStatus, String screeningStatus, String blockReason) {
+        this.identityStatus  = identityStatus;
+        this.screeningStatus = screeningStatus;
+        this.verificationBlockReason = blockReason;
+        if (isVerificationClear()) this.verifiedAt = java.time.Instant.now();
+    }
+
+    /**
+     * Si la persona puede avanzar. <b>Las dos cosas, y escrito en positivo.</b>
+     *
+     * <p>La forma natural —«bloquea si está PENDING o REJECTED»— se rompe en silencio el día que
+     * alguien añade un estado: el nuevo cae fuera de la lista y pasa sin que nadie lo decida.
+     */
+    public boolean isVerificationClear() {
+        return "VERIFIED".equals(identityStatus) && "CLEARED".equals(screeningStatus);
+    }
+
+    public String getIdentityStatus()          { return identityStatus; }
+    public String getScreeningStatus()         { return screeningStatus; }
+    public String getVerificationBlockReason() { return verificationBlockReason; }
+    public java.time.Instant getVerifiedAt()   { return verifiedAt; }
 }

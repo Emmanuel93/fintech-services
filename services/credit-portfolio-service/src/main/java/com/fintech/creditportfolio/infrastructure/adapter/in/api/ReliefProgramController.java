@@ -1,7 +1,7 @@
 package com.fintech.creditportfolio.infrastructure.adapter.in.api;
 
 import com.fintech.creditportfolio.application.port.in.ManageReliefProgramUseCase;
-import com.fintech.creditportfolio.application.port.in.ManageReliefProgramUseCase.Padron;
+import com.fintech.creditportfolio.application.port.in.ManageReliefProgramUseCase.EligibilityRoster;
 import com.fintech.creditportfolio.application.port.in.ManageReliefProgramUseCase.Proponer;
 import com.fintech.creditportfolio.domain.relief.ReliefProgram;
 import io.swagger.v3.oas.annotations.Operation;
@@ -46,42 +46,42 @@ import java.util.UUID;
 @Tag(name = "Relief Programs", description = "Programas de apoyo por contingencia (maker-checker)")
 class ReliefProgramController {
 
-    private final ManageReliefProgramUseCase programas;
+    private final ManageReliefProgramUseCase programs;
 
-    ReliefProgramController(ManageReliefProgramUseCase programas) { this.programas = programas; }
+    ReliefProgramController(ManageReliefProgramUseCase programs) { this.programs = programs; }
 
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN','RISK_ANALYST')")
     @Operation(summary = "Proponer un programa de apoyo (maker)")
-    ResponseEntity<ReliefProgramResponse> proponer(@Valid @RequestBody ProponerRequest req,
+    ResponseEntity<ReliefProgramResponse> propose(@Valid @RequestBody ProponerRequest req,
                                                    @RequestHeader("X-User-Id") String usuario) {
-        ReliefProgram p = programas.proponer(new Proponer(req.name(), req.reason(),
+        ReliefProgram p = programs.propose(new Proponer(req.name(), req.reason(),
                 req.deferredPeriods(), req.validFrom(), req.validTo(), req.productCode(),
                 req.originUnitCode(), req.region(), req.maxDaysDelinquent(),
                 req.eligibilityCutoffDate(), req.accrualDuringRelief()), usuario);
-        return ResponseEntity.status(HttpStatus.CREATED).body(ReliefProgramResponse.de(p));
+        return ResponseEntity.status(HttpStatus.CREATED).body(ReliefProgramResponse.from(p));
     }
 
-    @GetMapping("/{programId}/padron")
+    @GetMapping("/{programId}/roster")
     @PreAuthorize("hasAnyRole('ADMIN','RISK_ANALYST','COMMITTEE','AUDITOR')")
     @Operation(summary = "Cuántas cuentas alcanzaría, sin tocar ninguna")
-    Padron padron(@PathVariable UUID programId) {
-        return programas.simularPadron(programId);
+    EligibilityRoster roster(@PathVariable UUID programId) {
+        return programs.simulateRoster(programId);
     }
 
     @PostMapping("/{programId}/approve")
     @PreAuthorize("hasAnyRole('ADMIN','RISK_ANALYST')")
     @Operation(summary = "Autorizar el programa (checker) — no puede ser quien lo propuso")
-    ReliefProgramResponse autorizar(@PathVariable UUID programId,
+    ReliefProgramResponse authorize(@PathVariable UUID programId,
                                      @RequestHeader("X-User-Id") String usuario) {
-        return ReliefProgramResponse.de(programas.autorizar(programId, usuario));
+        return ReliefProgramResponse.from(programs.authorize(programId, usuario));
     }
 
     @PostMapping("/{programId}/grant")
     @PreAuthorize("hasAnyRole('ADMIN','RISK_ANALYST')")
     @Operation(summary = "Otorgar: corre los vencimientos de todo el padrón")
-    ResponseEntity<Otorgamiento> otorgar(@PathVariable UUID programId) {
-        return ResponseEntity.accepted().body(new Otorgamiento(programId, programas.otorgar(programId)));
+    ResponseEntity<Otorgamiento> grant(@PathVariable UUID programId) {
+        return ResponseEntity.accepted().body(new Otorgamiento(programId, programs.grant(programId)));
     }
 
     record ProponerRequest(@NotBlank String name,
@@ -102,7 +102,7 @@ class ReliefProgramController {
                                  int deferredPeriods, LocalDate validFrom, LocalDate validTo,
                                  String status, String proposedBy, String approvedBy) {
 
-        static ReliefProgramResponse de(ReliefProgram p) {
+        static ReliefProgramResponse from(ReliefProgram p) {
             return new ReliefProgramResponse(p.getId(), p.getName(), p.getReason(),
                     p.getDeferredPeriods(), p.getValidFrom(), p.getValidTo(), p.getStatus(),
                     p.getProposedBy(), p.getApprovedBy());

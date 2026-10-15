@@ -30,4 +30,9 @@ class JpaBureauPrefetchAdapter implements BureauPrefetchRepository {
     public boolean existsActiveByProspectId(UUID prospectId) {
         return jpa.existsActiveByProspectId(prospectId);
     }
+
+    @Override
+    public Optional<BureauPrefetch> findLatestByProspectId(UUID prospectId) {
+        return jpa.findFirstByProspectIdOrderByRequestedAtDesc(prospectId);
+    }
 }

@@ -9,7 +9,7 @@ import java.util.UUID;
 
 public interface ReliefProgramRepository {
 
-    ReliefProgram save(ReliefProgram programa);
+    ReliefProgram save(ReliefProgram program);
 
     Optional<ReliefProgram> findById(UUID id);
 

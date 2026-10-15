@@ -60,7 +60,7 @@ class PlacementControllerTest {
     @MockitoBean BureauReportAssembler bureauReportAssembler;
 
     private static Placement placement(UUID distributorPartyId) {
-        return Placement.draft(distributorPartyId, LINE, "María Luisa Cortés Hernández", "5541829037",
+        return Placement.draft(distributorPartyId, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa Cortés Hernández", "5541829037",
                 "Clienta de mi tienda desde 2023", new BigDecimal("18000"), 12, PAYMENT,
                 VerificationMode.SELF_SERVICE_LINK, EXPIRY, LIMITS, null);
     }

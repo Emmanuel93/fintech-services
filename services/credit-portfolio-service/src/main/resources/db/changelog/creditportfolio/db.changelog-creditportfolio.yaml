@@ -150,3 +150,21 @@ databaseChangeLog:
             path: db/changelog/creditportfolio/021-relief-programs.sql
             relativeToChangelogFile: false
             splitStatements: true
+
+  - changeSet:
+      id: 022-verificacion-de-personas
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/022-verificacion-de-personas.sql
+            relativeToChangelogFile: false
+            splitStatements: false
+
+  - changeSet:
+      id: 023-aml-en-la-disposicion
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/023-aml-en-la-disposicion.sql
+            relativeToChangelogFile: false
+            splitStatements: false

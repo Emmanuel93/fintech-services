@@ -192,8 +192,8 @@ class SalesOrgController {
         requireOrgAdmin();
         // El alcance se mide sobre **dónde está hoy** la persona. Sacar a alguien de una unidad
         // ajena es reorganizar equipo ajeno, aunque el destino luego sea propio.
-        Map<String, Object> actual = salesOrgClient.currentAssignment(assigneeType, assigneeId);
-        if (actual != null) scope.requireWithin(uuidOrNull(actual.get("unitId")), "reasignar desde");
+        Map<String, Object> current = salesOrgClient.currentAssignment(assigneeType, assigneeId);
+        if (current != null) scope.requireWithin(uuidOrNull(current.get("unitId")), "reasignar desde");
         boolean ended = salesOrgClient.endAssignment(assigneeType, assigneeId);
         return ended ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }

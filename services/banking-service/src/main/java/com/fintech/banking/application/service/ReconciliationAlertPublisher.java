@@ -13,7 +13,7 @@ import java.util.UUID;
  */
 public interface ReconciliationAlertPublisher {
 
-    void publicarDescuadre(UUID bankAccountId, LocalDate businessDate,
+    void publishMismatch(UUID bankAccountId, LocalDate businessDate,
                            BigDecimal saldoContable, BigDecimal saldoDelBanco,
                            BigDecimal partidasEnConciliacion, BigDecimal diferencia,
                            int partidasAbiertas);

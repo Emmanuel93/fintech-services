@@ -20,19 +20,19 @@ public class PayoutRouteAdminService implements ManagePayoutRoutesUseCase {
     private static final int PRIORIDAD_POR_DEFECTO = 100;
 
     private final PayoutRouteRepository rutas;
-    private final BankAccountRepository cuentas;
+    private final BankAccountRepository accounts;
 
-    public PayoutRouteAdminService(PayoutRouteRepository rutas, BankAccountRepository cuentas) {
+    public PayoutRouteAdminService(PayoutRouteRepository rutas, BankAccountRepository accounts) {
         this.rutas   = rutas;
-        this.cuentas = cuentas;
+        this.accounts = accounts;
     }
 
     @Override
     @Transactional
-    public PayoutRoute alta(AltaDeRuta a) {
+    public PayoutRoute register(AltaDeRuta a) {
         // Apuntar una ruta a una cuenta inexistente se detecta al dar de alta la ruta, no la noche
         // en que un pago la use: la clave foránea también lo impediría, con un mensaje ilegible.
-        cuentas.findById(a.bankAccountId()).orElseThrow(
+        accounts.findById(a.bankAccountId()).orElseThrow(
                 () -> new NoSuchElementException("Sin cuenta bancaria " + a.bankAccountId()));
 
         PayoutRoute ruta = rutas.save(PayoutRoute.of(a.companyId(), a.rail(), a.provider(),
@@ -47,14 +47,14 @@ public class PayoutRouteAdminService implements ManagePayoutRoutesUseCase {
 
     @Override
     @Transactional(readOnly = true)
-    public List<PayoutRoute> listar() { return rutas.findAll(); }
+    public List<PayoutRoute> list() { return rutas.findAll(); }
 
     @Override
     @Transactional
-    public PayoutRoute deshabilitar(UUID id) {
+    public PayoutRoute disable(UUID id) {
         PayoutRoute ruta = rutas.findById(id).orElseThrow(
                 () -> new NoSuchElementException("Sin ruta de pago " + id));
-        ruta.deshabilitar();
+        ruta.disable();
         log.warn("Ruta {} DESHABILITADA — deja de participar en la resolución", id);
         return rutas.save(ruta);
     }

@@ -15,41 +15,41 @@ import java.util.UUID;
 @Repository
 class JpaBankReconciliationAdapter implements BankReconciliationRepository {
 
-    private final SpringDataBankStatementLineRepository lineas;
+    private final SpringDataBankStatementLineRepository lines;
     private final SpringDataBankMatchRepository cruces;
     private final SpringDataSuspenseEntryRepository partidas;
-    private final SpringDataBankCloseSealRepository sellos;
+    private final SpringDataBankCloseSealRepository seals;
 
-    JpaBankReconciliationAdapter(SpringDataBankStatementLineRepository lineas,
+    JpaBankReconciliationAdapter(SpringDataBankStatementLineRepository lines,
                                  SpringDataBankMatchRepository cruces,
                                  SpringDataSuspenseEntryRepository partidas,
-                                 SpringDataBankCloseSealRepository sellos) {
-        this.lineas   = lineas;
+                                 SpringDataBankCloseSealRepository seals) {
+        this.lines   = lines;
         this.cruces   = cruces;
         this.partidas = partidas;
-        this.sellos   = sellos;
+        this.seals   = seals;
     }
 
-    @Override public BankStatementLine saveLine(BankStatementLine l) { return lineas.save(l); }
+    @Override public BankStatementLine saveLine(BankStatementLine l) { return lines.save(l); }
 
-    @Override public Optional<BankStatementLine> findLineByExternalId(UUID cuenta, String externalId) {
-        return lineas.findByBankAccountIdAndExternalId(cuenta, externalId);
+    @Override public Optional<BankStatementLine> findLineByExternalId(UUID account, String externalId) {
+        return lines.findByBankAccountIdAndExternalId(account, externalId);
     }
 
-    @Override public List<BankStatementLine> findLinesByDate(UUID cuenta, LocalDate fecha) {
-        return lineas.findByBankAccountIdAndBusinessDate(cuenta, fecha);
+    @Override public List<BankStatementLine> findLinesByDate(UUID account, LocalDate date) {
+        return lines.findByBankAccountIdAndBusinessDate(account, date);
     }
 
     @Override public BankMatch saveMatch(BankMatch m)         { return cruces.save(m); }
     @Override public SuspenseEntry saveSuspense(SuspenseEntry e) { return partidas.save(e); }
 
-    @Override public List<SuspenseEntry> findOpenSuspenseUpTo(UUID cuenta, LocalDate fecha) {
-        return partidas.findByBankAccountIdAndStatusAndBusinessDateLessThanEqual(cuenta, "OPEN", fecha);
+    @Override public List<SuspenseEntry> findOpenSuspenseUpTo(UUID account, LocalDate date) {
+        return partidas.findByBankAccountIdAndStatusAndBusinessDateLessThanEqual(account, "OPEN", date);
     }
 
-    @Override public BankCloseSeal saveSeal(BankCloseSeal s)  { return sellos.save(s); }
+    @Override public BankCloseSeal saveSeal(BankCloseSeal s)  { return seals.save(s); }
 
-    @Override public Optional<BankCloseSeal> findSeal(UUID cuenta, LocalDate fecha, String periodo) {
-        return sellos.findByBankAccountIdAndBusinessDateAndPeriodType(cuenta, fecha, periodo);
+    @Override public Optional<BankCloseSeal> findSeal(UUID account, LocalDate date, String period) {
+        return seals.findByBankAccountIdAndBusinessDateAndPeriodType(account, date, period);
     }
 }

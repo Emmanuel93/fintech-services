@@ -35,21 +35,21 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles("test")
 class ListenersAclIT extends AbstractIntegrationTest {
 
-    @Override protected List<String> esquemas() { return List.of("disbursement"); }
+    @Override protected List<String> schemas() { return List.of("disbursement"); }
 
     /**
      * El mapeo de empresa sobrevive al truncado: lo siembra Liquibase y sin él DB-07 rechaza toda
-     * orden. Es la trampa que documenta {@code AbstractIntegrationTest#preservar()}.
+     * orden. Es la trampa que documenta {@code AbstractIntegrationTest#preserve()}.
      */
-    @Override protected List<String> preservar() { return List.of("company_mappings"); }
+    @Override protected List<String> preserve() { return List.of("company_mappings"); }
 
     @Autowired DispositionAuthorizedListener listener;
     @Autowired DisbursementOrderRepository orders;
 
-    private static DispositionAuthorizedPayload autorizada(UUID dispositionId, String monto) {
+    private static DispositionAuthorizedPayload authorized(UUID dispositionId, String amount) {
         return new DispositionAuthorizedPayload(
                 dispositionId, UUID.randomUUID(), null, "SUC-001", null,
-                new BigDecimal(monto), "MXN",
+                new BigDecimal(amount), "MXN",
                 "JUAN PEREZ", "646180157000000004", "40", "PEPJ800101ABC", 646,
                 1L, "DISPOSICION DE CREDITO", Instant.now());
     }
@@ -57,12 +57,12 @@ class ListenersAclIT extends AbstractIntegrationTest {
     @Test
     @DisplayName("una disposición autorizada crea la orden de pago con su beneficiario")
     void creaLaOrden() {
-        UUID disposicion = UUID.randomUUID();
+        UUID disposition = UUID.randomUUID();
 
-        listener.onDispositionAuthorized(autorizada(disposicion, "20000.00"));
+        listener.onDispositionAuthorized(authorized(disposition, "20000.00"));
 
         var orden = orders.findBySourceKey("credit-portfolio",
-                DisbursementSource.DISPOSITION.name(), disposicion.toString());
+                DisbursementSource.DISPOSITION.name(), disposition.toString());
         assertThat(orden).isPresent();
         assertThat(orden.get().getAmount()).isEqualByComparingTo("20000.00");
         // Los tres campos que deciden adónde va el dinero. Si el productor deja de mandarlos, la
@@ -76,43 +76,43 @@ class ListenersAclIT extends AbstractIntegrationTest {
     @Test
     @DisplayName("DB-02 · el mismo evento reentregado NO crea una segunda orden")
     void esIdempotente() {
-        UUID disposicion = UUID.randomUUID();
+        UUID disposition = UUID.randomUUID();
 
-        listener.onDispositionAuthorized(autorizada(disposicion, "5000.00"));
-        listener.onDispositionAuthorized(autorizada(disposicion, "5000.00"));
+        listener.onDispositionAuthorized(authorized(disposition, "5000.00"));
+        listener.onDispositionAuthorized(authorized(disposition, "5000.00"));
 
         // Kafka entrega al menos una vez. Sin la restricción única, un reintegro pagaría dos veces.
         Integer cuantas = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*) FROM disbursement.disbursement_orders
                  WHERE source_event_id = ?
-                """, Integer.class, disposicion.toString());
+                """, Integer.class, disposition.toString());
         assertThat(cuantas).isEqualTo(1);
     }
 
     @Test
     @DisplayName("una disposición sin monto no crea orden — y no revienta")
     void sinMontoNoHaceNada() {
-        UUID disposicion = UUID.randomUUID();
+        UUID disposition = UUID.randomUUID();
 
         listener.onDispositionAuthorized(new DispositionAuthorizedPayload(
-                disposicion, UUID.randomUUID(), null, "SUC-001", null, null, "MXN",
+                disposition, UUID.randomUUID(), null, "SUC-001", null, null, "MXN",
                 "JUAN PEREZ", "646180157000000004", "40", null, 646, 1L, "X", Instant.now()));
 
         assertThat(orders.findBySourceKey("credit-portfolio",
-                DisbursementSource.DISPOSITION.name(), disposicion.toString())).isEmpty();
+                DisbursementSource.DISPOSITION.name(), disposition.toString())).isEmpty();
     }
 
     @Test
     @DisplayName("la procedencia viaja en eco y el núcleo NO la lee para decidir (DB-09)")
     void laProcedenciaViajaEnEco() {
-        UUID disposicion = UUID.randomUUID();
-        listener.onDispositionAuthorized(autorizada(disposicion, "7500.00"));
+        UUID disposition = UUID.randomUUID();
+        listener.onDispositionAuthorized(authorized(disposition, "7500.00"));
 
         var orden = orders.findBySourceKey("credit-portfolio",
-                DisbursementSource.DISPOSITION.name(), disposicion.toString()).orElseThrow();
+                DisbursementSource.DISPOSITION.name(), disposition.toString()).orElseThrow();
 
         // Es lo que permite que el emisor correlacione la respuesta sin que este servicio entienda
         // qué es una disposición. Borrar los tres listeners dejaría un motor de payouts intacto.
-        assertThat(orden.getSourceMetadata()).containsEntry("dispositionId", disposicion.toString());
+        assertThat(orden.getSourceMetadata()).containsEntry("dispositionId", disposition.toString());
     }
 }

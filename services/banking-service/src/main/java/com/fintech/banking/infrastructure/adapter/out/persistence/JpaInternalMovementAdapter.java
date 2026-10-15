@@ -26,20 +26,20 @@ class JpaInternalMovementAdapter implements InternalMovementLookupPort,
     JpaInternalMovementAdapter(SpringDataInternalMovementRepository jpa) { this.jpa = jpa; }
 
     @Override
-    public Optional<MovimientoInterno> porClaveDeRastreo(String trackingKey) {
-        return jpa.findByTrackingKey(trackingKey).map(JpaInternalMovementAdapter::traducir);
+    public Optional<MovimientoInterno> byTrackingKey(String trackingKey) {
+        return jpa.findByTrackingKey(trackingKey).map(JpaInternalMovementAdapter::translate);
     }
 
     @Override
-    public List<MovimientoInterno> porImporteYFecha(BigDecimal amount, LocalDate businessDate) {
+    public List<MovimientoInterno> byAmountAndDate(BigDecimal amount, LocalDate businessDate) {
         return jpa.findByBusinessDateAndAmount(businessDate, amount).stream()
-                .map(JpaInternalMovementAdapter::traducir)
+                .map(JpaInternalMovementAdapter::translate)
                 .toList();
     }
 
     /** Proyecta un hecho interno. Idempotente por el id del evento que lo trajo. */
     @Override
-    public void proyectar(InternalMovement m) {
+    public void project(InternalMovement m) {
         if (jpa.existsBySourceEventId(m.getSourceEventId())) {
             // Un reintento de Kafka volvería ambiguo un cruce que era determinista.
             return;
@@ -47,7 +47,7 @@ class JpaInternalMovementAdapter implements InternalMovementLookupPort,
         jpa.save(m);
     }
 
-    private static MovimientoInterno traducir(InternalMovement m) {
+    private static MovimientoInterno translate(InternalMovement m) {
         return new MovimientoInterno(m.getMovementType(), m.getReference(), m.getAmount(),
                 m.getBusinessDate(), m.getTrackingKey());
     }

@@ -83,6 +83,33 @@ public class KafkaConfig {
         return factory;
     }
 
+    // ── compliance.verification-completed ────────────────────────────────────
+    //
+    // El veredicto de KYC/AML de cada persona. Se proyecta para poder frenar una disposición sin
+    // salir a preguntar: la comprobación está en el camino del dinero.
+
+    @org.springframework.context.annotation.Bean
+    public org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory<String,
+            com.fintech.creditportfolio.infrastructure.adapter.in.messaging.VerificationCompletedPayload>
+    verificationCompletedListenerContainerFactory(
+            org.springframework.boot.autoconfigure.kafka.KafkaProperties properties) {
+        java.util.Map<String, Object> config = properties.buildConsumerProperties(null);
+        config.put(org.apache.kafka.clients.consumer.ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+                org.apache.kafka.common.serialization.StringDeserializer.class);
+        config.put(org.apache.kafka.clients.consumer.ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+                org.springframework.kafka.support.serializer.JsonDeserializer.class);
+        config.put(org.apache.kafka.clients.consumer.ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(org.springframework.kafka.support.serializer.JsonDeserializer.TRUSTED_PACKAGES, "com.fintech.*");
+        config.put(org.springframework.kafka.support.serializer.JsonDeserializer.VALUE_DEFAULT_TYPE,
+                com.fintech.creditportfolio.infrastructure.adapter.in.messaging.VerificationCompletedPayload.class.getName());
+        config.put(org.springframework.kafka.support.serializer.JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
+
+        var factory = new org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory<String,
+                com.fintech.creditportfolio.infrastructure.adapter.in.messaging.VerificationCompletedPayload>();
+        factory.setConsumerFactory(new org.springframework.kafka.core.DefaultKafkaConsumerFactory<>(config));
+        return factory;
+    }
+
     // ── product-catalog.product-activated ────────────────────────────────────
 
     @Bean

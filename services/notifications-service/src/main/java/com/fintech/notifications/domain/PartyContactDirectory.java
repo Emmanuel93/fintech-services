@@ -9,7 +9,7 @@ import java.util.UUID;
  * Resultado final del join de 3 pasos (ver T2_notifications.md §Prerequisito crítico): a partir
  * de aquí, cualquier evento post-activación que traiga {@code obligorPartyId} directo ya resuelve
  * contacto sin volver a hacer el join. {@code firstName} viaja desde ProspectContactShadow para
- * personalizar el copy ({@code {{nombre}}}).
+ * personalizar el copy ({@code {{firstName}}}).
  */
 @Entity
 @Table(name = "party_contact_directory", schema = "notifications")

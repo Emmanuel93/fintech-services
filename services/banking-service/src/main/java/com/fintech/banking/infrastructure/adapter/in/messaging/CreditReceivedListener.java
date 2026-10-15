@@ -26,12 +26,12 @@ public class CreditReceivedListener {
     private static final Logger log = LoggerFactory.getLogger(CreditReceivedListener.class);
 
     private final BankReconciliationService conciliacion;
-    private final BankAccountRepository cuentas;
+    private final BankAccountRepository accounts;
 
     public CreditReceivedListener(BankReconciliationService conciliacion,
-                                  BankAccountRepository cuentas) {
+                                  BankAccountRepository accounts) {
         this.conciliacion = conciliacion;
-        this.cuentas      = cuentas;
+        this.accounts      = accounts;
     }
 
     @KafkaListener(
@@ -39,16 +39,16 @@ public class CreditReceivedListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "creditReceivedListenerContainerFactory")
     public void onCreditReceived(CreditReceivedPayload event) {
-        cuentas.findByClabe(event.beneficiaryAccount()).ifPresentOrElse(
-                cuenta -> conciliacion.ingerir(cuenta.getId(), event.businessDate(), "CREDIT",
+        accounts.findByClabe(event.beneficiaryAccount()).ifPresentOrElse(
+                account -> conciliacion.ingest(account.getId(), event.businessDate(), "CREDIT",
                         event.amount(), event.externalId(), event.trackingKey(),
                         event.concept(), event.senderName(), event.senderAccount()),
                 () -> log.warn("Abono recibido a una CLABE no dada de alta ****{} — no se ingiere",
-                        sufijo(event.beneficiaryAccount())));
+                        suffix(event.beneficiaryAccount())));
     }
 
     /** Nunca se registra la CLABE completa, ni siquiera la de un tercero. */
-    private static String sufijo(String clabe) {
+    private static String suffix(String clabe) {
         return clabe == null || clabe.length() < 4 ? "?" : clabe.substring(clabe.length() - 4);
     }
 

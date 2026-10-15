@@ -286,7 +286,7 @@ public class StpPaymentOrder {
     public String getOrderingClientNumber() { return orderingClientNumber; }
 
     /** Las órdenes anteriores a BK-07 no traen fotografía: su relay cae al catálogo local. */
-    public boolean tieneCuentaOrdenanteRegistrada() {
+    public boolean hasRegisteredOrderingAccount() {
         return orderingClabe != null && !orderingClabe.isBlank();
     }
 

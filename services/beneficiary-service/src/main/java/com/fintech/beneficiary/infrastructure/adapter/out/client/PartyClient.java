@@ -93,8 +93,19 @@ public class PartyClient {
     }
 
     @com.fasterxml.jackson.annotation.JsonIgnoreProperties(ignoreUnknown = true)
+    /**
+     * La ficha de la persona. Trae <b>más campos de los que este servicio usa</b> a propósito:
+     * los de verificación los necesita la compuerta de aprobación, y viajan en esta misma respuesta
+     * en vez de en una llamada aparte.
+     *
+     * <p>Jackson ignora lo que no esté declarado aquí, así que party puede crecer su ficha sin
+     * romper este cliente — y los campos que sí se declaran llegan nulos si party todavía no los
+     * manda, que es el caso que {@code PartyScreeningAdapter} trata como «no se sabe».
+     */
     public record PartyResponse(UUID partyId, UUID prospectId, String firstName,
-                                String lastName1, String lastName2, String status) {
+                                String lastName1, String lastName2, String status,
+                                String identityStatus, String screeningStatus,
+                                String verificationBlockReason) {
         public String fullName() {
             return (nullToEmpty(firstName) + " " + nullToEmpty(lastName1) + " " + nullToEmpty(lastName2)).trim();
         }

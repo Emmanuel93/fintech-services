@@ -13,9 +13,9 @@ public interface SkipPaymentUseCase {
 
     record SaltarPago(UUID creditAccountId, UUID installmentId) {}
 
-    class NoSePuedeSaltarException extends RuntimeException {
-        public NoSePuedeSaltarException(String motivo) { super(motivo); }
+    class SkipNotAllowedException extends RuntimeException {
+        public SkipNotAllowedException(String motivo) { super(motivo); }
     }
 
-    void saltar(SaltarPago cmd);
+    void skip(SaltarPago cmd);
 }

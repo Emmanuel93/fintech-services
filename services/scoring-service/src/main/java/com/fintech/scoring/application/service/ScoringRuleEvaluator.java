@@ -37,48 +37,48 @@ class ScoringRuleEvaluator {
 
     private RuleEvaluationDetail applyRule(ScoringRule rule, CirculoReport report) {
         return switch (rule.getRuleType()) {
-            case MORA_CHECK      -> evalMora(rule, report);
+            case WORST_ARREARS_DAYS      -> evalDelinquency(rule, report);
             case FICO_THRESHOLD  -> evalFico(rule, report);
-            case FICO_SCORES_COUNT -> medir(rule, report, "puntajes de buró disponibles",
+            case FICO_SCORES_COUNT -> measure(rule, report, "puntajes de buró disponibles",
                     BigDecimal.valueOf(report.getFicoScoreValor() != null ? 1 : 0));
             case CREDIT_COUNT    -> evalCreditCount(rule, report);
             case BALANCE_CHECK   -> evalBalance(rule, report);
             case INQUIRY_COUNT   -> evalInquiryCount(rule, report);
 
             // ── Comportamiento de pago ───────────────────────────────────────
-            case WORST_ARREARS_BALANCE  -> medir(rule, report, "saldo en mora máxima histórica",
-                    sumaCreditos(rule, report, CirculoCredit::getSaldoVencidoPeorAtraso));
-            case OVERDUE_ACCOUNTS_COUNT -> medir(rule, report, "cuentas en mora",
-                    contarCreditos(rule, report, c -> positivo(c.getSaldoVencido())));
-            case CURRENT_ACCOUNTS_COUNT -> medir(rule, report, "cuentas al corriente",
-                    contarCreditos(rule, report, c -> !positivo(c.getSaldoVencido())));
-            case OVERDUE_PAYMENTS_COUNT -> medir(rule, report, "pagos vencidos acumulados",
-                    sumaCreditos(rule, report, c -> entero(c.getNumeroPagosVencidos())));
-            case ARREARS_RECENCY_MONTHS -> medir(rule, report, "meses desde el peor atraso",
-                    mesesDesdePeorAtraso(rule, report));
-            case PREVENTION_KEY_COUNT   -> medir(rule, report, "créditos con clave de prevención",
-                    contarCreditos(rule, report, c -> tieneTexto(c.getClavePrevencion())));
+            case WORST_ARREARS_BALANCE  -> measure(rule, report, "saldo en mora máxima histórica",
+                    sumCredits(rule, report, CirculoCredit::getSaldoVencidoPeorAtraso));
+            case OVERDUE_ACCOUNTS_COUNT -> measure(rule, report, "cuentas en mora",
+                    countCredits(rule, report, c -> positive(c.getSaldoVencido())));
+            case CURRENT_ACCOUNTS_COUNT -> measure(rule, report, "cuentas al corriente",
+                    countCredits(rule, report, c -> !positive(c.getSaldoVencido())));
+            case OVERDUE_PAYMENTS_COUNT -> measure(rule, report, "pagos vencidos acumulados",
+                    sumCredits(rule, report, c -> integerValue(c.getNumeroPagosVencidos())));
+            case ARREARS_RECENCY_MONTHS -> measure(rule, report, "meses desde el peor atraso",
+                    monthsSinceWorstDelinquency(rule, report));
+            case PREVENTION_KEY_COUNT   -> measure(rule, report, "créditos con clave de prevención",
+                    countCredits(rule, report, c -> hasText(c.getClavePrevencion())));
 
             // ── Exposición y capacidad ───────────────────────────────────────
-            case TOTAL_DEBT           -> medir(rule, report, "deuda total vigente",
-                    sumaCreditos(rule, report, CirculoCredit::getSaldoActual));
-            case CREDIT_UTILIZATION   -> medir(rule, report, "utilización de líneas (%)",
-                    utilizacion(rule, report));
-            case MONTHLY_PAYMENT_LOAD -> medir(rule, report, "pago mensual comprometido",
-                    sumaCreditos(rule, report, CirculoCredit::getMontoPagar));
-            case DEBT_TO_INCOME       -> medir(rule, report, "carga sobre el ingreso (%)",
-                    cargaSobreIngreso(rule, report));
+            case TOTAL_DEBT           -> measure(rule, report, "deuda total vigente",
+                    sumCredits(rule, report, CirculoCredit::getSaldoActual));
+            case CREDIT_UTILIZATION   -> measure(rule, report, "utilización de líneas (%)",
+                    utilization(rule, report));
+            case MONTHLY_PAYMENT_LOAD -> measure(rule, report, "pago mensual comprometido",
+                    sumCredits(rule, report, CirculoCredit::getMontoPagar));
+            case DEBT_TO_INCOME       -> measure(rule, report, "carga sobre el ingreso (%)",
+                    debtToIncome(rule, report));
 
             // ── Perfil ───────────────────────────────────────────────────────
-            case CREDIT_HISTORY_MONTHS -> medir(rule, report, "antigüedad del historial (meses)",
-                    antiguedadHistorial(rule, report));
+            case CREDIT_HISTORY_MONTHS -> measure(rule, report, "antigüedad del historial (meses)",
+                    historyMonths(rule, report));
 
             // ── Persona ──────────────────────────────────────────────────────
-            case AGE_YEARS         -> medir(rule, report, "edad (años)", edad(report));
-            case MONTHLY_INCOME    -> medir(rule, report, "ingreso mensual", ingresoMensual(report));
-            case EMPLOYMENT_MONTHS -> medir(rule, report, "antigüedad laboral (meses)",
-                    antiguedadLaboral(report));
-            case DEPENDENTS_COUNT  -> medir(rule, report, "dependientes económicos",
+            case AGE_YEARS         -> measure(rule, report, "edad (años)", ageYears(report));
+            case MONTHLY_INCOME    -> measure(rule, report, "ingreso mensual", monthlyIncome(report));
+            case EMPLOYMENT_MONTHS -> measure(rule, report, "antigüedad laboral (meses)",
+                    employmentMonths(report));
+            case DEPENDENTS_COUNT  -> measure(rule, report, "dependientes económicos",
                     report.getPersonaNumDependientes() == null ? null
                             : BigDecimal.valueOf(report.getPersonaNumDependientes()));
         };
@@ -95,13 +95,13 @@ class ScoringRuleEvaluator {
      * tratar un dato ausente como cero haría que quien no tiene ingreso declarado puntúe igual
      * que quien gana cero, y que un expediente incompleto pase por uno impecable.
      */
-    private RuleEvaluationDetail medir(ScoringRule rule, CirculoReport report,
-                                        String queMide, BigDecimal valor) {
-        boolean matched = valor != null && rule.getOperator().apply(valor, rule.getThresholdValue());
+    private RuleEvaluationDetail measure(ScoringRule rule, CirculoReport report,
+                                        String queMide, BigDecimal value) {
+        boolean matched = value != null && rule.getOperator().apply(value, rule.getThresholdValue());
         String detail = "%s%s = %s, umbral %s %s".formatted(
                 queMide,
                 rule.getCreditType() != null ? " (tipo " + rule.getCreditType() + ")" : "",
-                valor != null ? valor.stripTrailingZeros().toPlainString() : "sin dato",
+                value != null ? value.stripTrailingZeros().toPlainString() : "sin dato",
                 rule.getOperator(), rule.getThresholdValue().stripTrailingZeros().toPlainString());
 
         return new RuleEvaluationDetail(rule.getRuleId(), rule.getRuleType().name(),
@@ -110,19 +110,19 @@ class ScoringRuleEvaluator {
                 rule.isDisqualifying(), detail);
     }
 
-    // ── MORA_CHECK ────────────────────────────────────────────────────────────
+    // ── WORST_ARREARS_DAYS ────────────────────────────────────────────────────────────
 
-    private RuleEvaluationDetail evalMora(ScoringRule rule, CirculoReport report) {
-        BigDecimal worstMora = report.getCredits().stream()
+    private RuleEvaluationDetail evalDelinquency(ScoringRule rule, CirculoReport report) {
+        BigDecimal worstDelinquency = report.getCredits().stream()
                 .filter(c -> matchesCreditType(rule, c.getTipoCredito()))
                 .map(CirculoCredit::getPeorAtraso)
                 .filter(m -> m != null)
                 .max(BigDecimal::compareTo)
                 .orElse(BigDecimal.ZERO);
 
-        boolean matched = rule.getOperator().apply(worstMora, rule.getThresholdValue());
+        boolean matched = rule.getOperator().apply(worstDelinquency, rule.getThresholdValue());
         String detail = "peor atraso=%s días, tipo=%s, umbral %s %s".formatted(
-                worstMora, creditTypeLabel(rule), rule.getOperator(), rule.getThresholdValue());
+                worstDelinquency, creditTypeLabel(rule), rule.getOperator(), rule.getThresholdValue());
 
         return new RuleEvaluationDetail(rule.getRuleId(), rule.getRuleType().name(),
                 rule.getCreditType(), matched,
@@ -133,12 +133,12 @@ class ScoringRuleEvaluator {
     // ── FICO_THRESHOLD ────────────────────────────────────────────────────────
 
     private RuleEvaluationDetail evalFico(ScoringRule rule, CirculoReport report) {
-        Integer ficoValor = report.getFicoScoreValor();
-        BigDecimal fico = ficoValor != null ? BigDecimal.valueOf(ficoValor) : null;
+        Integer ficoValue = report.getFicoScoreValor();
+        BigDecimal fico = ficoValue != null ? BigDecimal.valueOf(ficoValue) : null;
 
         boolean matched = rule.getOperator().apply(fico, rule.getThresholdValue());
         String detail = "FICO=%s, umbral %s %s".formatted(
-                ficoValor != null ? ficoValor : "N/A",
+                ficoValue != null ? ficoValue : "N/A",
                 rule.getOperator(), rule.getThresholdValue().intValue());
 
         return new RuleEvaluationDetail(rule.getRuleId(), rule.getRuleType().name(),
@@ -167,14 +167,14 @@ class ScoringRuleEvaluator {
     // ── BALANCE_CHECK ─────────────────────────────────────────────────────────
 
     private RuleEvaluationDetail evalBalance(ScoringRule rule, CirculoReport report) {
-        BigDecimal sumVencido = report.getCredits().stream()
+        BigDecimal overdueSum = report.getCredits().stream()
                 .filter(c -> matchesCreditType(rule, c.getTipoCredito()))
                 .map(c -> c.getSaldoVencido() != null ? c.getSaldoVencido() : BigDecimal.ZERO)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        boolean matched = rule.getOperator().apply(sumVencido, rule.getThresholdValue());
+        boolean matched = rule.getOperator().apply(overdueSum, rule.getThresholdValue());
         String detail = "saldo vencido tipo %s = %s, umbral %s %s".formatted(
-                creditTypeLabel(rule), sumVencido, rule.getOperator(), rule.getThresholdValue());
+                creditTypeLabel(rule), overdueSum, rule.getOperator(), rule.getThresholdValue());
 
         return new RuleEvaluationDetail(rule.getRuleId(), rule.getRuleType().name(),
                 rule.getCreditType(), matched,
@@ -207,20 +207,20 @@ class ScoringRuleEvaluator {
     // ── Medidas sobre el reporte ──────────────────────────────────────────────
 
     /** Suma un campo numérico sobre los créditos que la regla alcanza. */
-    private BigDecimal sumaCreditos(ScoringRule rule, CirculoReport report,
+    private BigDecimal sumCredits(ScoringRule rule, CirculoReport report,
                                      java.util.function.Function<CirculoCredit, BigDecimal> campo) {
-        return creditos(rule, report)
+        return credits(rule, report)
                 .map(campo)
                 .filter(v -> v != null)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
-    private BigDecimal contarCreditos(ScoringRule rule, CirculoReport report,
+    private BigDecimal countCredits(ScoringRule rule, CirculoReport report,
                                        java.util.function.Predicate<CirculoCredit> cumple) {
-        return BigDecimal.valueOf(creditos(rule, report).filter(cumple).count());
+        return BigDecimal.valueOf(credits(rule, report).filter(cumple).count());
     }
 
-    private java.util.stream.Stream<CirculoCredit> creditos(ScoringRule rule, CirculoReport report) {
+    private java.util.stream.Stream<CirculoCredit> credits(ScoringRule rule, CirculoReport report) {
         return report.getCredits().stream()
                 .filter(c -> matchesCreditType(rule, c.getTipoCredito()));
     }
@@ -232,8 +232,8 @@ class ScoringRuleEvaluator {
      * Con el más antiguo, alguien que se atrasó hace ocho años y otra vez el mes pasado saldría
      * con ocho años de buena conducta.
      */
-    private BigDecimal mesesDesdePeorAtraso(ScoringRule rule, CirculoReport report) {
-        LocalDate masReciente = creditos(rule, report)
+    private BigDecimal monthsSinceWorstDelinquency(ScoringRule rule, CirculoReport report) {
+        LocalDate masReciente = credits(rule, report)
                 .map(CirculoCredit::getFechaPeorAtraso)
                 .filter(f -> f != null)
                 .max(LocalDate::compareTo)
@@ -244,38 +244,38 @@ class ScoringRuleEvaluator {
     }
 
     /** Saldo usado sobre línea autorizada, en porcentaje. */
-    private BigDecimal utilizacion(ScoringRule rule, CirculoReport report) {
-        BigDecimal saldo = sumaCreditos(rule, report, CirculoCredit::getSaldoActual);
-        BigDecimal linea = sumaCreditos(rule, report, CirculoCredit::getLimiteCredito);
+    private BigDecimal utilization(ScoringRule rule, CirculoReport report) {
+        BigDecimal balance = sumCredits(rule, report, CirculoCredit::getSaldoActual);
+        BigDecimal line = sumCredits(rule, report, CirculoCredit::getLimiteCredito);
         // Sin línea autorizada no hay proporción que calcular. Devolver cero diría «no usa nada»,
         // que es lo contrario de lo que significa un expediente sin líneas revolventes.
-        if (linea.signum() == 0) return null;
-        return saldo.multiply(BigDecimal.valueOf(100))
-                .divide(linea, 2, java.math.RoundingMode.HALF_UP);
+        if (line.signum() == 0) return null;
+        return balance.multiply(BigDecimal.valueOf(100))
+                .divide(line, 2, java.math.RoundingMode.HALF_UP);
     }
 
     /** Pago mensual comprometido sobre ingreso declarado, en porcentaje. */
-    private BigDecimal cargaSobreIngreso(ScoringRule rule, CirculoReport report) {
-        BigDecimal ingreso = ingresoMensual(report);
+    private BigDecimal debtToIncome(ScoringRule rule, CirculoReport report) {
+        BigDecimal ingreso = monthlyIncome(report);
         if (ingreso == null || ingreso.signum() == 0) return null;
-        BigDecimal pago = sumaCreditos(rule, report, CirculoCredit::getMontoPagar);
-        return pago.multiply(BigDecimal.valueOf(100))
+        BigDecimal payment = sumCredits(rule, report, CirculoCredit::getMontoPagar);
+        return payment.multiply(BigDecimal.valueOf(100))
                 .divide(ingreso, 2, java.math.RoundingMode.HALF_UP);
     }
 
     /** Meses desde la apertura más antigua: cuánto lleva existiendo en el buró. */
-    private BigDecimal antiguedadHistorial(ScoringRule rule, CirculoReport report) {
-        LocalDate primera = creditos(rule, report)
+    private BigDecimal historyMonths(ScoringRule rule, CirculoReport report) {
+        LocalDate first = credits(rule, report)
                 .map(CirculoCredit::getFechaApertura)
                 .filter(f -> f != null)
                 .min(LocalDate::compareTo)
                 .orElse(null);
-        if (primera == null) return null;
+        if (first == null) return null;
         return BigDecimal.valueOf(
-                java.time.temporal.ChronoUnit.MONTHS.between(primera, LocalDate.now()));
+                java.time.temporal.ChronoUnit.MONTHS.between(first, LocalDate.now()));
     }
 
-    private BigDecimal edad(CirculoReport report) {
+    private BigDecimal ageYears(CirculoReport report) {
         LocalDate nacimiento = report.getPersonaFechaNacimiento();
         if (nacimiento == null) return null;
         return BigDecimal.valueOf(
@@ -283,15 +283,15 @@ class ScoringRuleEvaluator {
     }
 
     /** El sueldo del empleo más reciente que reporta el buró. */
-    private BigDecimal ingresoMensual(CirculoReport report) {
-        return empleoMasReciente(report)
+    private BigDecimal monthlyIncome(CirculoReport report) {
+        return mostRecentEmployment(report)
                 .map(CirculoEmployment::getSalarioMensual)
                 .filter(v -> v != null)
                 .orElse(null);
     }
 
-    private BigDecimal antiguedadLaboral(CirculoReport report) {
-        return empleoMasReciente(report)
+    private BigDecimal employmentMonths(CirculoReport report) {
+        return mostRecentEmployment(report)
                 .map(CirculoEmployment::getFechaContratacion)
                 .filter(f -> f != null)
                 .map(f -> BigDecimal.valueOf(
@@ -306,7 +306,7 @@ class ScoringRuleEvaluator {
      * tomaría un empleo terminado si fue el último en empezar, y entonces «antigüedad laboral»
      * mediría un trabajo que ya no tiene.
      */
-    private java.util.Optional<CirculoEmployment> empleoMasReciente(CirculoReport report) {
+    private java.util.Optional<CirculoEmployment> mostRecentEmployment(CirculoReport report) {
         return report.getEmployments().stream()
                 .max(java.util.Comparator
                         .comparing((CirculoEmployment e) -> e.getFechaUltimoDia() == null)
@@ -316,11 +316,11 @@ class ScoringRuleEvaluator {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    private static boolean positivo(BigDecimal v) { return v != null && v.signum() > 0; }
+    private static boolean positive(BigDecimal v) { return v != null && v.signum() > 0; }
 
-    private static boolean tieneTexto(String s) { return s != null && !s.isBlank(); }
+    private static boolean hasText(String s) { return s != null && !s.isBlank(); }
 
-    private static BigDecimal entero(Integer v) {
+    private static BigDecimal integerValue(Integer v) {
         return v == null ? null : BigDecimal.valueOf(v);
     }
 

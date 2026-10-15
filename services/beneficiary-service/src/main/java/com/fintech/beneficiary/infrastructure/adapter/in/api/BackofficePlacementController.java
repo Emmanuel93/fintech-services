@@ -5,6 +5,7 @@ import com.fintech.beneficiary.application.port.out.PlacementQueryRepository;
 import com.fintech.beneficiary.application.port.out.PlacementTransitionRepository;
 import com.fintech.beneficiary.application.port.out.IdentityVerificationGateway;
 import com.fintech.beneficiary.domain.IdentityDecision;
+import com.fintech.beneficiary.application.service.KycPolicyResolver;
 import com.fintech.beneficiary.domain.VerificationSource;
 import com.fintech.beneficiary.domain.Placement;
 import com.fintech.beneficiary.domain.PlacementStatus;
@@ -51,15 +52,18 @@ class BackofficePlacementController {
     private final PlacementLifecycleUseCase placementLifecycle;
     private final PlacementTransitionRepository transitions;
     private final IdentityVerificationGateway verificationGateway;
+    private final KycPolicyResolver kycPolicyResolver;
 
     BackofficePlacementController(PlacementQueryRepository placementQuery,
                                   PlacementLifecycleUseCase placementLifecycle,
                                   PlacementTransitionRepository transitions,
-                                  IdentityVerificationGateway verificationGateway) {
+                                  IdentityVerificationGateway verificationGateway,
+                                  KycPolicyResolver kycPolicyResolver) {
         this.placementQuery      = placementQuery;
         this.placementLifecycle  = placementLifecycle;
         this.transitions         = transitions;
         this.verificationGateway = verificationGateway;
+        this.kycPolicyResolver   = kycPolicyResolver;
     }
 
     @Operation(summary = "Bandeja de colocaciones — todos los filtros opcionales",
@@ -148,7 +152,9 @@ class BackofficePlacementController {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("placement", BackofficePlacementResponse.from(placement, Instant.now()));
-        body.put("verificationStrategy", verificationGateway.describeStrategy());
+        // La estrategia es la del producto de ESTA colocación (F3b): ya no hay una global.
+        body.put("verificationStrategy",
+                verificationGateway.describeStrategy(kycPolicyResolver.resolve(placement)));
         return ResponseEntity.ok(body);
     }
 

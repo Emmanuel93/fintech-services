@@ -71,8 +71,8 @@ public class PortfolioAssignmentService {
     public Optional<Asignacion> resolver(String branchCode, UUID semilla) {
         if (branchCode == null || branchCode.isBlank()) return Optional.empty();
 
-        OrgUnit sucursal = unitRepository.findByCode(branchCode).orElse(null);
-        if (sucursal == null) {
+        OrgUnit branch = unitRepository.findByCode(branchCode).orElse(null);
+        if (branch == null) {
             log.warn("La sucursal {} no existe en el árbol comercial", branchCode);
             return Optional.empty();
         }
@@ -87,14 +87,14 @@ public class PortfolioAssignmentService {
         // asignación: cada uno es un nodo propio por debajo, y su gente vive ahí. Leer sólo las
         // asignaciones de la sucursal devuelve al responsable de plaza y a nadie más.
         List<List<UUID>> escalones = new ArrayList<>();
-        escalones.add(genteDeLaSucursal(sucursal, unidades, nivelPorId));
+        escalones.add(branchStaff(branch, unidades, nivelPorId));
 
         // Y de ahí hacia arriba: zona, región, nacional.
-        OrgUnit nodo = sucursal.getParentUnitId() == null ? null : porId.get(sucursal.getParentUnitId());
+        OrgUnit node = branch.getParentUnitId() == null ? null : porId.get(branch.getParentUnitId());
         int guarda = 0;
-        while (nodo != null && guarda++ < 10) {   // tope contra un árbol con ciclo
-            escalones.add(candidatos(nodo.getUnitId()));
-            nodo = nodo.getParentUnitId() == null ? null : porId.get(nodo.getParentUnitId());
+        while (node != null && guarda++ < 10) {   // tope contra un árbol con ciclo
+            escalones.add(candidates(node.getUnitId()));
+            node = node.getParentUnitId() == null ? null : porId.get(node.getParentUnitId());
         }
 
         for (int nivel = 0; nivel < escalones.size(); nivel++) {
@@ -109,7 +109,7 @@ public class PortfolioAssignmentService {
                 log.info("Cartera escalada: {} sin gente en el nivel {}, se asigna {} niveles arriba",
                         branchCode, nivel - 1, nivel);
             }
-            return Optional.of(new Asignacion(elegido, sucursal.getUnitId(), branchCode, nivel));
+            return Optional.of(new Asignacion(elegido, branch.getUnitId(), branchCode, nivel));
         }
 
         log.error("Ni {} ni toda su rama tienen a nadie: la cartera quedaría sin dueño", branchCode);
@@ -117,20 +117,20 @@ public class PortfolioAssignmentService {
     }
 
     /** La gente de la sucursal: la asignada a ella y la de sus nodos hoja (ejecutivos). */
-    private List<UUID> genteDeLaSucursal(OrgUnit sucursal, List<OrgUnit> unidades,
+    private List<UUID> branchStaff(OrgUnit branch, List<OrgUnit> unidades,
                                           Map<UUID, String> nivelPorId) {
-        LinkedHashSet<UUID> gente = new LinkedHashSet<>(candidatos(sucursal.getUnitId()));
+        LinkedHashSet<UUID> gente = new LinkedHashSet<>(candidates(branch.getUnitId()));
         for (OrgUnit hijo : unidades) {
-            if (!sucursal.getUnitId().equals(hijo.getParentUnitId())) continue;
+            if (!branch.getUnitId().equals(hijo.getParentUnitId())) continue;
             if (!NIVELES_HOJA.contains(nivelPorId.get(hijo.getLevelId()))) continue;
-            gente.addAll(candidatos(hijo.getUnitId()));
+            gente.addAll(candidates(hijo.getUnitId()));
             // `partyRef` es el enlace modelado nodo→persona; sirve de respaldo si falta la asignación.
             if (hijo.getPartyRef() != null) gente.add(hijo.getPartyRef());
         }
         return new ArrayList<>(gente);
     }
 
-    private List<UUID> candidatos(UUID unitId) {
+    private List<UUID> candidates(UUID unitId) {
         return assignmentRepository.findActiveByUnit(unitId).stream()
                 .filter(a -> a.getAssigneeType() == AssigneeType.STAFF)
                 .map(UnitAssignment::getAssigneeId)

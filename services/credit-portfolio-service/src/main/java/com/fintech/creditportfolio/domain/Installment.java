@@ -107,7 +107,7 @@ public class Installment {
      *
      * @param modo {@code GIFT} si el período no devenga, {@code DEFERRAL} si sigue devengando
      */
-    public void saltar(String modo, LocalDate nuevoVencimiento) {
+    public void skip(String modo, LocalDate newDueDate) {
         if (status == InstallmentStatus.PAID) {
             throw new IllegalStateException(
                     "La cuota " + installmentNumber + " ya está pagada: no hay nada que saltar");
@@ -119,14 +119,14 @@ public class Installment {
                     "La cuota " + installmentNumber + " ya se saltó el " + skippedAt);
         }
         this.originalDueDate = dueDate;
-        this.dueDate         = nuevoVencimiento;
+        this.dueDate         = newDueDate;
         this.skippedAt       = java.time.Instant.now();
         this.skippedMode     = modo;
         // Vuelve a PENDING: una cuota que ya se había vencido y se salta deja de estar vencida.
         this.status          = InstallmentStatus.PENDING;
     }
 
-    public boolean seSalto() { return skippedAt != null; }
+    public boolean wasSkipped() { return skippedAt != null; }
 
     /**
      * Corre el vencimiento sin marcar la cuota como saltada.
@@ -134,15 +134,15 @@ public class Installment {
      * <p>Es lo que le pasa a las cuotas <b>detrás</b> de una saltada: se mueven, pero no consumen
      * el tope de saltos del cliente ni cuentan como beneficio otorgado.
      */
-    public void correrVencimiento(LocalDate nuevoVencimiento) {
+    public void shiftDueDate(LocalDate newDueDate) {
         if (originalDueDate == null) {
             this.originalDueDate = dueDate;
         }
-        this.dueDate = nuevoVencimiento;
+        this.dueDate = newDueDate;
     }
 
     /** El período saltado como regalo no devenga: es una recompensa, no un aplazamiento. */
-    public boolean noDevenga() { return "GIFT".equals(skippedMode); }
+    public boolean doesNotAccrue() { return "GIFT".equals(skippedMode); }
 
     /**
      * Aplica [amount] a esta mensualidad y devuelve lo que sobró.

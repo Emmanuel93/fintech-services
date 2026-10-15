@@ -27,9 +27,9 @@ public record Capabilities(
          *
          * <p>Puede llegar nula desde una versión de configuración anterior a BK-23: el catálogo se
          * guarda como JSONB y las filas viejas no la traen. Se lee siempre con
-         * {@code OpcionesDePago.oNinguna(...)}, que devuelve todo apagado.
+         * {@code PaymentOptions.orNone(...)}, que devuelve todo apagado.
          */
-        OpcionesDePago opcionesDePago
+        PaymentOptions opcionesDePago
 ) {
     /**
      * Conservative defaults derived from product behavior, used only as a degraded
@@ -63,11 +63,11 @@ public record Capabilities(
                         boolean requiresBeneficiaryPartyId) {
         this(hasAmortizationSchedule, hasCreditLimit, allowsMultipleDispositions, dispositionType,
              hasCutoffDate, hasMinimumPayment, allowsMultipleObligors, commissionsEnabled,
-             requiresBeneficiaryPartyId, OpcionesDePago.ninguna());
+             requiresBeneficiaryPartyId, PaymentOptions.none());
     }
 
     /** Nunca nulo, venga de donde venga la fila. */
-    public OpcionesDePago opciones() {
-        return OpcionesDePago.oNinguna(opcionesDePago);
+    public PaymentOptions options() {
+        return PaymentOptions.orNone(opcionesDePago);
     }
 }

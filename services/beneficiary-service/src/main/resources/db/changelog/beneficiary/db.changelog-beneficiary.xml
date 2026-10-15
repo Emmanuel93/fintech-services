@@ -10,4 +10,5 @@
     <include file="db/changelog/beneficiary/004-create-event-publication.sql"     relativeToChangelogFile="false"/>
     <include file="db/changelog/beneficiary/005-align-with-app-contract.sql"      relativeToChangelogFile="false"/>
     <include file="db/changelog/beneficiary/006-identity-review.sql"           relativeToChangelogFile="false"/>
+    <include file="db/changelog/beneficiary/007-kyc-por-producto.sql"          relativeToChangelogFile="false"/>
 </databaseChangeLog>

@@ -43,7 +43,7 @@ class MobileAccessAuditInterceptorTest {
         MDC.clear();
     }
 
-    private void autenticaComoCliente() {
+    private void authenticateAsCustomer() {
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(PROSPECT.toString(), null,
                         List.of(new SimpleGrantedAuthority("ROLE_CUSTOMER"))));
@@ -53,7 +53,7 @@ class MobileAccessAuditInterceptorTest {
                         "pedro.ramirez@example.mx", "5215512345678")));
     }
 
-    private MobileAuditClient.AccessLog registra(MockHttpServletRequest request) {
+    private MobileAuditClient.AccessLog records(MockHttpServletRequest request) {
         var response = new MockHttpServletResponse();
         response.setStatus(200);
         interceptor.preHandle(request, response, new Object());
@@ -66,11 +66,11 @@ class MobileAccessAuditInterceptorTest {
 
     @Test
     void registra_laIdentidadCompletaDelCliente() {
-        autenticaComoCliente();
+        authenticateAsCustomer();
         var request = new MockHttpServletRequest("GET", "/credit/accounts/" + CUENTA);
         MDC.put(MdcCorrelationFilter.MDC_KEY, "corr-1234");
 
-        var log = registra(request);
+        var log = records(request);
 
         assertThat(log.actorName()).isEqualTo("Pedro Ramírez Soto");
         assertThat(log.actorCurp()).isEqualTo("RASP880920HDFMTD05");
@@ -80,8 +80,8 @@ class MobileAccessAuditInterceptorTest {
 
     @Test
     void enLaApp_elActorYElSujetoSonLaMismaPersona() {
-        autenticaComoCliente();
-        var log = registra(new MockHttpServletRequest("GET", "/wallet/balance"));
+        authenticateAsCustomer();
+        var log = records(new MockHttpServletRequest("GET", "/wallet/balance"));
 
         assertThat(log.subjectPartyId()).isEqualTo(PARTY.toString());
         assertThat(log.subjectName()).isEqualTo("Pedro Ramírez Soto");
@@ -91,28 +91,28 @@ class MobileAccessAuditInterceptorTest {
 
     @Test
     void extrae_elIdDeLaRuta_queAntesIbaSiempreNulo() {
-        autenticaComoCliente();
-        var log = registra(new MockHttpServletRequest("GET", "/credit/accounts/" + CUENTA));
+        authenticateAsCustomer();
+        var log = records(new MockHttpServletRequest("GET", "/credit/accounts/" + CUENTA));
 
         assertThat(log.resourceId()).isEqualTo(CUENTA.toString());
     }
 
     @Test
     void tomaLaCorrelacionDelMdc_noDeLaPeticion() {
-        autenticaComoCliente();
+        authenticateAsCustomer();
         MDC.put(MdcCorrelationFilter.MDC_KEY, "corr-1234");
 
         // El cliente no manda la cabecera —nunca lo hace—; el filtro generó el valor y lo dejó
         // en el MDC. Leer la petición devolvía null en el 100% de las entradas.
-        var log = registra(new MockHttpServletRequest("GET", "/wallet/balance"));
+        var log = records(new MockHttpServletRequest("GET", "/wallet/balance"));
 
         assertThat(log.correlationId()).isEqualTo("corr-1234");
     }
 
     @Test
     void seAtribuyeAlCanalMovil_noAlBackoffice() {
-        autenticaComoCliente();
-        var log = registra(new MockHttpServletRequest("GET", "/wallet/balance"));
+        authenticateAsCustomer();
+        var log = records(new MockHttpServletRequest("GET", "/wallet/balance"));
 
         assertThat(log.domainSource()).isEqualTo("channel-mobile-service");
         assertThat(log.actorChannel()).isEqualTo("MOBILE");
@@ -124,7 +124,7 @@ class MobileAccessAuditInterceptorTest {
                 new UsernamePasswordAuthenticationToken(PROSPECT.toString(), null, List.of()));
         when(resolver.resolve(any())).thenReturn(Optional.empty());
 
-        var log = registra(new MockHttpServletRequest("GET", "/wallet/balance"));
+        var log = records(new MockHttpServletRequest("GET", "/wallet/balance"));
 
         assertThat(log.actor()).isEqualTo(PROSPECT.toString());
         assertThat(log.actorName()).isNull();
@@ -133,9 +133,9 @@ class MobileAccessAuditInterceptorTest {
 
     @Test
     void recursoId_soloCuandoLaRutaTraeUnUuid() {
-        assertThat(MobileAccessAuditInterceptor.recursoId("/credit/accounts/" + CUENTA))
+        assertThat(MobileAccessAuditInterceptor.resourceId("/credit/accounts/" + CUENTA))
                 .isEqualTo(CUENTA.toString());
-        assertThat(MobileAccessAuditInterceptor.recursoId("/wallet/balance")).isNull();
-        assertThat(MobileAccessAuditInterceptor.recursoId(null)).isNull();
+        assertThat(MobileAccessAuditInterceptor.resourceId("/wallet/balance")).isNull();
+        assertThat(MobileAccessAuditInterceptor.resourceId(null)).isNull();
     }
 }

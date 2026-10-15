@@ -140,13 +140,14 @@ public class AccrualSchedule {
      * @param graciaEfectiva días de gracia del producto; la mora corre a partir de
      *                       {@code oldestDueDate + gracia}, no desde el vencimiento
      */
-    public void actualizarMora(BigDecimal capitalVencido, LocalDate vencimientoMasAntiguo,
+    public void updateMoratorium(BigDecimal overduePrincipal, LocalDate vencimientoMasAntiguo,
                                LocalDate hoy, int graciaEfectiva) {
-        this.overduePrincipal = capitalVencido != null ? capitalVencido : BigDecimal.ZERO;
+        this.overduePrincipal = overduePrincipal != null ? overduePrincipal : BigDecimal.ZERO;
         this.oldestDueDate    = vencimientoMasAntiguo;
         this.updatedAt        = Instant.now();
 
-        boolean hayVencido = overduePrincipal.compareTo(BigDecimal.ZERO) > 0
+        // `this.` a propósito: el campo ya quedó normalizado arriba, el parámetro puede venir nulo.
+        boolean hayVencido = this.overduePrincipal.compareTo(BigDecimal.ZERO) > 0
                 && vencimientoMasAntiguo != null;
         if (!hayVencido) {
             clearMoratorium();
@@ -221,8 +222,8 @@ public class AccrualSchedule {
      * se corren, y correr sólo uno es el error que hay que evitar — con el devengo corrido y el
      * plan quieto, el cliente no paga interés pero su primera cuota vence igual.
      */
-    public void arrancarDevengoEl(LocalDate fecha) {
-        this.accrualStartDate = fecha;
+    public void startAccrualOn(LocalDate date) {
+        this.accrualStartDate = date;
         this.updatedAt        = Instant.now();
     }
 

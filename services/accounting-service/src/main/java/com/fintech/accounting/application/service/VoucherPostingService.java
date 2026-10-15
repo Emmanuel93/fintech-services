@@ -90,14 +90,14 @@ public class VoucherPostingService {
      * ninguna pantalla: de veinte pagos reales sólo llegaban cinco al mayor, justo los que no tenían
      * moratorios. El síntoma no era un error visible, era una cifra que faltaba.
      */
-    private static List<Pair> fundir(List<Pair> pairs) {
-        java.util.Map<String, Pair> porCuentas = new java.util.LinkedHashMap<>();
+    private static List<Pair> merge(List<Pair> pairs) {
+        java.util.Map<String, Pair> byAccount = new java.util.LinkedHashMap<>();
         for (Pair p : pairs) {
-            porCuentas.merge(p.debitAccount() + "|" + p.creditAccount(), p,
+            byAccount.merge(p.debitAccount() + "|" + p.creditAccount(), p,
                     (a, b) -> new Pair(a.debitAccount(), a.creditAccount(),
                             a.amount().add(b.amount()), a.description()));
         }
-        return List.copyOf(porCuentas.values());
+        return List.copyOf(byAccount.values());
     }
 
     /** Todo lo que define una póliza salvo sus pares. */
@@ -118,7 +118,7 @@ public class VoucherPostingService {
      * @return la póliza, o {@code null} si no había nada que asentar (todos los pares en cero).
      */
     public Voucher post(VoucherRequest req, List<Pair> pairs) {
-        List<Pair> real = fundir(pairs.stream()
+        List<Pair> real = merge(pairs.stream()
                 .filter(p -> p.amount() != null && p.amount().signum() > 0)
                 .toList());
         if (real.isEmpty()) return null;

@@ -250,3 +250,14 @@ Checklist:
 | Logs sin `trace_id` | logs en texto plano (no incluiste `logback-base.xml`) | añade el `logback-spring.xml` del paso 3 |
 | Logs no llegan a Elasticsearch | ES caído por OOM (exit 137) | sube el límite de memoria de `elasticsearch` (hoy 1536M) |
 | Panel *System architecture* en blanco | Grafana sanitiza el HTML | ya está `GF_PANELS_DISABLE_SANITIZE_HTML=true` (solo dev/localhost) |
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

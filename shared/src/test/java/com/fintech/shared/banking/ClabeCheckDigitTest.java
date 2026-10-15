@@ -20,16 +20,16 @@ class ClabeCheckDigitTest {
     @Test
     @DisplayName("una CLABE completada con su verificador es válida")
     void completarProduceValida() {
-        assertThat(ClabeCheckDigit.esValida(ClabeCheckDigit.completar(CUERPO))).isTrue();
+        assertThat(ClabeCheckDigit.isValid(ClabeCheckDigit.complete(CUERPO))).isTrue();
     }
 
     @Test
     @DisplayName("un dígito cambiado NO pasa — el error de captura más común")
     void detectaDigitoCambiado() {
-        String buena = ClabeCheckDigit.completar(CUERPO);
+        String buena = ClabeCheckDigit.complete(CUERPO);
         char otro = buena.charAt(9) == '9' ? '8' : '9';
 
-        assertThat(ClabeCheckDigit.esValida(buena.substring(0, 9) + otro + buena.substring(10)))
+        assertThat(ClabeCheckDigit.isValid(buena.substring(0, 9) + otro + buena.substring(10)))
                 .isFalse();
     }
 
@@ -39,21 +39,21 @@ class ClabeCheckDigitTest {
         // El ponderado 3,7,1 los detecta porque los dos dígitos llevan peso distinto. Un dígito
         // verificador de suma simple dejaría pasar la transposición, que es la segunda forma más
         // común de teclear mal una cuenta.
-        String buena = ClabeCheckDigit.completar(CUERPO);
+        String buena = ClabeCheckDigit.complete(CUERPO);
         String transpuesta = "01218000123456879" + buena.charAt(17);
 
-        assertThat(ClabeCheckDigit.esValida(transpuesta)).isFalse();
+        assertThat(ClabeCheckDigit.isValid(transpuesta)).isFalse();
     }
 
     @Test
     @DisplayName("lo mal formado devuelve false, no explota")
-    void malFormadaNoExplota() {
+    void amalformedClabeDoesNotBlowUp() {
         // Quien valida una cuenta de beneficiario lo hace sobre un dato que llega de fuera: una
         // excepción convertiría un rechazo previsible en un 500.
-        assertThat(ClabeCheckDigit.esValida(null)).isFalse();
-        assertThat(ClabeCheckDigit.esValida("")).isFalse();
-        assertThat(ClabeCheckDigit.esValida("0121800012345678")).isFalse();
-        assertThat(ClabeCheckDigit.esValida("01218000123456789X")).isFalse();
+        assertThat(ClabeCheckDigit.isValid(null)).isFalse();
+        assertThat(ClabeCheckDigit.isValid("")).isFalse();
+        assertThat(ClabeCheckDigit.isValid("0121800012345678")).isFalse();
+        assertThat(ClabeCheckDigit.isValid("01218000123456789X")).isFalse();
     }
 
     @Test
@@ -61,19 +61,19 @@ class ClabeCheckDigitTest {
     void calcularConLongitudMalaLanza() {
         // La asimetría es deliberada. `esValida` recibe dato externo; `de` recibe un cuerpo que
         // alguien construyó, y ahí un tamaño equivocado es un bug, no una entrada inválida.
-        assertThatThrownBy(() -> ClabeCheckDigit.de("123"))
+        assertThatThrownBy(() -> ClabeCheckDigit.from("123"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("17 dígitos");
     }
 
     @Test
     @DisplayName("la institución sale de los tres primeros dígitos, y es nula si no son numéricos")
-    void institucion() {
-        assertThat(ClabeCheckDigit.institucionDe("646180000000000012")).isEqualTo(646);
+    void institution() {
+        assertThat(ClabeCheckDigit.institutionOf("646180000000000012")).isEqualTo(646);
         // Rails que no son SPEI mandan teléfonos o tarjetas: lanzar convertiría un dato opcional
         // en un 500.
-        assertThat(ClabeCheckDigit.institucionDe("55-1234-5678")).isNull();
-        assertThat(ClabeCheckDigit.institucionDe(null)).isNull();
+        assertThat(ClabeCheckDigit.institutionOf("55-1234-5678")).isNull();
+        assertThat(ClabeCheckDigit.institutionOf(null)).isNull();
     }
 
     @Test
@@ -83,7 +83,7 @@ class ClabeCheckDigitTest {
         // cuerpo elegido diera justo ese valor. Barrer el rango lo descarta.
         java.util.Set<Integer> vistos = new java.util.HashSet<>();
         for (int i = 0; i < 10; i++) {
-            vistos.add(ClabeCheckDigit.de("0121800012345678" + i));
+            vistos.add(ClabeCheckDigit.from("0121800012345678" + i));
         }
         assertThat(vistos).hasSizeGreaterThan(1);
     }

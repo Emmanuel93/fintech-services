@@ -47,14 +47,14 @@ class AccrualScheduleServiceTest {
         UUID accountId     = UUID.randomUUID();
         UUID obligorId     = UUID.randomUUID();
         BigDecimal nominal = new BigDecimal("0.24");
-        BigDecimal mora    = new BigDecimal("0.36");
+        BigDecimal delinquency    = new BigDecimal("0.36");
         BigDecimal balance = new BigDecimal("10000.00");
 
         when(scheduleRepo.existsByCreditAccountId(accountId)).thenReturn(false);
         when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.createFromActivation(accountId, obligorId, "PERSONAL_LOAN", "AMORTIZING",
-                nominal, mora, balance, BigDecimal.ZERO);
+                nominal, delinquency, balance, BigDecimal.ZERO);
 
         ArgumentCaptor<AccrualSchedule> cap = ArgumentCaptor.forClass(AccrualSchedule.class);
         verify(scheduleRepo).save(cap.capture());
@@ -62,7 +62,7 @@ class AccrualScheduleServiceTest {
         AccrualSchedule saved = cap.getValue();
         assertThat(saved.getCreditAccountId()).isEqualTo(accountId);
         assertThat(saved.getNominalRate()).isEqualByComparingTo(nominal);
-        assertThat(saved.getMoratoriumRate()).isEqualByComparingTo(mora);
+        assertThat(saved.getMoratoriumRate()).isEqualByComparingTo(delinquency);
         assertThat(saved.getStatus()).isEqualTo(AccrualScheduleStatus.ACTIVE.name());
     }
 

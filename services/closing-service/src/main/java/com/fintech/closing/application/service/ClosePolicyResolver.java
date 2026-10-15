@@ -42,7 +42,7 @@ public class ClosePolicyResolver {
                 productType == null ? List.of() : List.of(productType));
 
         return candidatas.stream()
-                .filter(p -> p.vigenteEn(businessDate))
+                .filter(p -> p.activeOn(businessDate))
                 .max(Comparator.comparingInt(ClosePolicy::specificity)
                         .thenComparing(ClosePolicy::getEffectiveDate));
     }

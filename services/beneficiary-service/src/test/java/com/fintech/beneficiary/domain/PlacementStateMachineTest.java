@@ -29,6 +29,9 @@ class PlacementStateMachineTest {
 
     private static final UUID DISTRIBUTOR = UUID.randomUUID();
     private static final UUID LINE        = UUID.randomUUID();
+    /** El veredicto que deja pasar. Se nombra para que cada aprobación diga con qué pasó. */
+    private static final ScreeningVerdict DESPEJADA = new ScreeningVerdict("CLEARED", null);
+
     private static final UUID PROSPECT    = UUID.randomUUID();
     private static final UUID PARTY       = UUID.randomUUID();
     private static final UUID DISPOSITION = UUID.randomUUID();
@@ -42,7 +45,7 @@ class PlacementStateMachineTest {
 
 
     private static Placement draft() {
-        return Placement.draft(DISTRIBUTOR, LINE, "María Luisa Cortés Hernández", "5541829037",
+        return Placement.draft(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa Cortés Hernández", "5541829037",
                 "Clienta de mi tienda desde 2023", new BigDecimal("18000"), 12, PAYMENT,
                 VerificationMode.SELF_SERVICE_LINK, EXPIRY, LIMITS, null);
     }
@@ -68,7 +71,7 @@ class PlacementStateMachineTest {
 
         // Aprobar exige identidad comprobada: es la regla nueva y el camino canónico la respeta.
         p.reviewIdentity(IdentityDecision.VERIFIED, VerificationSource.MANUAL, "analista-1", null);
-        p.approve(true);
+        p.approve(true, DESPEJADA);
         if (target == PlacementStatus.APPROVED) return p;
 
         p.markDisbursing(DISPOSITION);
@@ -93,7 +96,7 @@ class PlacementStateMachineTest {
                 if (p.getIdentityDecision() != IdentityDecision.VERIFIED && p.hasFile()) {
                     p.reviewIdentity(IdentityDecision.VERIFIED, VerificationSource.MANUAL, "analista-1", null);
                 }
-                p.approve(true);
+                p.approve(true, DESPEJADA);
             }
             case DISBURSING      -> p.markDisbursing(DISPOSITION);
             case DISBURSED       -> p.markDisbursed();
@@ -173,7 +176,7 @@ class PlacementStateMachineTest {
     class ProductLimits {
 
         private static Placement withAmountAndTerm(BigDecimal amount, int term, BigDecimal availableLine) {
-            return Placement.draft(DISTRIBUTOR, LINE, "María Luisa Cortés Hernández", "5541829037",
+            return Placement.draft(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa Cortés Hernández", "5541829037",
                     null, amount, term, PAYMENT, VerificationMode.SELF_SERVICE_LINK,
                     EXPIRY, LIMITS, availableLine);
         }
@@ -400,7 +403,7 @@ class PlacementStateMachineTest {
         void approveWithoutRiskAcknowledgementIsRejected() {
             Placement p = at(PlacementStatus.BUREAU_READY);
 
-            assertThatThrownBy(() -> p.approve(false))
+            assertThatThrownBy(() -> p.approve(false, DESPEJADA))
                     .isInstanceOf(PlacementValidationException.class)
                     .hasMessageContaining("aceptación expresa del riesgo");
 
@@ -488,12 +491,12 @@ class PlacementStateMachineTest {
         @Test
         @DisplayName("el celular tiene que ser de 10 dígitos")
         void phoneMustBeTenDigits() {
-            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "María Luisa", "554182903",
+            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa", "554182903",
                     null, new BigDecimal("18000"), 12, PAYMENT, VerificationMode.SELF_SERVICE_LINK, EXPIRY, LIMITS, null))
                     .isInstanceOf(PlacementValidationException.class)
                     .hasMessageContaining("10 dígitos");
 
-            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "María Luisa", "55 4182 9037",
+            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa", "55 4182 9037",
                     null, new BigDecimal("18000"), 12, PAYMENT, VerificationMode.SELF_SERVICE_LINK, EXPIRY, LIMITS, null))
                     .isInstanceOf(PlacementValidationException.class);
         }
@@ -501,12 +504,12 @@ class PlacementStateMachineTest {
         @Test
         @DisplayName("el monto mínimo del producto se respeta desde el alta")
         void amountFloorIsEnforcedAtDraft() {
-            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "María Luisa", "5541829037",
+            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa", "5541829037",
                     null, new BigDecimal("4999"), 12, PAYMENT, VerificationMode.SELF_SERVICE_LINK, EXPIRY, LIMITS, null))
                     .isInstanceOf(PlacementValidationException.class)
                     .hasMessageContaining("El monto mínimo de una colocación es 5000");
 
-            assertThat(Placement.draft(DISTRIBUTOR, LINE, "María Luisa", "5541829037",
+            assertThat(Placement.draft(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa", "5541829037",
                     null, new BigDecimal("5000"), 12, PAYMENT, VerificationMode.SELF_SERVICE_LINK, EXPIRY, LIMITS, null).getAmount())
                     .isEqualByComparingTo("5000");
         }
@@ -514,11 +517,11 @@ class PlacementStateMachineTest {
         @Test
         @DisplayName("nombre en blanco y plazo no positivo se rechazan")
         void nameAndTermAreValidated() {
-            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "   ", "5541829037",
+            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "   ", "5541829037",
                     null, new BigDecimal("18000"), 12, PAYMENT, VerificationMode.SELF_SERVICE_LINK, EXPIRY, LIMITS, null))
                     .isInstanceOf(PlacementValidationException.class);
 
-            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "María Luisa", "5541829037",
+            assertThatThrownBy(() -> Placement.draft(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa", "5541829037",
                     null, new BigDecimal("18000"), 0, PAYMENT, VerificationMode.SELF_SERVICE_LINK, EXPIRY, LIMITS, null))
                     .isInstanceOf(PlacementValidationException.class);
         }
@@ -539,19 +542,19 @@ class PlacementStateMachineTest {
             sinRevisar.bureauReady();
 
             assertThat(sinRevisar.getIdentityDecision()).isEqualTo(IdentityDecision.PENDING);
-            assertThatThrownBy(() -> sinRevisar.approve(true))
+            assertThatThrownBy(() -> sinRevisar.approve(true, DESPEJADA))
                     .isInstanceOf(IdentityNotVerifiedException.class);
             assertThat(sinRevisar.getStatus()).isEqualTo(PlacementStatus.BUREAU_READY);
 
             // Y con identidad rechazada tampoco: no es «falta revisar», es «no es ella».
             sinRevisar.reviewIdentity(IdentityDecision.REJECTED, VerificationSource.MANUAL,
                     "analista-1", "La selfie no coincide con la INE");
-            assertThatThrownBy(() -> sinRevisar.approve(true))
+            assertThatThrownBy(() -> sinRevisar.approve(true, DESPEJADA))
                     .isInstanceOf(IdentityNotVerifiedException.class);
 
             // Con identidad verificada sí aprueba.
             p.reviewIdentity(IdentityDecision.VERIFIED, VerificationSource.MANUAL, "analista-1", null);
-            p.approve(true);
+            p.approve(true, DESPEJADA);
             assertThat(p.getStatus()).isEqualTo(PlacementStatus.APPROVED);
         }
 
@@ -562,7 +565,7 @@ class PlacementStateMachineTest {
             p.reviewIdentity(IdentityDecision.VERIFIED, VerificationSource.MANUAL, "analista-1", null);
 
             // Identidad sí, riesgo no → no aprueba.
-            assertThatThrownBy(() -> p.approve(false))
+            assertThatThrownBy(() -> p.approve(false, DESPEJADA))
                     .isInstanceOf(PlacementValidationException.class)
                     .hasMessageContaining("aceptación expresa del riesgo");
         }

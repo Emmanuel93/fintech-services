@@ -7,7 +7,7 @@ import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.Disposition;
 import com.fintech.creditportfolio.domain.Installment;
-import com.fintech.creditportfolio.domain.config.OpcionesDePago;
+import com.fintech.creditportfolio.domain.config.PaymentOptions;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -52,56 +52,56 @@ public class SkipPaymentService implements SkipPaymentUseCase {
 
     @Override
     @Transactional
-    public void saltar(SaltarPago cmd) {
-        CreditAccount cuenta = accounts.findById(cmd.creditAccountId()).orElseThrow(
+    public void skip(SaltarPago cmd) {
+        CreditAccount account = accounts.findById(cmd.creditAccountId()).orElseThrow(
                 () -> new NoSuchElementException("Sin cuenta " + cmd.creditAccountId()));
 
         ProductConfigVersion config = configResolver
-                .resolveForAccount(cuenta.getProductCode(), cuenta.getProductVersion())
-                .orElseThrow(() -> new NoSePuedeSaltarException(
-                        "Sin configuración del producto " + cuenta.getProductCode()));
-        OpcionesDePago opciones = config.getCapabilities().opciones();
+                .resolveForAccount(account.getProductCode(), account.getProductVersion())
+                .orElseThrow(() -> new SkipNotAllowedException(
+                        "Sin configuración del producto " + account.getProductCode()));
+        PaymentOptions opciones = config.getCapabilities().options();
 
         if (!opciones.skipPaymentEnabled()) {
-            throw new NoSePuedeSaltarException(
-                    "El producto " + cuenta.getProductCode() + " no admite saltar pagos");
+            throw new SkipNotAllowedException(
+                    "El producto " + account.getProductCode() + " no admite saltar pagos");
         }
 
-        List<Installment> calendario = calendarioDe(cuenta);
+        List<Installment> calendario = scheduleOf(account);
         Installment aSaltar = calendario.stream()
                 .filter(i -> i.getInstallmentId().equals(cmd.installmentId()))
                 .findFirst()
-                .orElseThrow(() -> new NoSePuedeSaltarException(
+                .orElseThrow(() -> new SkipNotAllowedException(
                         "La cuota " + cmd.installmentId() + " no es de esta cuenta"));
 
-        int yaSaltadas = (int) calendario.stream().filter(Installment::seSalto).count();
+        int yaSaltadas = (int) calendario.stream().filter(Installment::wasSkipped).count();
         int tope = opciones.maxSkipsPerCycle() != null ? opciones.maxSkipsPerCycle() : 0;
         if (yaSaltadas >= tope) {
             // Un tope que no se aplica no es un tope.
-            throw new NoSePuedeSaltarException(
+            throw new SkipNotAllowedException(
                     "Ya se usaron los " + tope + " saltos que permite el producto");
         }
 
         // Un período de la cadencia del producto, no un mes fijo: una línea quincenal se corre
         // quince días, no treinta.
-        LocalDate nuevoVencimiento = AmortizationEngine.firstDueDate(
+        LocalDate newDueDate = AmortizationEngine.firstDueDate(
                 aSaltar.getDueDate(), config.getPaymentFrequency());
 
-        aSaltar.saltar(opciones.skipMode(), nuevoVencimiento);
+        aSaltar.skip(opciones.skipMode(), newDueDate);
 
         // Las de atrás se corren también: dejar la saltada encima de la siguiente le daría al
         // cliente dos vencimientos el mismo día.
         calendario.stream()
                 .filter(i -> i.getInstallmentNumber() > aSaltar.getInstallmentNumber())
-                .filter(i -> !i.seSalto())
-                .forEach(i -> i.correrVencimiento(AmortizationEngine.firstDueDate(
+                .filter(i -> !i.wasSkipped())
+                .forEach(i -> i.shiftDueDate(AmortizationEngine.firstDueDate(
                         i.getDueDate(), config.getPaymentFrequency())));
 
         installments.saveAll(calendario);
 
         log.info("Pago SALTADO cuenta={} cuota={} modo={} de {} a {} (salto {} de {})",
-                cuenta.getCreditAccountId(), aSaltar.getInstallmentNumber(), opciones.skipMode(),
-                aSaltar.getOriginalDueDate(), nuevoVencimiento, yaSaltadas + 1, tope);
+                account.getCreditAccountId(), aSaltar.getInstallmentNumber(), opciones.skipMode(),
+                aSaltar.getOriginalDueDate(), newDueDate, yaSaltadas + 1, tope);
     }
 
     /**
@@ -119,16 +119,16 @@ public class SkipPaymentService implements SkipPaymentUseCase {
      * ciclo — que es exactamente el que querría saltar. Lo único que encontraba eran los planes de
      * compras que ya había diferido.
      */
-    private List<Installment> calendarioDe(CreditAccount cuenta) {
-        List<Installment> deLaCuenta =
-                installments.findByScheduleIdOrdered(cuenta.getCreditAccountId());
-        if (!cuenta.isRevolving()) {
-            return deLaCuenta;
+    private List<Installment> scheduleOf(CreditAccount account) {
+        List<Installment> ofTheAccount =
+                installments.findByScheduleIdOrdered(account.getCreditAccountId());
+        if (!account.isRevolving()) {
+            return ofTheAccount;
         }
-        List<UUID> calendarios = dispositions.findByCreditAccountId(cuenta.getCreditAccountId())
+        List<UUID> calendarios = dispositions.findByCreditAccountId(account.getCreditAccountId())
                 .stream().map(Disposition::getDispositionId).toList();
 
-        List<Installment> todo = new java.util.ArrayList<>(deLaCuenta);
+        List<Installment> todo = new java.util.ArrayList<>(ofTheAccount);
         todo.addAll(installments.findByScheduleIds(calendarios));
         return todo;
     }

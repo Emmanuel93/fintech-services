@@ -155,3 +155,14 @@ java -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapp
 | `PUT /origination/applications/{id}/documents/{type}/review` | Funciona; falta sembrar `applications.review-documents`. Volver a subir el archivo borra el dictamen. |
 | `GET /notifications` · `PUT /notifications/read-all` | Funcionan y **devuelven cero**: ningún servicio publica avisos todavía. |
 
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

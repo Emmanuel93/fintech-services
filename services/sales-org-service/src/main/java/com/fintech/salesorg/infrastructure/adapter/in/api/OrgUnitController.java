@@ -106,13 +106,13 @@ class OrgUnitController {
 
     @GetMapping("/by-code/{code}/vat-rate")
     java.util.Map<String, Object> vatRate(@PathVariable String code) {
-        java.math.BigDecimal tasa = orgUnitRepository.findEffectiveVatRate(code);
+        java.math.BigDecimal rate = orgUnitRepository.findEffectiveVatRate(code);
         java.util.Map<String, Object> r = new java.util.LinkedHashMap<>();
         r.put("code", code);
         // Sin ancestro con tasa declarada devuelve null, no cero: cero es «exento», que es una
         // decisión fiscal distinta de «aquí no se configuró nada». Quien pregunta aplica su default.
-        r.put("vatRate", tasa);
-        r.put("configured", tasa != null);
+        r.put("vatRate", rate);
+        r.put("configured", rate != null);
         return r;
     }
 

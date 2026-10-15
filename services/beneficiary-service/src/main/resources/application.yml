@@ -87,12 +87,15 @@ fintech:
     #         excepciones. Encenderla sin adaptador **impide arrancar el servicio** a propósito:
     #         caer a manual en silencio escondería que la automatización que se cree tener no existe.
     identity-verification:
-      # MANUAL    = todo lo revisa un analista de crédito. Es el modo vigente: sin contrato de KYC.
-      # AUTOMATIC = el proveedor evalúa y el analista recibe SÓLO las excepciones — umbral no
-      #             alcanzado, documento que no pudo validar, o el proveedor caído.
+      # F3b · el modo YA NO se configura aquí.
       #
-      # Cambiar de modo NO requiere tocar código ni redesplegar nada más: es esta línea.
-      mode: ${BENEFICIARY_IDENTITY_VERIFICATION_MODE:MANUAL}
+      # Manual o automático, y con qué proveedor, lo declara cada PRODUCTO en `Capabilities.kyc` del
+      # catálogo, y llega por `product-catalog.product-activated`. Era una bandera del servicio y
+      # eso obligaba a que todos los productos de un ambiente compartieran regla — una línea de
+      # distribuidor y una tarjeta de uso propio no exigen lo mismo. Además, aflojar la
+      # verificación dejaba de ser una decisión con autor y fecha para ser una variable de entorno.
+      #
+      # Lo que SÍ sigue aquí son los umbrales: calibran a un proveedor, no definen a un producto.
       # Mínimos para dar por buena una identidad sin intervención humana. Una métrica declarada
       # aquí que el proveedor no reporte cuenta como NO alcanzada: no saber no es aprobar.
       thresholds:

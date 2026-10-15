@@ -56,7 +56,7 @@ public class BankReconciliationService {
      * @return la línea, nueva o la que ya existía
      */
     @Transactional
-    public BankStatementLine ingerir(UUID bankAccountId, LocalDate businessDate, String direction,
+    public BankStatementLine ingest(UUID bankAccountId, LocalDate businessDate, String direction,
                                      BigDecimal amount, String externalId, String trackingKey,
                                      String reference, String counterparty,
                                      String counterpartyAccount) {
@@ -66,85 +66,85 @@ public class BankReconciliationService {
                     externalId, bankAccountId);
             return yaEstaba.get();
         }
-        BankStatementLine linea = repo.saveLine(BankStatementLine.de(bankAccountId, businessDate,
+        BankStatementLine line = repo.saveLine(BankStatementLine.from(bankAccountId, businessDate,
                 direction, amount, externalId, trackingKey, reference, counterparty,
                 counterpartyAccount));
         log.info("Movimiento bancario ingerido cuenta={} externalId={} {} {}",
                 bankAccountId, externalId, direction, amount);
-        return linea;
+        return line;
     }
 
     /** Corre las tres pasadas sobre todo lo que quedó sin cruzar en la fecha. */
     @Transactional
     public Resultado conciliar(UUID bankAccountId, LocalDate businessDate) {
-        List<BankStatementLine> lineas = repo.findLinesByDate(bankAccountId, businessDate);
+        List<BankStatementLine> lines = repo.findLinesByDate(bankAccountId, businessDate);
         int deterministas = 0, heuristicos = 0, aPuente = 0;
 
-        for (BankStatementLine linea : lineas) {
-            if (!linea.estaSinCruzar()) continue;
+        for (BankStatementLine line : lines) {
+            if (!line.isUnmatched()) continue;
 
-            if (cruzarPorClave(linea))      { deterministas++; continue; }
-            if (cruzarPorImporteYFecha(linea)) { heuristicos++; continue; }
+            if (matchByTrackingKey(line))      { deterministas++; continue; }
+            if (matchByAmountAndDate(line)) { heuristicos++; continue; }
 
             aPuente++;
-            aLaPuente(linea, motivoDeNoCruce(linea));
+            toSuspense(line, noMatchReason(line));
         }
 
         log.info("Conciliación cuenta={} fecha={} líneas={} deterministas={} heurísticos={} puente={}",
-                bankAccountId, businessDate, lineas.size(), deterministas, heuristicos, aPuente);
-        return new Resultado(lineas.size(), deterministas, heuristicos, aPuente);
+                bankAccountId, businessDate, lines.size(), deterministas, heuristicos, aPuente);
+        return new Resultado(lines.size(), deterministas, heuristicos, aPuente);
     }
 
-    private boolean cruzarPorClave(BankStatementLine linea) {
-        if (linea.getTrackingKey() == null || linea.getTrackingKey().isBlank()) {
+    private boolean matchByTrackingKey(BankStatementLine line) {
+        if (line.getTrackingKey() == null || line.getTrackingKey().isBlank()) {
             return false;
         }
-        return interno.porClaveDeRastreo(linea.getTrackingKey())
-                .filter(m -> m.amount().compareTo(linea.getAmount()) == 0)
+        return interno.byTrackingKey(line.getTrackingKey())
+                .filter(m -> m.amount().compareTo(line.getAmount()) == 0)
                 .map(m -> {
-                    repo.saveMatch(BankMatch.determinista(linea.getId(), m.type(), m.reference(),
-                            linea.getAmount()));
-                    linea.marcarCruzado();
-                    repo.saveLine(linea);
+                    repo.saveMatch(BankMatch.deterministic(line.getId(), m.type(), m.reference(),
+                            line.getAmount()));
+                    line.markMatched();
+                    repo.saveLine(line);
                     return true;
                 })
                 .orElseGet(() -> {
                     // Clave conocida con importe distinto: NO se cruza. Es la señal más nítida de
                     // que algo salió mal, y taparla cuadrando el reporte la haría invisible.
-                    if (interno.porClaveDeRastreo(linea.getTrackingKey()).isPresent()) {
+                    if (interno.byTrackingKey(line.getTrackingKey()).isPresent()) {
                         log.warn("Clave {} conocida pero con importe distinto: banco={} — no se cruza",
-                                linea.getTrackingKey(), linea.getAmount());
+                                line.getTrackingKey(), line.getAmount());
                     }
                     return false;
                 });
     }
 
-    private boolean cruzarPorImporteYFecha(BankStatementLine linea) {
+    private boolean matchByAmountAndDate(BankStatementLine line) {
         List<MovimientoInterno> candidatos =
-                interno.porImporteYFecha(linea.getAmount(), linea.getBusinessDate());
+                interno.byAmountAndDate(line.getAmount(), line.getBusinessDate());
 
         if (candidatos.size() != 1) {
             if (candidatos.size() > 1) {
                 // Elegir «el primero» cuadraría el reporte y cruzaría el pago contra otra persona:
                 // el total daría bien y dos cuentas individuales estarían mal.
                 log.warn("{} candidatos para el movimiento {} de {} — a la puente, decide una persona",
-                        candidatos.size(), linea.getExternalId(), linea.getAmount());
+                        candidatos.size(), line.getExternalId(), line.getAmount());
             }
             return false;
         }
 
         MovimientoInterno m = candidatos.get(0);
-        repo.saveMatch(BankMatch.heuristico(linea.getId(), m.type(), m.reference(),
-                linea.getAmount(), CONFIANZA_IMPORTE_Y_FECHA));
-        linea.marcarCruzado();
-        repo.saveLine(linea);
+        repo.saveMatch(BankMatch.heuristic(line.getId(), m.type(), m.reference(),
+                line.getAmount(), CONFIANZA_IMPORTE_Y_FECHA));
+        line.markMatched();
+        repo.saveLine(line);
         return true;
     }
 
-    private void aLaPuente(BankStatementLine linea, String motivo) {
-        repo.saveSuspense(SuspenseEntry.de(linea, motivo));
-        linea.marcarEnPuente();
-        repo.saveLine(linea);
+    private void toSuspense(BankStatementLine line, String motivo) {
+        repo.saveSuspense(SuspenseEntry.from(line, motivo));
+        line.markInSuspense();
+        repo.saveLine(line);
     }
 
     /**
@@ -154,22 +154,22 @@ public class BankReconciliationService {
      * todos —hay candidatos y sobran— y decir «sin movimiento equivalente» cuando había dos manda a
      * buscar en el lugar equivocado.
      */
-    private String motivoDeNoCruce(BankStatementLine linea) {
-        int candidatos = interno.porImporteYFecha(linea.getAmount(), linea.getBusinessDate()).size();
+    private String noMatchReason(BankStatementLine line) {
+        int candidatos = interno.byAmountAndDate(line.getAmount(), line.getBusinessDate()).size();
         if (candidatos > 1) {
             return "Ambiguo: " + candidatos + " movimientos internos con el mismo importe y fecha";
         }
-        if (linea.getTrackingKey() != null && !linea.getTrackingKey().isBlank()) {
-            return "Clave de rastreo " + linea.getTrackingKey()
+        if (line.getTrackingKey() != null && !line.getTrackingKey().isBlank()) {
+            return "Clave de rastreo " + line.getTrackingKey()
                     + " sin movimiento interno que la respalde con ese importe";
         }
-        return linea.esAbono()
+        return line.isCredit()
                 ? "Abono sin clave de rastreo ni movimiento interno equivalente"
                 : "Cargo sin clave de rastreo: posible comisión o cargo del banco";
     }
 
-    public record Resultado(int lineas, int deterministas, int heuristicos, int aPuente) {
+    public record Resultado(int lines, int deterministas, int heuristicos, int aPuente) {
 
-        public int cruzados() { return deterministas + heuristicos; }
+        public int matched() { return deterministas + heuristicos; }
     }
 }

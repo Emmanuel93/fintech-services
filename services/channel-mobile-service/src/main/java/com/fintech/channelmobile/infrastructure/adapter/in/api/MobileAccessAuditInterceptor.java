@@ -88,7 +88,7 @@ public class MobileAccessAuditInterceptor implements HandlerInterceptor {
             // Quién es el cliente detrás del UUID: nombre, CURP, correo y teléfono. Este canal
             // pasaba null literal en esas posiciones, así que ningún cliente tenía nombre jamás.
             // En la app el actor y el sujeto son la misma persona: quien entra actúa sobre lo suyo.
-            var cliente = actor == null ? null : identityResolver.resolve(actor).orElse(null);
+            var customer = actor == null ? null : identityResolver.resolve(actor).orElse(null);
 
             long start = request.getAttribute(START_ATTR) instanceof Long l ? l : System.currentTimeMillis();
             long durationMs = System.currentTimeMillis() - start;
@@ -98,26 +98,26 @@ public class MobileAccessAuditInterceptor implements HandlerInterceptor {
             int status    = response.getStatus();
 
             var access = new MobileAuditClient.AccessLog(
-                    accion(method, path, esAcceso, status),
+                    action(method, path, esAcceso, status),
                     actor,
-                    cliente != null ? cliente.email() : null,
-                    cliente != null ? cliente.fullName() : null,
-                    cliente != null ? cliente.curp() : null,
-                    cliente != null ? cliente.phone() : null,
+                    customer != null ? customer.email() : null,
+                    customer != null ? customer.fullName() : null,
+                    customer != null ? customer.curp() : null,
+                    customer != null ? customer.phone() : null,
                     roles,
                     "MOBILE",
-                    cliente != null && cliente.partyId() != null ? cliente.partyId().toString() : null,
-                    cliente != null ? cliente.fullName() : null,
-                    cliente != null ? cliente.curp() : null,
-                    cliente != null ? cliente.email() : null,
-                    cliente != null ? cliente.phone() : null,
-                    ipCliente(request),
+                    customer != null && customer.partyId() != null ? customer.partyId().toString() : null,
+                    customer != null ? customer.fullName() : null,
+                    customer != null ? customer.curp() : null,
+                    customer != null ? customer.email() : null,
+                    customer != null ? customer.phone() : null,
+                    clientIp(request),
                     request.getHeader(HttpHeaders.USER_AGENT),
                     sessionId(bearer(request)),
-                    recurso(path),
-                    recursoId(path),
+                    resource(path),
+                    resourceId(path),
                     method, path, query,
-                    desenlace(status, esAcceso), status, durationMs,
+                    outcome(status, esAcceso), status, durationMs,
                     correlationId(request),
                     DOMAIN_SOURCE,
                     Instant.ofEpochMilli(start));
@@ -133,7 +133,7 @@ public class MobileAccessAuditInterceptor implements HandlerInterceptor {
     }
 
     /** El verbo del hecho, con el mismo vocabulario que usa el backoffice. */
-    static String accion(String method, String path, boolean esAcceso, int status) {
+    static String action(String method, String path, boolean esAcceso, int status) {
         if (esAcceso) {
             if (path.contains("logout")) return "LOGOUT";
             return status < 400 ? "LOGIN" : "LOGIN_FAILED";
@@ -147,11 +147,11 @@ public class MobileAccessAuditInterceptor implements HandlerInterceptor {
     }
 
     /** El módulo tocado, deducido del primer segmento de la ruta. */
-    static String recurso(String path) {
+    static String resource(String path) {
         String p = path.startsWith("/") ? path.substring(1) : path;
-        int corte = p.indexOf('/');
-        String primero = corte > 0 ? p.substring(0, corte) : p;
-        return primero.isBlank() ? null : primero;
+        int cutoff = p.indexOf('/');
+        String first = cutoff > 0 ? p.substring(0, cutoff) : p;
+        return first.isBlank() ? null : first;
     }
 
     /**
@@ -161,7 +161,7 @@ public class MobileAccessAuditInterceptor implements HandlerInterceptor {
      * las 189 suyas. Una bitácora que registra la ruta pero no el id obliga a quien audita a
      * parsearla a mano, y sólo en la mitad de los canales.
      */
-    static String recursoId(String path) {
+    static String resourceId(String path) {
         if (path == null) return null;
         var m = UUID_SEG.matcher(path);
         return m.find() ? m.group() : null;
@@ -180,7 +180,7 @@ public class MobileAccessAuditInterceptor implements HandlerInterceptor {
         return request.getHeader(MdcCorrelationFilter.HEADER);
     }
 
-    static String desenlace(int status, boolean esAcceso) {
+    static String outcome(int status, boolean esAcceso) {
         if (status < 400) return "SUCCESS";
         if (status == 401) return esAcceso ? "FAILED_CREDENTIALS" : "DENIED";
         if (status == 403) return "DENIED";
@@ -194,7 +194,7 @@ public class MobileAccessAuditInterceptor implements HandlerInterceptor {
      * bitácora quedaría registrando la misma dirección — inútil para detectar desde dónde entró
      * alguien. La primera de {@code X-Forwarded-For} es la del cliente.
      */
-    static String ipCliente(HttpServletRequest request) {
+    static String clientIp(HttpServletRequest request) {
         String fwd = request.getHeader("X-Forwarded-For");
         if (fwd != null && !fwd.isBlank()) return fwd.split(",")[0].trim();
         return request.getRemoteAddr();

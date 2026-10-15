@@ -77,11 +77,11 @@ class ScoringRuleEvaluatorTest {
         assertThat(result.totalScore()).isZero();
     }
 
-    // ── MORA_CHECK ────────────────────────────────────────────────────────────
+    // ── WORST_ARREARS_DAYS ────────────────────────────────────────────────────────────
 
     @Test
     void mora_anyMora_applyNegativeScore() {
-        addRule(RuleType.MORA_CHECK, null, RuleOperator.GT, 0, -200, false, null);
+        addRule(RuleType.WORST_ARREARS_DAYS, null, RuleOperator.GT, 0, -200, false, null);
         CirculoReport report = reportWithCredits(List.of(
                 credit("TC", BigDecimal.valueOf(30), BigDecimal.ZERO),
                 credit("PP", BigDecimal.ZERO, BigDecimal.ZERO)
@@ -95,7 +95,7 @@ class ScoringRuleEvaluatorTest {
 
     @Test
     void mora_noMora_doesNotApply() {
-        addRule(RuleType.MORA_CHECK, null, RuleOperator.GT, 0, -200, false, null);
+        addRule(RuleType.WORST_ARREARS_DAYS, null, RuleOperator.GT, 0, -200, false, null);
         CirculoReport report = reportWithCredits(List.of(
                 credit("TC", BigDecimal.ZERO, BigDecimal.ZERO)
         ));
@@ -105,7 +105,7 @@ class ScoringRuleEvaluatorTest {
 
     @Test
     void mora_specificCreditType_onlyFilters() {
-        addRule(RuleType.MORA_CHECK, "FM", RuleOperator.GT, 0, -200, false, null);
+        addRule(RuleType.WORST_ARREARS_DAYS, "FM", RuleOperator.GT, 0, -200, false, null);
         CirculoReport report = reportWithCredits(List.of(
                 credit("TC", BigDecimal.valueOf(60), BigDecimal.ZERO), // mora en TC — no aplica
                 credit("FM", BigDecimal.ZERO, BigDecimal.ZERO)          // FM sin mora
@@ -118,7 +118,7 @@ class ScoringRuleEvaluatorTest {
     @Test
     void mora_disqualifying_stopsEvaluation() {
         // First rule: disqualifying mora > 90 days
-        addRule(RuleType.MORA_CHECK, null, RuleOperator.GT, 90, -500, true, null);
+        addRule(RuleType.WORST_ARREARS_DAYS, null, RuleOperator.GT, 90, -500, true, null);
         // Second rule: would add score, but should not be reached
         addRule(RuleType.FICO_THRESHOLD, null, RuleOperator.GTE, 650, 50, false, null);
 
@@ -240,7 +240,7 @@ class ScoringRuleEvaluatorTest {
         return report;
     }
 
-    private CirculoCredit credit(String tipo, BigDecimal peorAtraso, BigDecimal saldoVencido) {
+    private CirculoCredit credit(String tipo, BigDecimal peorAtraso, BigDecimal overdueBalance) {
         return new CirculoCredit(
                 UUID.randomUUID(), null,
                 "CLAVE", "NOMBRE", "CTA001",
@@ -249,10 +249,10 @@ class ScoringRuleEvaluatorTest {
                 LocalDate.now().minusYears(2), null, null, null,
                 LocalDate.now(), null,
                 BigDecimal.valueOf(50000), BigDecimal.valueOf(10000), BigDecimal.valueOf(50000),
-                saldoVencido, 0, "V",
+                overdueBalance, 0, "V",
                 "VVVVVVVV", null, null,
                 null, 24,
-                peorAtraso, null, saldoVencido,
+                peorAtraso, null, overdueBalance,
                 BigDecimal.valueOf(500), 0, LocalDate.now());
     }
 }

@@ -192,7 +192,7 @@ class AccountingController {
                 creditAccountId, partyId, page, size);
         List<VoucherResponse> rows = result == null ? List.of() : safe(result.content());
 
-        Map<String, Atribucion> attr   = atribuciones();
+        Map<String, Atribucion> attr   = attributions();
         Map<UUID, String> partyNames   = resolveParties(rows);
         Map<UUID, String> contractNums = resolveContracts(rows);
 
@@ -235,7 +235,7 @@ class AccountingController {
         var result = accountingClient.loans(period, scopeCodes(unitId, unitCode), page, size);
         List<AccountingClient.LoanMovementResponse> rows = result == null ? List.of() : safe(result.content());
 
-        Map<String, Atribucion> attr = atribuciones();
+        Map<String, Atribucion> attr = attributions();
         Map<UUID, String> partyNames = new HashMap<>();
         partiesOf(rows.stream().map(AccountingClient.LoanMovementResponse::obligorPartyId)
                 .filter(Objects::nonNull).limit(MAX_BATCH).collect(Collectors.toSet()))
@@ -251,7 +251,7 @@ class AccountingController {
             m.put("obligorPartyId", l.obligorPartyId());
             m.put("obligorName", l.obligorPartyId() == null ? null : partyNames.get(l.obligorPartyId()));
             m.put("orgUnitCode", l.orgUnitCode());
-            ponAtribucion(m, l.orgUnitCode(), attr);
+            setAttribution(m, l.orgUnitCode(), attr);
             m.put("vouchers", l.vouchers());
             m.put("firstVoucherDate", l.firstVoucherDate());
             m.put("lastVoucherDate", l.lastVoucherDate());
@@ -280,7 +280,7 @@ class AccountingController {
     ResponseEntity<Map<String, Object>> voucher(@PathVariable UUID voucherId) {
         var v = accountingClient.voucher(voucherId);
         if (v == null) return ResponseEntity.notFound().build();
-        return ResponseEntity.ok(voucherView(v, atribuciones(),
+        return ResponseEntity.ok(voucherView(v, attributions(),
                 resolveParties(List.of(v)), resolveContracts(List.of(v)), true));
     }
 
@@ -327,11 +327,11 @@ class AccountingController {
         body.put("obligorName", partyId == null ? null : nameOf(partyId));
 
         // Una sola lectura del árbol para la ficha entera: la cabecera y cada una de sus pólizas.
-        Map<String, Atribucion> attrLedger = atribuciones();
+        Map<String, Atribucion> attrLedger = attributions();
 
         String unitCode = ledger != null ? ledger.orgUnitCode() : null;
         body.put("orgUnitCode", unitCode);
-        ponAtribucion(body, unitCode, attrLedger);
+        setAttribution(body, unitCode, attrLedger);
 
         body.put("balances", ledger == null ? List.of() : safe(ledger.balances()));
         body.put("vouchers", ledger == null ? List.of() : safe(ledger.vouchers()).stream()
@@ -482,7 +482,7 @@ class AccountingController {
             // incompleta para siempre. La atribución es idempotente: sólo rellena lo que está en nulo.
             if (a.originUnitCode() != null && !a.originUnitCode().isBlank()) {
                 yaSellados++;
-                if (!dryRun) polizasAtribuidas += atribuir(a.creditAccountId(), a.originUnitCode());
+                if (!dryRun) polizasAtribuidas += attribute(a.creditAccountId(), a.originUnitCode());
                 continue;
             }
 
@@ -502,7 +502,7 @@ class AccountingController {
                 // Y se le pone la sucursal a lo que ya estaba asentado. Va después del sello y no
                 // antes: si cartera rechaza, contabilidad no debe quedar atribuyendo a una sucursal
                 // que el préstamo no tiene.
-                polizasAtribuidas += atribuir(a.creditAccountId(), branch);
+                polizasAtribuidas += attribute(a.creditAccountId(), branch);
             }
             sellados++;
             if (muestra.size() < 10) muestra.add(a.contractNumber() + " → " + branch);
@@ -537,7 +537,7 @@ class AccountingController {
     }
 
     /** Cuántas pólizas quedaron atribuidas. Que falle no invalida el sello, que ya está puesto. */
-    private int atribuir(UUID creditAccountId, String orgUnitCode) {
+    private int attribute(UUID creditAccountId, String orgUnitCode) {
         try {
             var r = accountingClient.attributeUnit(creditAccountId, orgUnitCode);
             return r == null ? 0 : ((Number) r.getOrDefault("vouchersUpdated", 0)).intValue();
@@ -594,16 +594,16 @@ class AccountingController {
             if (cache.containsKey(staffUserId)) return cache.get(staffUserId);
 
             String code = porPartyRef.get(staffUserId);
-            if (code == null) code = porAsignacion(staffUserId);
+            if (code == null) code = byAssignment(staffUserId);
             cache.put(staffUserId, code);
             return code;
         }
 
-        private String porAsignacion(UUID staffUserId) {
+        private String byAssignment(UUID staffUserId) {
             try {
                 var asignacion = salesOrgClient.currentAssignment("STAFF", staffUserId);
                 if (asignacion == null || asignacion.get("unitId") == null) return null;
-                return subirHastaSucursal(unidadPorId.get(String.valueOf(asignacion.get("unitId"))));
+                return climbToBranch(unidadPorId.get(String.valueOf(asignacion.get("unitId"))));
             } catch (Exception ex) {
                 return null;
             }
@@ -616,18 +616,18 @@ class AccountingController {
          * zona y no hay ninguna sucursal encima. Subir siempre acabaría atribuyéndole a la raíz
          * nacional todo lo que coloca la dirección, que es peor que dejarlo en su propia unidad.
          */
-        private String subirHastaSucursal(Map<String, Object> nodo) {
+        private String climbToBranch(Map<String, Object> node) {
             int guarda = 0;   // tope contra un árbol con ciclo: un dato malo no cuelga la operación
-            while (nodo != null && guarda++ < 10) {
-                String nivel = nivelPorId.get(String.valueOf(nodo.get("levelId")));
+            while (node != null && guarda++ < 10) {
+                String nivel = nivelPorId.get(String.valueOf(node.get("levelId")));
                 if (nivel == null || !"EXECUTIVE".equals(nivel) && !"DISTRIBUTOR".equals(nivel)) break;
-                Object padre = nodo.get("parentUnitId");
+                Object padre = node.get("parentUnitId");
                 if (padre == null) break;
-                Map<String, Object> siguiente = unidadPorId.get(String.valueOf(padre));
-                if (siguiente == null) break;
-                nodo = siguiente;
+                Map<String, Object> next = unidadPorId.get(String.valueOf(padre));
+                if (next == null) break;
+                node = next;
             }
-            return nodo == null || nodo.get("code") == null ? null : String.valueOf(nodo.get("code"));
+            return node == null || node.get("code") == null ? null : String.valueOf(node.get("code"));
         }
     }
 
@@ -713,7 +713,7 @@ class AccountingController {
      * @param sucursal    nombre de la sucursal; nunca el de una persona
      * @param responsable el ejecutivo que colocó, o {@code null} si la unidad sellada ya era la sucursal
      */
-    private record Atribucion(String codigo, String sucursal, String responsable) {}
+    private record Atribucion(String codigo, String branch, String responsable) {}
 
     /**
      * Resuelve cada unidad sellada a <b>sucursal + responsable</b>.
@@ -728,7 +728,7 @@ class AccountingController {
      * por convención de prefijos: el path es texto y una unidad renombrada rompería el troceo sin
      * avisar, mientras que el nivel es un dato explícito del árbol.
      */
-    private Map<String, Atribucion> atribuciones() {
+    private Map<String, Atribucion> attributions() {
         try {
             Map<String, Map<String, Object>> porId = new HashMap<>();
             List<Map<String, Object>> unidades = safe(salesOrgClient.listUnits());
@@ -745,18 +745,18 @@ class AccountingController {
 
                 // Se sube hasta la sucursal, recordando de dónde se partió: si la unidad sellada
                 // está por debajo, esa unidad es el responsable.
-                Map<String, Object> actual = u;
+                Map<String, Object> current = u;
                 String responsable = null;
                 int guarda = 0;   // el árbol tiene seis niveles; el tope sólo evita un ciclo por dato corrupto
-                while (actual != null && !NIVEL_SUCURSAL.equals(String.valueOf(actual.get("levelId")))
+                while (current != null && !NIVEL_SUCURSAL.equals(String.valueOf(current.get("levelId")))
                         && guarda++ < 10) {
-                    if (responsable == null) responsable = String.valueOf(actual.get("name"));
-                    Object padre = actual.get("parentUnitId");
-                    actual = padre == null ? null : porId.get(String.valueOf(padre));
+                    if (responsable == null) responsable = String.valueOf(current.get("name"));
+                    Object padre = current.get("parentUnitId");
+                    current = padre == null ? null : porId.get(String.valueOf(padre));
                 }
 
-                if (actual != null) {
-                    out.put(codigo, new Atribucion(codigo, String.valueOf(actual.get("name")), responsable));
+                if (current != null) {
+                    out.put(codigo, new Atribucion(codigo, String.valueOf(current.get("name")), responsable));
                 } else {
                     // Por encima de sucursal (zona, región, nacional): no hay plaza que mostrar y el
                     // nombre de la unidad ya es el correcto para su nivel.
@@ -771,7 +771,7 @@ class AccountingController {
     }
 
     /** Pone `orgUnitName` (la sucursal) y `orgUnitManager` (quién responde) en un cuerpo de salida. */
-    private void ponAtribucion(Map<String, Object> m, String codigo, Map<String, Atribucion> attr) {
+    private void setAttribution(Map<String, Object> m, String codigo, Map<String, Atribucion> attr) {
         if (codigo == null) {
             // Sin código no es un fallo de resolución: es un crédito anterior al sellado, y la
             // pantalla tiene que poder contarlo aparte en vez de esconderlo.
@@ -780,7 +780,7 @@ class AccountingController {
             return;
         }
         Atribucion a = attr.get(codigo);
-        m.put("orgUnitName", a != null ? a.sucursal() : codigo);
+        m.put("orgUnitName", a != null ? a.branch() : codigo);
         m.put("orgUnitManager", a != null ? a.responsable() : null);
     }
 
@@ -800,13 +800,13 @@ class AccountingController {
     }
 
     private List<Map<String, Object>> withUnitNames(List<UnitMovementResponse> rows) {
-        Map<String, Atribucion> attr = atribuciones();
+        Map<String, Atribucion> attr = attributions();
         Map<String, String> ids   = unitIds();
         List<Map<String, Object>> out = new ArrayList<>();
         for (var u : rows) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("orgUnitCode", u.orgUnitCode());
-            ponAtribucion(m, u.orgUnitCode(), attr);
+            setAttribution(m, u.orgUnitCode(), attr);
             // El id permite pedir el subárbol de una rama; el código, sólo esa unidad. La pantalla
             // necesita los dos para poder ofrecer «esta sucursal» y «esta región y lo que cuelga».
             m.put("orgUnitId", u.orgUnitCode() == null ? null : ids.get(u.orgUnitCode()));
@@ -835,7 +835,7 @@ class AccountingController {
         m.put("period", v.period());
         m.put("voucherDate", v.voucherDate());
         m.put("orgUnitCode", v.orgUnitCode());
-        ponAtribucion(m, v.orgUnitCode(), attr);
+        setAttribution(m, v.orgUnitCode(), attr);
         m.put("concept", v.concept());
         m.put("triggerEvent", v.triggerEvent());
         m.put("sourceEventId", v.sourceEventId());

@@ -214,3 +214,14 @@ Sin `JWT_SECRET`: el modelo es header-trust.
 docker compose up -d                  # plataforma completa
 docker compose up -d payments-service # sólo este (requiere postgres, kafka, credit-portfolio)
 ```
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

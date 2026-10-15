@@ -54,23 +54,23 @@ public class CloseRunPlanner {
     }
 
     /** Lo que devuelve planificar: la corrida, y si este pod fue quien la creó. */
-    public record Planificacion(CloseRun run, boolean creadaPorEstePod) {}
+    public record Plan(CloseRun run, boolean createdByThisPod) {}
 
     /**
      * @param materializador produce las unidades de la corrida. Se le pasa la corrida ya creada
      *                       para que pueda insertar en lote con su {@code runId}.
      */
-    public Optional<Planificacion> plan(LocalDate businessDate, ClosePhase phase, String scopeKey,
+    public Optional<Plan> plan(LocalDate businessDate, ClosePhase phase, String scopeKey,
                                          Function<CloseRun, List<CloseUnit>> materializador) {
         String alcance = scopeKey == null || scopeKey.isBlank() ? "ALL" : scopeKey;
 
         // Ya existe: nada que planificar, pero sí algo que trabajar.
         Optional<CloseRun> existente = runs.find(businessDate, phase, alcance);
         if (existente.isPresent()) {
-            return Optional.of(new Planificacion(existente.get(), false));
+            return Optional.of(new Plan(existente.get(), false));
         }
 
-        guardarBarreraDeFase(businessDate, phase, alcance);
+        savePhaseBarrier(businessDate, phase, alcance);
 
         LockKey key = LockKey.of("closing", "run", businessDate, phase, alcance);
         return lock.withLock(key, PLAN_LEASE, () -> {
@@ -78,14 +78,14 @@ public class CloseRunPlanner {
             // haberla creado. Sin esto, el candado sólo estrecharía la ventana en vez de cerrarla.
             Optional<CloseRun> yaCreada = runs.find(businessDate, phase, alcance);
             if (yaCreada.isPresent()) {
-                return new Planificacion(yaCreada.get(), false);
+                return new Plan(yaCreada.get(), false);
             }
-            return new Planificacion(materializar(businessDate, phase, alcance, materializador), true);
+            return new Plan(materialize(businessDate, phase, alcance, materializador), true);
         });
     }
 
     @Transactional
-    protected CloseRun materializar(LocalDate businessDate, ClosePhase phase, String alcance,
+    protected CloseRun materialize(LocalDate businessDate, ClosePhase phase, String alcance,
                                      Function<CloseRun, List<CloseUnit>> materializador) {
         CloseRun run = runs.save(CloseRun.plan(businessDate, phase, alcance));
 
@@ -107,24 +107,24 @@ public class CloseRunPlanner {
      * → 01:00: si el devengo tarda más de 59 minutos, la mora corre sobre datos viejos y
      * <b>nada lo detecta</b>.
      */
-    private void guardarBarreraDeFase(LocalDate businessDate, ClosePhase phase, String alcance) {
-        ClosePhase requerida = phase.requires();
-        if (requerida == null) return;
+    private void savePhaseBarrier(LocalDate businessDate, ClosePhase phase, String alcance) {
+        ClosePhase required = phase.requires();
+        if (required == null) return;
 
-        boolean sellada = runs.find(businessDate, requerida, alcance)
+        boolean sellada = runs.find(businessDate, required, alcance)
                 .map(CloseRun::isSealed)
                 .orElse(false);
 
         if (!sellada) {
-            throw new FaseNoLista(phase, requerida, businessDate);
+            throw new PhaseNotReady(phase, required, businessDate);
         }
     }
 
     /** La fase previa no ha sellado. No es un error del sistema: es que todavía no toca. */
-    public static class FaseNoLista extends IllegalStateException {
-        public FaseNoLista(ClosePhase phase, ClosePhase requerida, LocalDate businessDate) {
+    public static class PhaseNotReady extends IllegalStateException {
+        public PhaseNotReady(ClosePhase phase, ClosePhase required, LocalDate businessDate) {
             super("La fase " + phase + " de " + businessDate + " no puede arrancar: "
-                  + requerida + " todavía no ha sellado");
+                  + required + " todavía no ha sellado");
         }
     }
 }

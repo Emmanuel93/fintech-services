@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog
+                            http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <include file="db/changelog/compliance/001-create-watchlists.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/compliance/002-screening-indexes.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/compliance/003-person-verifications.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/compliance/004-rescreen.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/compliance/005-detalle-por-actualizacion.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/compliance/006-cobertura-de-identificadores.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/compliance/007-raiz-de-curp.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/compliance/008-bitacora-de-consultas.sql" relativeToChangelogFile="false"/>
+
+</databaseChangeLog>

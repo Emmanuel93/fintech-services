@@ -58,35 +58,35 @@ public class BankMatch {
 
     protected BankMatch() {}
 
-    public static BankMatch determinista(UUID lineId, String tipo, String ref, BigDecimal monto) {
-        return crear(lineId, tipo, ref, monto, DETERMINISTA, null, "SYSTEM");
+    public static BankMatch deterministic(UUID lineId, String tipo, String ref, BigDecimal amount) {
+        return create(lineId, tipo, ref, amount, DETERMINISTA, null, "SYSTEM");
     }
 
-    public static BankMatch heuristico(UUID lineId, String tipo, String ref, BigDecimal monto,
+    public static BankMatch heuristic(UUID lineId, String tipo, String ref, BigDecimal amount,
                                        BigDecimal confianza) {
         if (confianza == null) {
             throw new IllegalArgumentException(
                     "Un cruce heurístico sin confianza no se puede revisar después");
         }
-        return crear(lineId, tipo, ref, monto, HEURISTICO, confianza, "SYSTEM");
+        return create(lineId, tipo, ref, amount, HEURISTICO, confianza, "SYSTEM");
     }
 
-    public static BankMatch manual(UUID lineId, String tipo, String ref, BigDecimal monto,
+    public static BankMatch manual(UUID lineId, String tipo, String ref, BigDecimal amount,
                                    String quien) {
         if (quien == null || quien.isBlank()) {
             throw new IllegalArgumentException("Un cruce manual sin autor no es auditable");
         }
-        return crear(lineId, tipo, ref, monto, MANUAL, null, quien);
+        return create(lineId, tipo, ref, amount, MANUAL, null, quien);
     }
 
-    private static BankMatch crear(UUID lineId, String tipo, String ref, BigDecimal monto,
+    private static BankMatch create(UUID lineId, String tipo, String ref, BigDecimal amount,
                                    String metodo, BigDecimal confianza, String quien) {
         BankMatch m = new BankMatch();
         m.id           = UUID.randomUUID();
         m.lineId       = lineId;
         m.internalType = tipo;
         m.internalRef  = ref;
-        m.amount       = monto;
+        m.amount       = amount;
         m.method       = metodo;
         m.confidence   = confianza;
         m.matchedBy    = quien;

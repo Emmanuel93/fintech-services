@@ -179,3 +179,40 @@ analítica.
 
 **Reintentos:** régimen por defecto, sin DLT.
 Ver [README raíz §5.4](../../README.md#54-política-de-reintentos-y-dlt-kafka).
+
+---
+
+## IR-02 · el control de lista negra falla CERRADO
+
+Un intent de una parte en lista negra se abandona antes de llegar a originación. Y si **no se puede
+comprobar**, el intent tampoco avanza.
+
+```mermaid
+flowchart LR
+    classDef ok fill:#bbf7d0,stroke:#166534,color:#052e16,font-weight:bold
+    classDef gt fill:#fef08a,stroke:#854d0e,color:#422006,font-weight:bold
+    classDef no fill:#fecaca,stroke:#991b1b,color:#450a0a,font-weight:bold
+
+    I(["routeIntent"]):::ok --> C{"consultar estatus<br/>en party"}:::gt
+    C -->|"party no contesta"| U["RECHAZA el ruteo<br/>reintentable"]:::no
+    C -->|"BLACKLISTED"| A["ABANDONA el intent<br/>con motivo"]:::no
+    C -->|"limpio"| R(["enruta"]):::ok
+```
+
+**No saber no es rechazar, y tampoco es aprobar.** Un party en lista negra *abandona* el intent con
+motivo, porque se sabe. Uno que no se pudo comprobar *rechaza el enrutamiento* —reintentable en
+cuanto party conteste— en vez de abandonar, que afirmaría algo que nadie comprobó.
+
+> Antes esta rama registraba un `WARN` y **continuaba sin comprobar**. Para un control regulatorio la
+> polaridad estaba invertida: con el screening de listas como condición para colocar, fallar abierto
+> significa dispersar dinero sin haber comprobado listas porque un servicio estaba caído. Y ninguna
+> prueba cubría la rama — por eso sobrevivió.
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

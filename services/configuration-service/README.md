@@ -265,3 +265,14 @@ docker compose --profile configuration-service up -d
 - **Historial regulatorio**: los parámetros nunca se borran. La migración 003-audit-trail + el historial permiten reconstruir qué valor estaba vigente en cualquier fecha pasada (CNBV, retención 7 años).
 
 
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

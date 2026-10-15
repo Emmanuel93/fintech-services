@@ -171,7 +171,7 @@ public class RateCard {
     }
 
     /** Meses sin intereses: la tasa es exactamente cero. */
-    public boolean esMesesSinIntereses() {
+    public boolean isInterestFree() {
         return DIFERIMIENTO.equals(purposeOrDefault()) && nominalRate.signum() == 0;
     }
 }

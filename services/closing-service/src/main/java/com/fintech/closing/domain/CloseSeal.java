@@ -79,8 +79,8 @@ public class CloseSeal {
      */
     private String computeHash() {
         String payload = String.join("|", businessDate.toString(), phase, scopeKey,
-                String.valueOf(unitCount), canonico(totalPrincipal),
-                canonico(totalInterest), canonico(totalPenalty), canonico(totalDebt));
+                String.valueOf(unitCount), canonical(totalPrincipal),
+                canonical(totalInterest), canonical(totalPenalty), canonical(totalDebt));
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(payload.getBytes(StandardCharsets.UTF_8));
@@ -96,7 +96,7 @@ public class CloseSeal {
     private static BigDecimal nz(BigDecimal v) { return v == null ? BigDecimal.ZERO : v; }
 
     /** Misma cifra, misma cadena — venga de memoria o de la base. */
-    private static String canonico(BigDecimal v) {
+    private static String canonical(BigDecimal v) {
         return nz(v).setScale(ESCALA_CANONICA, java.math.RoundingMode.HALF_UP).toPlainString();
     }
 

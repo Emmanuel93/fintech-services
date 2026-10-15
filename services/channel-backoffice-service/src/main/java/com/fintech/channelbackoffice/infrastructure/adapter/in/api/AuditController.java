@@ -100,19 +100,19 @@ class AuditController {
         r.actors().forEach(a -> merge(porEntrada,
                 () -> auditClient.listEntries(null, null, eventType, a, from, to, limit)));
 
-        List<Map<String, Object>> todos = new ArrayList<>(porEntrada.values());
-        todos.sort(Comparator.comparing(
+        List<Map<String, Object>> all = new ArrayList<>(porEntrada.values());
+        all.sort(Comparator.comparing(
                 (Map<String, Object> e) -> String.valueOf(e.get("createdAt")), Comparator.reverseOrder()));
-        return todos;
+        return all;
     }
 
     /** Suma un tramo al resultado. Si ese camino falla, los demás siguen valiendo. */
     private void merge(Map<Object, Map<String, Object>> acc,
                        java.util.function.Supplier<List<Map<String, Object>>> tramo) {
         try {
-            List<Map<String, Object>> filas = tramo.get();
-            if (filas == null) return;
-            for (Map<String, Object> f : filas) {
+            List<Map<String, Object>> rows = tramo.get();
+            if (rows == null) return;
+            for (Map<String, Object> f : rows) {
                 Object id = f.get("entryId");
                 if (id != null) acc.putIfAbsent(id, f);
             }

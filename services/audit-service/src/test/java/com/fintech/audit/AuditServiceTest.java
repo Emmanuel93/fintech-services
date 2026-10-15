@@ -206,7 +206,7 @@ class AuditServiceTest {
     }
 
     @Test
-    void todaConsultaDeListadoQuedaAcotada() {
+    void everyListQueryIsBounded() {
         // Guarda de diseño: si mañana alguien agrega un findBy… al puerto sin `limit`, este test
         // falla al compilar. Es a propósito — la cota no es opcional en este servicio.
         when(repository.findByPartyId(any(), any(), any(), anyInt())).thenReturn(List.of());

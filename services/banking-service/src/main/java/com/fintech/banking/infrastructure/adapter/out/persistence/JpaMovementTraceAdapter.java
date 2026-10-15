@@ -25,7 +25,7 @@ interface SpringDataMovementTraceRepository extends JpaRepository<MovementTrace,
                 OR t.lineId IS NULL OR t.voucherRef IS NULL
              ORDER BY t.createdAt ASC
             """)
-    List<MovementTrace> findIncompletas(Limit limite);
+    List<MovementTrace> findIncomplete(Limit limite);
 }
 
 @Repository
@@ -41,5 +41,5 @@ class JpaMovementTraceAdapter implements MovementTraceRepository {
     @Override public Optional<MovementTrace> findByLineId(UUID id)    { return jpa.findByLineId(id); }
     @Override public List<MovementTrace> findByCreditAccountId(UUID id) { return jpa.findByCreditAccountId(id); }
     @Override public List<MovementTrace> findByVoucherRef(String ref) { return jpa.findByVoucherRef(ref); }
-    @Override public List<MovementTrace> findIncompletas(int limite)  { return jpa.findIncompletas(Limit.of(limite)); }
+    @Override public List<MovementTrace> findIncomplete(int limite)  { return jpa.findIncomplete(Limit.of(limite)); }
 }

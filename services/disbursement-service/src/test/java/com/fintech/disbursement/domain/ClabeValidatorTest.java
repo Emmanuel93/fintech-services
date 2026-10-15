@@ -32,7 +32,7 @@ class ClabeValidatorTest {
 
     @Test
     @DisplayName("los tres primeros dígitos son la institución")
-    void institucion() {
+    void institution() {
         assertThat(ClabeValidator.institutionOf("646180157000000004")).isEqualTo(646);
     }
 }

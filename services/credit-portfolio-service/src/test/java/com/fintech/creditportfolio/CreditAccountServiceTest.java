@@ -45,6 +45,7 @@ class CreditAccountServiceTest {
     @Mock BalanceEventRepository balanceEventRepository;
     @Mock CreditPortfolioEventPublisher eventPublisher;
     @Mock ProductConfigResolver configResolver;
+    @Mock com.fintech.creditportfolio.application.port.out.PartyVerificationRepository partyVerifications;
 
     CreditAccountService service;
 
@@ -52,7 +53,14 @@ class CreditAccountServiceTest {
     void setUp() {
         service = new CreditAccountService(accountRepository, dispositionRepository,
                 installmentRepository, balanceEventRepository, new AmortizationEngine(),
-                eventPublisher, configResolver, 12);
+                eventPublisher, configResolver, partyVerifications, 12);
+        // El veredicto de AML llega limpio salvo que la prueba diga lo contrario: estas pruebas
+        // examinan el motor de disposiciones, no la compuerta —ésa tiene las suyas en
+        // `AmlOnDispositionTest`—. Dejarlo bloqueado por omisión haría fallar a todas por un motivo
+        // que no es el que miden.
+        lenient().when(partyVerifications.findByPartyId(any())).thenReturn(
+                java.util.Optional.of(com.fintech.creditportfolio.domain.PartyVerification.of(
+                        java.util.UUID.randomUUID(), "VERIFIED", "CLEARED", true, null)));
         // Default: resolver returns an INSTALLMENT/FRENCH/MONTHLY config (lenient — idempotent test returns early)
         lenient().when(configResolver.resolveForActivation(any())).thenReturn(installmentConfig());
         // BK-13 · el tipo de disposición sale del PRODUCTO. Que las pruebas tengan que declarar la
@@ -132,7 +140,7 @@ class CreditAccountServiceTest {
         given(dispositionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
 
         String promotor = UUID.randomUUID().toString();
-        CreditAccount result = service.activate(conPromotorYSucursal(promotor, null));
+        CreditAccount result = service.activate(withAgentAndBranch(promotor, null));
 
         assertThat(result.getOriginUnitCode())
                 .as("un crédito sin sucursal resuelta nace sin sellar, para que la reconciliación "
@@ -147,13 +155,13 @@ class CreditAccountServiceTest {
         given(dispositionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
 
         String promotor = UUID.randomUUID().toString();
-        CreditAccount result = service.activate(conPromotorYSucursal(promotor, "S_GDL"));
+        CreditAccount result = service.activate(withAgentAndBranch(promotor, "S_GDL"));
 
         assertThat(result.getOriginUnitCode()).isEqualTo("S_GDL");
         assertThat(result.getOriginUnitCode()).isNotEqualTo(promotor);
     }
 
-    private CreateCreditAccountCommand conPromotorYSucursal(String promoterCode, String originUnitCode) {
+    private CreateCreditAccountCommand withAgentAndBranch(String promoterCode, String originUnitCode) {
         return new CreateCreditAccountCommand(
                 UUID.randomUUID(), "CTR-202608-DIST0001", UUID.randomUUID(),
                 "PL-001", 1, "PERSONAL_LOAN", "INSTALLMENT",

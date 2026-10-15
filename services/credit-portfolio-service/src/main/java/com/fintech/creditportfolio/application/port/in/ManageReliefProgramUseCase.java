@@ -30,14 +30,14 @@ public interface ManageReliefProgramUseCase {
      * necesita saber que hay cartera que ya viene de otro programa. Sin esa cifra, dos programas
      * que se solapan se ven cada uno razonable y juntos difieren el doble de lo autorizado.
      */
-    record Padron(UUID programId, int cuentasElegibles, int yaApoyadas, List<UUID> muestra) {}
+    record EligibilityRoster(UUID programId, int eligibleAccounts, int alreadySupported, List<UUID> sample) {}
 
-    ReliefProgram proponer(Proponer alta, String proposedBy);
+    ReliefProgram propose(Proponer alta, String proposedBy);
 
-    ReliefProgram autorizar(UUID programId, String approvedBy);
+    ReliefProgram authorize(UUID programId, String approvedBy);
 
-    Padron simularPadron(UUID programId);
+    EligibilityRoster simulateRoster(UUID programId);
 
     /** @return cuántas cuentas quedaron inscritas */
-    int otorgar(UUID programId);
+    int grant(UUID programId);
 }

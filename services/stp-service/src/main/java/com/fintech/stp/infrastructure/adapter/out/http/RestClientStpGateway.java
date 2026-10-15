@@ -107,7 +107,7 @@ public class RestClientStpGateway implements StpGatewayPort {
                 detalle.causaDevolucion() != null ? String.valueOf(detalle.causaDevolucion()) : null,
                 detalle.urlCEP(), detalle.nombreCep(), detalle.rfcCep(), detalle.sello(),
                 detalle.tsLiquidacion(), detalle.tsCaptura(), detalle.monto(),
-                detalle.cuentaBeneficiario(), serialize(detalle), serializeWithoutSello(detalle));
+                detalle.cuentaBeneficiario(), serialize(detalle), serializeWithoutSeal(detalle));
     }
 
     /** El payload crudo es evidencia regulatoria (SO-01). Se archiva tal cual llegó. */
@@ -128,7 +128,7 @@ public class RestClientStpGateway implements StpGatewayPort {
      * el cambio de estado, en vez de bloquear todas las liquidaciones contra una suposición.
      * Ver {@code fintech.stp.settlement.signature-policy}.
      */
-    private String serializeWithoutSello(Detalle detalle) {
+    private String serializeWithoutSeal(Detalle detalle) {
         try {
             var node = objectMapper.convertValue(detalle, java.util.Map.class);
             node.remove("sello");

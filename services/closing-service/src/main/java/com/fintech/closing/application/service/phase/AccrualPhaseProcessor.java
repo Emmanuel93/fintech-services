@@ -42,8 +42,8 @@ public class AccrualPhaseProcessor implements CloseUnitProcessor {
         if (perfil.isTerminal()) {
             throw new CloseRunWorker.UnitSkipped("cuenta en estado terminal: " + perfil.getStatus());
         }
-        BigDecimal saldo = perfil.getPrincipalBalance();
-        if (saldo == null || saldo.signum() <= 0) {
+        BigDecimal balance = perfil.getPrincipalBalance();
+        if (balance == null || balance.signum() <= 0) {
             throw new CloseRunWorker.UnitSkipped("sin saldo que devengar");
         }
 

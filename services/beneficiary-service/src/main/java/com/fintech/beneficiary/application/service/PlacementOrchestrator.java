@@ -72,6 +72,7 @@ public class PlacementOrchestrator {
         return lifecycle.create(new CreatePlacementCommand(
                 distributorPartyId,
                 line.creditAccountId(),
+                line.productCode(),
                 fullName,
                 phone,
                 relationship,

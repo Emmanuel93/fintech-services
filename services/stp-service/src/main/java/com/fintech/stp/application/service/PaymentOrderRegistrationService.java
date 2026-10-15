@@ -83,13 +83,13 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
         // de la migración; mantenerla más allá habría dejado en pie exactamente lo que este trabajo
         // vino a quitar: un conector capaz de elegir por su cuenta la cuenta de la que sale el
         // dinero, con un `is_default` ciego al saldo y al costo.
-        if (!cmd.traeCuentaOrdenante()) {
+        if (!cmd.fetchesOrderingAccount()) {
             throw new OrderingAccountNotFoundException(
                     "La orden no trae cuenta ordenante. Este conector ya no elige: la decide "
                             + "tesorería y viaja en el mensaje (paymentRequestId="
                             + cmd.paymentRequestId() + ")");
         }
-        CuentaOrdenante ordenante = CuentaOrdenante.deLaOrden(cmd);
+        CuentaOrdenante ordenante = CuentaOrdenante.fromOrder(cmd);
 
         // Validación local: una CLABE con dígito verificador malo no merece un viaje a STP.
         if (isClabe(accountTypeOf(cmd)) && !ClabeValidator.isValid(cmd.beneficiaryAccount())) {

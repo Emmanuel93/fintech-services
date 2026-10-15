@@ -156,10 +156,10 @@ public class PermissionsService {
                 log.warn("identity devolvió un catálogo de roles vacío; se conserva {}", source);
                 return;
             }
-            Map<String, Set<String>> nueva = new TreeMap<>();
-            roles.forEach(r -> nueva.put(r.code(),
+            Map<String, Set<String>> updated = new TreeMap<>();
+            roles.forEach(r -> updated.put(r.code(),
                     r.capabilities() == null ? Set.of() : Set.copyOf(r.capabilities())));
-            this.roleCapabilities = Map.copyOf(nueva);
+            this.roleCapabilities = Map.copyOf(updated);
             this.source = "identity-service (" + roles.size() + " roles)";
             log.info("Matriz de permisos recargada desde identity: {} roles", roles.size());
         } catch (Exception ex) {

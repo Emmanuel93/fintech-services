@@ -74,19 +74,30 @@ public class IntentService {
         }
 
         // IR-02: BLACKLISTED party → IntentAbandoned — never reaches Origination
+        //
+        // **Falla CERRADO.** Antes, cualquier excepción al consultar a party se registraba con un
+        // WARN y el intent seguía su camino sin comprobar. Para un control regulatorio esa
+        // polaridad está invertida: que la comprobación no esté disponible tiene que DETENER, no
+        // dejar pasar. Con el screening de listas como condición para colocar, fallar abierto
+        // significaría dispersar dinero a alguien sin haber comprobado que no está en una lista,
+        // porque un servicio estaba caído — y sin que nada lo indicara después.
+        //
+        // No se abandona el intent: no se sabe si la persona está o no en lista, y abandonarlo
+        // diría que sí. Se rechaza el enrutamiento, que es reintentable en cuanto party conteste.
         if (session.getPartyId() != null) {
+            PartyStatusChecker.PartyStatus partyStatus;
             try {
-                PartyStatusChecker.PartyStatus partyStatus =
-                        partyStatusChecker.check(session.getPartyId(), requestingUserId);
-                if (partyStatus.isBlacklisted()) {
-                    intent.abandon("PARTY_BLACKLISTED");
-                    intentRepository.save(intent);
-                    eventPublisher.publishIntentAbandoned(intent.getIntentId(), "PARTY_BLACKLISTED");
-                    return intent;
-                }
+                partyStatus = partyStatusChecker.check(session.getPartyId(), requestingUserId);
             } catch (Exception ex) {
-                log.warn("Party status check failed for partyId={}, proceeding without blacklist check: {}",
-                        session.getPartyId(), ex.getMessage());
+                log.error("No se pudo comprobar el estatus de party partyId={} — el intent NO avanza: {}",
+                        session.getPartyId(), ex.toString());
+                throw new PartyStatusUnavailableException(session.getPartyId(), ex);
+            }
+            if (partyStatus.isBlacklisted()) {
+                intent.abandon("PARTY_BLACKLISTED");
+                intentRepository.save(intent);
+                eventPublisher.publishIntentAbandoned(intent.getIntentId(), "PARTY_BLACKLISTED");
+                return intent;
             }
         }
 

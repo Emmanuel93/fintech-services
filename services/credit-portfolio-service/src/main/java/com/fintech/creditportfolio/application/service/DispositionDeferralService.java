@@ -9,7 +9,7 @@ import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.Disposition;
 import com.fintech.creditportfolio.domain.Installment;
 import com.fintech.creditportfolio.domain.config.Capabilities;
-import com.fintech.creditportfolio.domain.config.OpcionesDePago;
+import com.fintech.creditportfolio.domain.config.PaymentOptions;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import com.fintech.creditportfolio.domain.event.DispositionDeferredEvent;
 import org.slf4j.Logger;
@@ -64,30 +64,30 @@ public class DispositionDeferralService implements DeferDispositionUseCase {
 
     @Override
     @Transactional
-    public void diferir(DiferirCompra cmd) {
-        CreditAccount cuenta = accounts.findById(cmd.creditAccountId()).orElseThrow(
+    public void defer(DiferirCompra cmd) {
+        CreditAccount account = accounts.findById(cmd.creditAccountId()).orElseThrow(
                 () -> new NoSuchElementException("Sin cuenta " + cmd.creditAccountId()));
 
         Disposition compra = dispositions.findById(cmd.dispositionId()).orElseThrow(
                 () -> new NoSuchElementException("Sin disposición " + cmd.dispositionId()));
 
-        if (!compra.getCreditAccountId().equals(cuenta.getCreditAccountId())) {
+        if (!compra.getCreditAccountId().equals(account.getCreditAccountId())) {
             // No es un detalle de validación: sin esto, cualquiera con un id de disposición podría
             // diferir la compra de otra persona.
             throw new NoSePuedeDiferirException("La disposición no pertenece a esta cuenta");
         }
 
         ProductConfigVersion config = configResolver
-                .resolveForAccount(cuenta.getProductCode(), cuenta.getProductVersion())
+                .resolveForAccount(account.getProductCode(), account.getProductVersion())
                 .orElseThrow(() -> new NoSePuedeDiferirException(
-                        "Sin configuración del producto " + cuenta.getProductCode()));
-        OpcionesDePago opciones = config.getCapabilities().opciones();
+                        "Sin configuración del producto " + account.getProductCode()));
+        PaymentOptions opciones = config.getCapabilities().options();
 
-        if (!opciones.admiteDiferir()) {
+        if (!opciones.allowsDeferral()) {
             throw new NoSePuedeDiferirException(
-                    "El producto " + cuenta.getProductCode() + " no admite diferir compras");
+                    "El producto " + account.getProductCode() + " no admite diferir compras");
         }
-        if (!compra.esExigibleEnElCorte()) {
+        if (!compra.isDueAtCutoff()) {
             // Ya se difirió, o ya se facturó en un corte. En el segundo caso el importe ya es
             // exigible: diferirlo entonces sería mover una deuda que el cliente ya debe.
             throw new NoSePuedeDiferirException(
@@ -97,33 +97,33 @@ public class DispositionDeferralService implements DeferDispositionUseCase {
                                     : "ya tiene plan"));
         }
 
-        int plazo = opciones.plazoDeDiferimiento(cmd.termPeriods());
-        BigDecimal tasa = opciones.tasaDeDiferimiento(plazo).orElseThrow(
+        int plazo = opciones.deferralTerm(cmd.termPeriods());
+        BigDecimal rate = opciones.deferralRate(plazo).orElseThrow(
                 () -> new NoSePuedeDiferirException(
                         "El producto no tiene tasa de diferimiento para " + plazo + " pagos"));
 
         LocalDate desde = compra.getCreatedAt().atZone(ZoneId.systemDefault()).toLocalDate();
-        compra.diferir(plazo);
+        compra.defer(plazo);
         dispositions.save(compra);
 
         String cadencia = config.getPaymentFrequency() != null && !config.getPaymentFrequency().isBlank()
                 ? config.getPaymentFrequency() : "MONTHLY";
 
         List<Installment> plan = amortizationEngine.generate(
-                compra.getDispositionId(), compra.getAmount(), tasa, plazo,
-                cuenta.getAmortizationType() != null ? cuenta.getAmortizationType() : "FRENCH",
+                compra.getDispositionId(), compra.getAmount(), rate, plazo,
+                account.getAmortizationType() != null ? account.getAmortizationType() : "FRENCH",
                 cadencia, AmortizationEngine.firstDueDate(LocalDate.now(), cadencia),
-                cuenta.getVatRate());
+                account.getVatRate());
         installments.saveAll(plan);
 
         // BK-26 · lo devengado mientras fue revolvente se reversa: el plan lo sustituye. Cartera no
         // calcula cuánto — ese número es de charges, que es quien devengó.
         eventPublisher.publishDispositionDeferred(new DispositionDeferredEvent(
-                compra.getDispositionId(), cuenta.getCreditAccountId(), cuenta.getObligorPartyId(),
-                compra.getAmount(), plazo, tasa, desde, LocalDate.now()));
+                compra.getDispositionId(), account.getCreditAccountId(), account.getObligorPartyId(),
+                compra.getAmount(), plazo, rate, desde, LocalDate.now()));
 
         log.info("Compra DIFERIDA dispositionId={} cuenta={} plazo={} tasa={} cuotas={}{}",
-                compra.getDispositionId(), cuenta.getCreditAccountId(), plazo, tasa, plan.size(),
-                tasa.signum() == 0 ? " (MESES SIN INTERESES)" : "");
+                compra.getDispositionId(), account.getCreditAccountId(), plazo, rate, plan.size(),
+                rate.signum() == 0 ? " (MESES SIN INTERESES)" : "");
     }
 }

@@ -53,7 +53,7 @@ acceso falla, quien consulta debe enterarse.
 
 ---
 
-## 2. Tópicos consumidos (20)
+## 2. Tópicos consumidos (21)
 
 | Productor | Tópicos |
 |---|---|
@@ -65,12 +65,13 @@ acceso falla, quien consulta debe enterarse.
 | credit-product | `product-catalog.product-activated` · `product-catalog.product-retired` |
 | identity | `identity.login-attempted` |
 | configuration | `configuration.configuration-updated` |
+| **compliance** | **`compliance.confirmed-match`** — y éste no sólo se audita: **abre un `UIFReport`** |
 
 Todos con `auto-offset-reset: earliest`: en su primer arranque el servicio captura el historial
 completo que siga en el retention del broker, no sólo lo que pase de ahí en adelante.
 
 > **Alcance real:** audit se describe como «suscriptor global», pero suscribe una **lista explícita**
-> de 20 tópicos, no un patrón. Los eventos de `beneficiary.*`, `collections.*`, `wallet.*`,
+> de 21 tópicos, no un patrón. Los eventos de `beneficiary.*`, `collections.*`, `wallet.*`,
 > `commission.*`, `disbursement.*`, `stp.*` y `risk.*` **no** están cableados hoy. Añadir uno es un
 > `@KafkaListener` más; mientras no exista, no está en la bitácora.
 
@@ -86,6 +87,29 @@ completo que siga en el retention del broker, no sólo lo que pase de ahí en ad
 | `GET` | `/parties/{partyId}/uif-reports` | Reportes UIF del party |
 | `GET` | `/parties/{partyId}/expedition` | Expediente completo: entradas + documentos + UIF |
 | `POST` | `/access` | Registrar un acceso a información sensible |
+
+---
+
+## 3.b El único consumo que además *decide*: la coincidencia confirmada
+
+Los 20 tópicos restantes se auditan y nada más: llega el hecho, se guarda con su payload. El de
+`compliance.confirmed-match` hace **dos** escrituras, y la distinción importa:
+
+| Escritura | Qué es | Por qué |
+|---|---|---|
+| Entrada de bitácora | el rastro técnico: qué llegó, cuándo, de quién | es lo que hace todo lo demás |
+| **`UIFReport`** | el expediente regulatorio, nacido `PENDING` | confirmar que alguien está en una lista **genera una obligación de reporte**, y un control que bloquea sin dejar constancia protege del dinero pero no de la auditoría |
+
+Dos detalles deliberados:
+
+* **Nace `INTERNO`, no `RELEVANTE`.** El tipo regulatorio lo decide cumplimiento mirando el caso;
+  un consumidor de Kafka tipificando un reporte ante la autoridad no es su decisión. `INTERNO` es el
+  que no afirma nada que no se haya determinado — queda abierto y quien lo trabaje lo reclasifica.
+* **La nota lleva el argumento de quien adjudicó**, no un texto genérico: la entrada de lista, el
+  programa, quién firmó y por qué. Es lo único que explica el expediente meses después.
+
+Y si el evento llega sin `partyId` utilizable, **el hecho sigue entrando en bitácora** y se grita en
+el log: cambiar un registro incompleto por ninguno sería peor.
 
 ---
 
@@ -120,3 +144,14 @@ Schema `audit`, 9 changesets Liquibase bajo `db/changelog/audit/`.
 ./gradlew :audit-service:test    # AuditServiceTest (unit) + AuditControllerTest (@WebMvcTest)
 docker compose up -d audit-service
 ```
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

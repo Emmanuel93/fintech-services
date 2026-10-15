@@ -46,7 +46,7 @@ class DunningServiceTest {
      * manda nada por diseño. En vez de falsear el reloj, la prueba se salta cuando corre de noche:
      * un test que fija la hora del sistema para pasar dejaría de comprobar justamente la guarda.
      */
-    private void assumeDentroDeVentana() {
+    private void assumeWithinWindow() {
         int hora = LocalTime.now().getHour();
         assumeThat(hora)
                 .as("la corrida sólo publica dentro de la ventana CONDUSEF")
@@ -59,8 +59,8 @@ class DunningServiceTest {
     }
 
     @Test
-    void publica_unaPeticionPorCasoDentroDelCicloDeCincoDias() {
-        assumeDentroDeVentana();
+    void onerequestPerCaseWithinTheFiveDayCycle() {
+        assumeWithinWindow();
         given(caseRepository.findByStatusInAndDaysDelinquentGreaterThanEqual(any(), any(Integer.class)))
                 .willReturn(List.of(caseWithDays(1), caseWithDays(3), caseWithDays(5)));
         given(holdRepository.findCaseIdsWithActiveHold(any())).willReturn(List.of());
@@ -72,7 +72,7 @@ class DunningServiceTest {
 
     @Test
     void noPublica_paraCasosFueraDelCicloDeCincoDias() {
-        assumeDentroDeVentana();
+        assumeWithinWindow();
         // 6 y 40 días ya pasaron el ciclo automático: de ahí en adelante gestiona una persona.
         given(caseRepository.findByStatusInAndDaysDelinquentGreaterThanEqual(any(), any(Integer.class)))
                 .willReturn(List.of(caseWithDays(6), caseWithDays(40)));
@@ -83,8 +83,8 @@ class DunningServiceTest {
     }
 
     @Test
-    void noPublica_paraCasosSilenciadosPorUnFreno() {
-        assumeDentroDeVentana();
+    void nothingIsPublishedForCasesSilencedByAhold() {
+        assumeWithinWindow();
         CollectionCase silenciado = caseWithDays(2);
         CollectionCase libre      = caseWithDays(2);
         given(caseRepository.findByStatusInAndDaysDelinquentGreaterThanEqual(any(), any(Integer.class)))
@@ -110,7 +110,7 @@ class DunningServiceTest {
         assertThat(DunningStep.forDay(4)).isEqualTo(DunningStep.HISTORIAL);
         assertThat(DunningStep.forDay(5)).isEqualTo(DunningStep.OFRECER_AYUDA);
         assertThat(DunningStep.forDay(6)).isNull();
-        assertThat(DunningStep.cicloDias()).isEqualTo(5);
+        assertThat(DunningStep.cycleDays()).isEqualTo(5);
     }
 
     private static CollectionCase eqCase(CollectionCase expected) {

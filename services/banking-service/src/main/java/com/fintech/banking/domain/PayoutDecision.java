@@ -23,10 +23,10 @@ public record PayoutDecision(UUID routeId,
                              PayoutRail rail,
                              PayoutProvider provider) {
 
-    public static PayoutDecision de(PayoutRoute ruta, BankAccount cuenta) {
-        return new PayoutDecision(ruta.getId(), cuenta.getId(), cuenta.getClabe(),
-                cuenta.getHolderName(), cuenta.getTaxId(), cuenta.getProviderClientRef(),
-                cuenta.getInstitutionCode(), ruta.railValue(), ruta.providerValue());
+    public static PayoutDecision from(PayoutRoute ruta, BankAccount account) {
+        return new PayoutDecision(ruta.getId(), account.getId(), account.getClabe(),
+                account.getHolderName(), account.getTaxId(), account.getProviderClientRef(),
+                account.getInstitutionCode(), ruta.railValue(), ruta.providerValue());
     }
 
     /** Para bitácora: la decisión sin el número de cuenta. */

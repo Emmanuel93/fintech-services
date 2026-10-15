@@ -21,8 +21,8 @@ public interface InternalMovementLookupPort {
                              LocalDate businessDate, String trackingKey) {}
 
     /** El cruce sin margen de error: la clave de rastreo es única por orden. */
-    Optional<MovimientoInterno> porClaveDeRastreo(String trackingKey);
+    Optional<MovimientoInterno> byTrackingKey(String trackingKey);
 
     /** Candidatos por importe y fecha. Puede devolver varios — y eso es información, no un fallo. */
-    List<MovimientoInterno> porImporteYFecha(BigDecimal amount, LocalDate businessDate);
+    List<MovimientoInterno> byAmountAndDate(BigDecimal amount, LocalDate businessDate);
 }

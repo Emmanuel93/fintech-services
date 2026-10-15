@@ -89,11 +89,11 @@ class CollectionsQueueIT {
         //
         // No era sensibilidad a la carga —así estaba escrito en la deuda del README— sino a la
         // hora del día, y se reproduce puntualmente una hora cada día.
-        Instant iniciaElDiaEnMexico = LocalDate.now(ZONA_OPERATIVA)
+        Instant startsTheDayInMexico = LocalDate.now(ZONA_OPERATIVA)
                 .atStartOfDay(ZONA_OPERATIVA).toInstant();
-        attempt(caseA, ContactResult.NO_ANSWER, iniciaElDiaEnMexico);
-        attempt(caseA, ContactResult.ANSWERED,  iniciaElDiaEnMexico.plusSeconds(1));
-        attempt(caseB, ContactResult.DELIVERED, iniciaElDiaEnMexico.minus(10, ChronoUnit.DAYS));
+        attempt(caseA, ContactResult.NO_ANSWER, startsTheDayInMexico);
+        attempt(caseA, ContactResult.ANSWERED,  startsTheDayInMexico.plusSeconds(1));
+        attempt(caseB, ContactResult.DELIVERED, startsTheDayInMexico.minus(10, ChronoUnit.DAYS));
         em.flush();
     }
 

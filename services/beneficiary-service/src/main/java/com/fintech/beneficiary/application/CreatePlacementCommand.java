@@ -23,6 +23,12 @@ import java.util.UUID;
 public record CreatePlacementCommand(
         UUID distributorPartyId,
         UUID distributorCreditAccountId,
+        /**
+         * El producto de esa línea (F3b). Decide qué verificación de identidad se exige y cómo se
+         * resuelve. Viaja desde el llamador por la misma razón que la línea: quien sabe hablar con
+         * credit-portfolio es quien lo conoce.
+         */
+        String productCode,
         String beneficiaryFullName,
         String beneficiaryPhone,
         String beneficiaryRelationship,

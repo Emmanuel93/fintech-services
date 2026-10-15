@@ -38,10 +38,10 @@ class ClosePhaseTest {
         assertThat(orden).startsWith(ClosePhase.RECONCILE).endsWith(ClosePhase.PROPAGATE);
 
         for (int i = 1; i < orden.size(); i++) {
-            ClosePhase actual = orden.get(i);
+            ClosePhase current = orden.get(i);
             assertThat(orden.subList(0, i))
-                    .as("la fase %s exige %s, que tiene que venir antes", actual, actual.requires())
-                    .contains(actual.requires());
+                    .as("la fase %s exige %s, que tiene que venir antes", current, current.requires())
+                    .contains(current.requires());
         }
     }
 }

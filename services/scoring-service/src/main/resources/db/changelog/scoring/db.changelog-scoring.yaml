@@ -115,3 +115,11 @@ databaseChangeLog:
             path: db/changelog/scoring/013-rekey-scoring-policies-by-product.sql
             relativeToChangelogFile: false
             splitStatements: false
+  - changeSet:
+      id: 014-rename-mora-check
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/014-rename-mora-check.sql
+            relativeToChangelogFile: false
+            splitStatements: false

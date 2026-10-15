@@ -49,7 +49,7 @@ public class CloseRunWorker {
     }
 
     public record Resultado(int tomadas, int hechas, int fallidas, int omitidas, int colisiones) {
-        public boolean huboTrabajo() { return tomadas > 0; }
+        public boolean didWork() { return tomadas > 0; }
     }
 
     /**
@@ -88,7 +88,7 @@ public class CloseRunWorker {
                 }
                 tomadas++;
 
-                switch (procesarUnidad(candidata.getUnitId(), businessDate, processor, h.fencingToken())) {
+                switch (processUnit(candidata.getUnitId(), businessDate, processor, h.fencingToken())) {
                     case DONE    -> hechas++;
                     case SKIPPED -> omitidas++;
                     case FAILED  -> fallidas++;
@@ -118,7 +118,7 @@ public class CloseRunWorker {
      * falla; la segunda graba la marca de {@code FAILED}. Si la marca fuera en la misma, el
      * rollback se la llevaría y la unidad volvería a aparecer como {@code CLAIMED} sin causa.
      */
-    private Desenlace procesarUnidad(UUID unitId, LocalDate businessDate,
+    private Desenlace processUnit(UUID unitId, LocalDate businessDate,
                                       CloseUnitProcessor processor, long fencingToken) {
         var causa = new java.util.concurrent.atomic.AtomicReference<String>();
 

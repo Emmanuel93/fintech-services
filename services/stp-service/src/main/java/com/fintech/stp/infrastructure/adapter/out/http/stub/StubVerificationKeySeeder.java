@@ -84,7 +84,7 @@ public class StubVerificationKeySeeder {
                 // nadie. Que se genere una nueva en cada arranque es lo correcto para un ambiente
                 // bajo: no hay ningún secreto que se quede escrito en ningún lado.
                 manageCompany.registerKey(company.getCompanyId(), "stub-signing",
-                        KeyPurpose.SIGNING, generarPrivadaPkcs8(), now,
+                        KeyPurpose.SIGNING, generatePrivatePkcs8(), now,
                         now.plus(VALIDITY_DAYS, ChronoUnit.DAYS), "STUB_SEEDER");
                 log.info("Stub: llave SIGNING registrada para companyId={}", company.getCompanyId());
             } catch (RuntimeException e) {
@@ -95,7 +95,7 @@ public class StubVerificationKeySeeder {
     }
 
     /** Una privada RSA nueva en PKCS#8, que es el formato que `wrapSigningKey` espera. */
-    private static String generarPrivadaPkcs8() {
+    private static String generatePrivatePkcs8() {
         try {
             java.security.KeyPairGenerator generador = java.security.KeyPairGenerator.getInstance("RSA");
             generador.initialize(TAMANO_LLAVE);

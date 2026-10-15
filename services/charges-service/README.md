@@ -188,6 +188,35 @@ La red interna de Docker no publica este puerto al host: el único camino de ent
 **Reintentos:** régimen por defecto de la plataforma, sin DLT.
 Ver [README raíz §5.4](../../README.md#54-política-de-reintentos-y-dlt-kafka).
 
+### 🔴 El publicador trata dos fallas opuestas de forma opuesta, y eso hay que decidirlo
+
+`KafkaChargesEventPublisher` llama a `kafkaTemplate.send(...)` y maneja el resultado en
+`whenComplete`. Eso cubre **una** de las dos formas en que un envío falla:
+
+| Cómo falla el envío | Qué pasa hoy | Consecuencia |
+|---|---|---|
+| **Asíncrona** — el broker rechaza o se cae al entregar | `whenComplete` lo registra en ERROR y **se traga** | El cargo **se guarda**; `credit-portfolio` nunca se entera. **Divergencia silenciosa**, y no se autocorrige: el día queda marcado como devengado, así que ninguna re-corrida lo reemite |
+| **Síncrona** — no se pueden obtener metadatos en `max.block.ms` (60 s) | `send(...)` lanza **dentro** de la transacción `@Transactional` del devengo | **Rollback**: no hay cargo y el día **no** queda marcado. El job lo registra y sigue con el siguiente |
+
+La intención del `whenComplete` es clara —«perder el evento no debe tumbar el devengo»— y la ruta
+síncrona la contradice. Pero **la ruta síncrona es la más segura de las dos**, y por eso esto no se
+«arregla» envolviendo el `send` en un `try`:
+
+* El rollback deja el día **sin devengar y recuperable**: volver a correr el job para esa fecha lo
+  arregla, porque la guarda es por día y tampoco se marcó.
+* Tragarse la falla deja el cargo cobrado en `charges` y el saldo sin actualizar en cartera —
+  **irrecuperable sin intervención**, porque el día ya está marcado y nada lo va a reemitir.
+
+Así que uniformar hacia «tragar» convertiría el caso recuperable en el irrecuperable. Y uniformar
+hacia «fallar» ataría el devengo a la latencia del broker y seguiría siendo escritura dual: si el
+envío va bien y el commit falla, se emite un evento de un cargo que no existe.
+
+**La respuesta correcta es un outbox para `charges`**, que es lo que el resto de la plataforma hace
+para esto. Mientras no exista, la asimetría se queda escrita aquí en vez de resolverse a medias — y
+lo que importa saber es que **un broker lento no degrada en «se perdió un evento», escala a «no se
+devengó el interés»**, con una línea de ERROR en un log que [la deuda 11](../../README.md) dice que
+nadie consume.
+
 ---
 
 ## 7. Persistencia — schema `charges`
@@ -229,3 +258,14 @@ Sin `JWT_SECRET`: el modelo es header-trust.
 docker compose up -d                 # plataforma completa
 docker compose up -d charges-service # sólo este (requiere postgres, kafka, credit-portfolio)
 ```
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

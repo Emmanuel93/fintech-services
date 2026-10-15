@@ -34,21 +34,21 @@ public class BankAccountService implements ManageBankAccountsUseCase {
 
     @Override
     @Transactional
-    public BankAccount alta(AltaDeCuenta a) {
+    public BankAccount register(AltaDeCuenta a) {
         // La CLABE se valida ANTES de tocar la base: el dígito verificador atrapa el error de
         // captura en el único momento en que corregirlo es gratis.
         Clabe clabe = Clabe.of(a.clabe());
 
         // La unicidad la impone `uq_bank_accounts_clabe`, pero rebotar aquí da un motivo legible
         // en vez de una violación de restricción.
-        repo.findByClabe(clabe.valor()).ifPresent(existente -> {
+        repo.findByClabe(clabe.value()).ifPresent(existente -> {
             throw new IllegalStateException(
-                    "La CLABE " + clabe.enmascarada() + " ya está dada de alta: " + existente.getId());
+                    "La CLABE " + clabe.masked() + " ya está dada de alta: " + existente.getId());
         });
 
-        BankAccount cuenta = BankAccount.alta(
+        BankAccount account = BankAccount.register(
                 a.companyId(),
-                a.institutionCode() != null ? a.institutionCode() : clabe.institucion(),
+                a.institutionCode() != null ? a.institutionCode() : clabe.institution(),
                 a.institutionName(),
                 clabe,
                 a.holderName(),
@@ -59,30 +59,30 @@ public class BankAccountService implements ManageBankAccountsUseCase {
                 a.suspenseDebitAccount()  != null ? a.suspenseDebitAccount()  : PUENTE_CARGOS,
                 a.providerClientRef());
 
-        BankAccount guardada = repo.save(cuenta);
+        BankAccount guardada = repo.save(account);
         // La CLABE nunca entra completa a la bitácora.
         log.info("Cuenta propia dada de alta id={} institución={} clabe={}",
-                guardada.getId(), guardada.getInstitutionName(), clabe.enmascarada());
+                guardada.getId(), guardada.getInstitutionName(), clabe.masked());
         return guardada;
     }
 
     @Override
     @Transactional(readOnly = true)
-    public BankAccount consultar(UUID id) {
+    public BankAccount query(UUID id) {
         return repo.findById(id).orElseThrow(
                 () -> new NoSuchElementException("Sin cuenta bancaria " + id));
     }
 
     @Override
     @Transactional(readOnly = true)
-    public List<BankAccount> listar(UUID companyId) {
+    public List<BankAccount> list(UUID companyId) {
         return companyId == null ? repo.findAll() : repo.findByCompany(companyId);
     }
 
     @Override
     @Transactional
     public BankAccount suspender(UUID id) {
-        BankAccount c = consultar(id);
+        BankAccount c = query(id);
         c.suspender();
         log.warn("Cuenta {} SUSPENDIDA — deja de participar en el ruteo", id);
         return repo.save(c);
@@ -90,9 +90,9 @@ public class BankAccountService implements ManageBankAccountsUseCase {
 
     @Override
     @Transactional
-    public BankAccount reactivar(UUID id) {
-        BankAccount c = consultar(id);
-        c.reactivar();
+    public BankAccount reactivate(UUID id) {
+        BankAccount c = query(id);
+        c.reactivate();
         return repo.save(c);
     }
 }

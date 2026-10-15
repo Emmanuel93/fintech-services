@@ -509,3 +509,95 @@ docker compose up -d credit-portfolio-service
 > **Testcontainers determinista:** el build fija `DOCKER_HOST=unix:///var/run/docker.sock` y
 > `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE` para no depender de un `docker.host` obsoleto en
 > `~/.testcontainers.properties`. Ver [README raíz §12](../../README.md#12-tests).
+
+---
+
+## AML en cada disposición — y por qué el KYC no se repite
+
+Originar ocurre **una vez**. Disponer ocurre **decenas de veces durante años** —una revolvente
+dispone cada mes, una de distribuidor en cada colocación— y las listas cambian entre una y otra.
+Así que la originación es un control de punto en el tiempo y **la disposición es el recurrente**: el
+último antes de que el dinero salga.
+
+```mermaid
+flowchart LR
+    classDef ok fill:#bbf7d0,stroke:#166534,color:#052e16,font-weight:bold
+    classDef gt fill:#fef08a,stroke:#854d0e,color:#422006,font-weight:bold
+    classDef no fill:#fecaca,stroke:#991b1b,color:#450a0a,font-weight:bold
+
+    D(["disposición"]):::ok --> A{"¿saldo y cupo?"}:::gt
+    A -->|"ok"| B{"¿beneficiario válido?"}:::gt
+    B -->|"ok"| C{"¿AML del<br/>RESPONSABLE?"}:::gt
+    C -->|"ok"| E{"¿AML de<br/>QUIEN RECIBE?"}:::gt
+    C -->|"no"| X1["RECHAZA<br/>AML_RESPONSABLE"]:::no
+    E -->|"no"| X2["RECHAZA<br/>AML_RECEPTOR"]:::no
+    E -->|"limpio"| F["guarda la FOTO<br/>del veredicto del receptor"]:::ok
+    F --> S(["sale el dinero"]):::ok
+```
+
+### Los dos papeles, y por qué son dos
+
+**Toda disposición tiene un beneficiario.** Lo que cambia con el producto es quién es — y en una
+línea de distribuidor **nunca** es el titular:
+
+| Producto | Responsable de la línea | Quien recibe el dinero |
+|---|---|---|
+| `SELF_USE` · `PAYROLL` | el titular | **el mismo titular** — no es que falte beneficiario, es que es él |
+| `THIRD_PARTY_CREDIT` | la distribuidora | **la beneficiaria colocada — nunca la distribuidora** |
+
+Se comprueban **los dos**, por razones distintas:
+
+* **al receptor**, porque es a quien se le va a pagar;
+* **al responsable**, porque no tiene sentido mover dinero de la línea de alguien que está en listas
+  por mucho que el destino sea un tercero — el crédito lo está usando esa persona.
+
+En uso propio los dos papeles caen en la misma persona: una lectura, un veredicto, una comprobación.
+
+Dos reglas previas lo sostienen, y sin ellas el control sería decorativo: una colocación de
+distribuidor **exige** beneficiaria (`BENEFICIARY_REQUIRED`) y **prohíbe** que sea la propia
+distribuidora (`BENEFICIARY_CANNOT_BE_OBLIGOR`). Sin la primera, una colocación sin beneficiaria
+pasaría el AML habiendo mirado sólo a quien **no** recibe el dinero.
+
+> **Una lectura por persona, no dos.** La compuerta y la foto del veredicto usan la **misma** fila:
+> leerla dos veces podría devolver algo distinto —la proyección se actualiza por evento— y entonces
+> se decidiría con un dato y se archivaría otro. El expediente hablaría de una comprobación que no
+> fue la que ocurrió.
+
+### Las dos compuertas son distintas, y esa diferencia es el diseño
+
+```
+ORIGINAR:  identidad VERIFIED  ∧  listas CLEARED
+
+DISPONER:  autenticación del RESPONSABLE (NIP + OTP)     ← quien autoriza
+         ∧ listas CLEARED del responsable
+         ∧ listas CLEARED de QUIEN RECIBE                ← a quien se le paga
+         ∧ identidad del responsable no revocada
+```
+
+Quien se autentica es **el responsable de la línea**, porque es quien autoriza el movimiento: el
+titular en uso propio, la distribuidora en una colocación. **La beneficiaria recibe, no autoriza** —
+no hay nada que pedirle en el momento de la disposición; a ella se la comprobó al darla de alta y se
+le vuelve a comprobar en listas aquí.
+
+El KYC es el **enrolamiento**; la autenticación es el **uso**. Repetir la biometría en cada
+disposición sería pedir una selfie para sacar dinero de la propia línea cada mes: no añade seguridad
+y garantiza que el producto se abandone. Lo que sí bloquea aquí es una identidad **revocada**, que es
+un hecho distinto de «no verificada».
+
+### La foto del veredicto
+
+Cada disposición guarda qué decía el veredicto **en ese instante**: su estado, contra qué versiones
+de lista se calculó y cuándo. No se actualiza nunca después.
+
+Existe porque el negocio asumió la ventana entre que se activa una lista y que termina el re-cruce.
+Sin la foto, mirando atrás se vería a una persona hoy señalada y un desembolso que pasó — y no habría
+forma de distinguir *«no lo sabíamos»* de *«lo dejamos pasar»*.
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

@@ -50,7 +50,7 @@ public class PartyService {
             return partyRepository.findByProspectId(payload.prospectId()).orElseThrow();
         }
 
-        PartyType partyType = PartyType.valueOf(payload.prospectType());
+        PartyType partyType = partyTypeOf(payload.prospectType(), payload.prospectId());
 
         Party party = Party.create(
                 UUID.randomUUID(),
@@ -69,6 +69,49 @@ public class PartyService {
                 saved.getPartyId(), saved.getProspectId(),
                 saved.getPartyType(), saved.getStatus());
         return saved;
+    }
+
+    /**
+     * Traduce el tipo de prospecto al tipo de persona, <b>sin reventar</b>.
+     *
+     * <h2>Lo que esto arregla</h2>
+     *
+     * Antes era {@code PartyType.valueOf(payload.prospectType())} directo, y los dos catálogos no
+     * coinciden: {@code ProspectType} tiene {@code DISTRIBUTOR} y {@code PartyType} sólo
+     * {@code INDIVIDUAL} y {@code BUSINESS}. Un prospecto con ese valor tumbaba el listener con un
+     * {@code IllegalArgumentException} — y este servicio corre <b>sin DLT</b>, así que el mensaje se
+     * reintentaba en bucle y la persona nunca se creaba. No ocurría todavía sólo porque ningún
+     * productor emitía ese valor; el endpoint que lo acepta es {@code permitAll()}.
+     *
+     * <h2>Por qué DISTRIBUTOR se traduce a INDIVIDUAL y no a BUSINESS</h2>
+     *
+     * Porque un distribuidor <b>es una persona física con actividad empresarial</b>: eso es una
+     * persona, no una empresa. Y porque el invariante del modelo (I-03) dice que un distribuidor es
+     * <b>party + rol</b>, no un tipo de persona distinto — el rol se concede aparte y es ahí donde
+     * vive esa condición. Mapearlo a {@code BUSINESS} metería a una persona física en el carril de
+     * las morales, que es un error más difícil de ver que un crash.
+     *
+     * <h2>Y por qué un valor desconocido también entra como INDIVIDUAL</h2>
+     *
+     * Porque la alternativa es no crear la persona, y no crearla es peor: el alta ya ocurrió del
+     * otro lado, el prospecto existe, y dejar a party sin su fila deja a la persona sin ficha, sin
+     * veredicto de verificación y por tanto bloqueada en toda compuerta, sin que nadie sepa por qué.
+     * Se crea con el tipo más conservador y se grita en el log, que es revisable.
+     */
+    private PartyType partyTypeOf(String prospectType, UUID prospectId) {
+        if (prospectType == null || prospectType.isBlank()) {
+            log.warn("El prospecto {} llegó sin tipo — se crea como INDIVIDUAL", prospectId);
+            return PartyType.INDIVIDUAL;
+        }
+        try {
+            return PartyType.valueOf(prospectType);
+        } catch (IllegalArgumentException e) {
+            log.warn("El prospecto {} llegó con prospectType='{}', que PartyType no tiene. Se crea "
+                     + "como INDIVIDUAL: un distribuidor es persona física con actividad "
+                     + "empresarial, y su condición es un ROL, no un tipo de persona (I-03).",
+                    prospectId, prospectType);
+            return PartyType.INDIVIDUAL;
+        }
     }
 
     /**
@@ -172,7 +215,7 @@ public class PartyService {
         // asignación perdida, y hacer que la transacción dependa del bus le añadiría a la operación
         // un modo de fallo a cambio de nada.
         try {
-            eventPublisher.publishExecutiveAssigned(partyId, executiveId, executiveName, nombreDe(saved));
+            eventPublisher.publishExecutiveAssigned(partyId, executiveId, executiveName, nameOf(saved));
         } catch (RuntimeException ex) {
             // El envío es asíncrono y sus fallos llegan por callback, pero un error al construir o
             // serializar el mensaje sí revienta aquí. Sin este catch, el comentario de arriba sería
@@ -198,12 +241,34 @@ public class PartyService {
     }
 
     /** El nombre con el que el ejecutivo reconoce al cliente en su campana. */
-    private static String nombreDe(Party p) {
-        String nombre = java.util.stream.Stream.of(p.getFirstName(), p.getLastName1(), p.getLastName2())
+    private static String nameOf(Party p) {
+        String name = java.util.stream.Stream.of(p.getFirstName(), p.getLastName1(), p.getLastName2())
                 .filter(x -> x != null && !x.isBlank())
                 .reduce((a, b) -> a + " " + b)
                 .orElse(null);
         // Una persona moral no tiene nombre de pila: su razón social vive en `taxName`.
-        return nombre != null ? nombre : p.getTaxName();
+        return name != null ? name : p.getTaxName();
+    }
+
+    /**
+     * Guarda el veredicto de verificación que emitió compliance.
+     *
+     * <p><b>Si el Party todavía no existe, no se pierde: se ignora y se recupera solo.</b> Los dos
+     * —la creación del Party y la evaluación— cuelgan del mismo evento de alta, así que el orden no
+     * está garantizado. Cuando el Party se crea, arranca en `PENDING`, que bloquea; y compliance
+     * vuelve a publicar en cuanto el veredicto cambia —que ocurre siempre, porque la identidad
+     * empieza en revisión y alguien tiene que firmarla—. El lado seguro del desorden es quedarse
+     * bloqueado, no pasar.
+     */
+    @Transactional
+    public void applyVerification(UUID prospectId, String identityStatus,
+                                  String screeningStatus, String blockReason) {
+        partyRepository.findByProspectId(prospectId).ifPresentOrElse(
+                party -> {
+                    party.applyVerification(identityStatus, screeningStatus, blockReason);
+                    partyRepository.save(party);
+                },
+                () -> log.info("Veredicto para prospectId={} sin Party todavía — se reaplicará "
+                               + "con la siguiente publicación; mientras tanto queda PENDING", prospectId));
     }
 }

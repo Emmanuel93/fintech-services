@@ -14,6 +14,6 @@ public interface CloseSealRepository {
     /** Las cifras de control del día, agregadas en SQL. Recorrer cuentas en memoria no escala. */
     Totales aggregateActive();
 
-    record Totales(int cuentas, BigDecimal principal, BigDecimal interes,
+    record Totales(int accounts, BigDecimal principal, BigDecimal interes,
                    BigDecimal penalidad, BigDecimal deudaTotal) {}
 }

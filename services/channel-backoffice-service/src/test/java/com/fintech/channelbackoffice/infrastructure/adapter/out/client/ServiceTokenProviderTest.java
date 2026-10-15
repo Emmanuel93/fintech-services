@@ -25,10 +25,10 @@ class ServiceTokenProviderTest {
 
     private final AtomicInteger llamadas = new AtomicInteger();
 
-    private ServiceTokenProvider provider(String secret, Supplier<ClientResponse> respuesta) {
+    private ServiceTokenProvider provider(String secret, Supplier<ClientResponse> response) {
         ExchangeFunction intercambio = req -> {
             llamadas.incrementAndGet();
-            return Mono.just(respuesta.get());
+            return Mono.just(response.get());
         };
         var props = new ChannelBackofficeProperties();
         props.getServiceClient().setClientId("channel-backoffice-service");

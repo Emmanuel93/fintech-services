@@ -185,7 +185,7 @@ class OnboardingController {
                 address.colonia(),
                 address.municipio(),
                 address.ciudad(),
-                address.estado(),
+                address.state(),
                 address.codigoPostal(),
                 request.aceptaAvisoPrivacidad(),
                 request.aceptaCirculo(),
@@ -357,23 +357,23 @@ class OnboardingController {
         String[] parts = domicilio.split(",");
         String colonia = parts.length > 0 ? parts[0].replaceAll("(?i)^COL\\.\\s*", "").trim() : "SIN COLONIA";
         String ciudad = parts.length > 1 ? parts[1].trim() : "SIN CIUDAD";
-        String estadoCp = parts.length > 2 ? parts[2].trim() : "SIN ESTADO";
+        String zipState = parts.length > 2 ? parts[2].trim() : "SIN ESTADO";
 
         String cp = "00000";
-        String estado = estadoCp;
-        String[] estadoParts = estadoCp.split("\\s+");
-        if (estadoParts.length > 1) {
-            String last = estadoParts[estadoParts.length - 1];
+        String state = zipState;
+        String[] stateParts = zipState.split("\\s+");
+        if (stateParts.length > 1) {
+            String last = stateParts[stateParts.length - 1];
             if (last.matches("\\d{5}")) {
                 cp = last;
-                estado = estadoCp.substring(0, estadoCp.lastIndexOf(last)).trim();
+                state = zipState.substring(0, zipState.lastIndexOf(last)).trim();
             }
         }
 
-        return new AddressParts("COL. " + colonia, "S/N", colonia, ciudad, ciudad, estado, cp);
+        return new AddressParts("COL. " + colonia, "S/N", colonia, ciudad, ciudad, state, cp);
     }
 
     private record AddressParts(
             String calle, String numeroExterior, String colonia,
-            String municipio, String ciudad, String estado, String codigoPostal) {}
+            String municipio, String ciudad, String state, String codigoPostal) {}
 }

@@ -53,7 +53,7 @@ public class CreditProductCreationRequestedListener {
                 payload.obligorTaxId(),
                 // Lo que el cliente pidió al firmar, no el tope del producto. Nulo es "nadie lo
                 // pidió" y es lo que deja el plan empezando en el período siguiente; el tope lo
-                // aplica `OpcionesDePago`, recortando lo pedido si se pasa.
+                // aplica `PaymentOptions`, recortando lo pedido si se pasa.
                 payload.bnplDeferralDays()));
     }
 }

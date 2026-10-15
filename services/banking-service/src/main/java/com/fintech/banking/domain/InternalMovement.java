@@ -52,7 +52,7 @@ public class InternalMovement {
 
     protected InternalMovement() {}
 
-    public static InternalMovement de(String type, String reference, BigDecimal amount,
+    public static InternalMovement from(String type, String reference, BigDecimal amount,
                                       LocalDate businessDate, String trackingKey,
                                       String direction, String sourceEventId) {
         InternalMovement m = new InternalMovement();

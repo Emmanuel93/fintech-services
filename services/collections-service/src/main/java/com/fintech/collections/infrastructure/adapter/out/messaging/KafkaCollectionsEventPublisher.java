@@ -69,7 +69,7 @@ public class KafkaCollectionsEventPublisher implements CollectionsEventPublisher
     @Override
     public void publishDunningRequested(CollectionCase c, DunningStep step) {
         var payload = new DunningRequestedPayload(c.getCaseId(), c.getCreditAccountId(), c.getObligorPartyId(),
-                step.name(), step.dia(), c.getDaysDelinquent(), c.getCurrentBucket().name(),
+                step.name(), step.day(), c.getDaysDelinquent(), c.getCurrentBucket().name(),
                 c.getTotalDebt(), Instant.now());
         send(TOPIC_DUNNING_REQUESTED, c.getCaseId().toString(), payload, "dunning-requested");
     }

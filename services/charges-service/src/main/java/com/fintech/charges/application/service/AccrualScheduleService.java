@@ -63,18 +63,18 @@ public class AccrualScheduleService {
             return;
         }
 
-        BigDecimal effectiveMoraRate = (moratoriumRate != null && moratoriumRate.compareTo(BigDecimal.ZERO) > 0)
+        BigDecimal effectiveMoratoriumRate = (moratoriumRate != null && moratoriumRate.compareTo(BigDecimal.ZERO) > 0)
                 ? moratoriumRate
                 : nominalRate.multiply(properties.getMoratoriumRateMultiplier())
                              .setScale(8, RoundingMode.HALF_UP);
 
         AccrualSchedule schedule = AccrualSchedule.create(
                 creditAccountId, obligorPartyId, productType, productBehavior,
-                nominalRate, effectiveMoraRate, principalBalance, principalBalance,
+                nominalRate, effectiveMoratoriumRate, principalBalance, principalBalance,
                 properties.getGracePeriodDays());
 
         if (accrualStartDate != null) {
-            schedule.arrancarDevengoEl(accrualStartDate);
+            schedule.startAccrualOn(accrualStartDate);
         }
         scheduleRepository.save(schedule);
         log.info("AccrualSchedule created scheduleId={} creditAccountId={} productType={} nominalRate={}{}",
@@ -111,19 +111,19 @@ public class AccrualScheduleService {
      * <p>Se conecta <b>después</b> de corregir la base (BK-19). Al revés, la primera corrida habría
      * encendido el cobro sobre el saldo completo en toda la cartera vencida.
      */
-    public void actualizarMora(UUID creditAccountId, BigDecimal capitalVencido,
+    public void updateMoratorium(UUID creditAccountId, BigDecimal overduePrincipal,
                                LocalDate vencimientoMasAntiguo) {
         scheduleRepository.findByCreditAccountId(creditAccountId).ifPresent(schedule -> {
             boolean estabaActiva = schedule.isMoratoriumActive();
 
-            schedule.actualizarMora(capitalVencido, vencimientoMasAntiguo,
+            schedule.updateMoratorium(overduePrincipal, vencimientoMasAntiguo,
                     LocalDate.now(), schedule.getGracePeriodDays());
             scheduleRepository.save(schedule);
 
             if (estabaActiva != schedule.isMoratoriumActive()) {
                 log.info("Mora {} creditAccountId={} capitalVencido={} desde={}",
                         schedule.isMoratoriumActive() ? "ENCENDIDA" : "APAGADA (cuenta curada)",
-                        creditAccountId, capitalVencido, vencimientoMasAntiguo);
+                        creditAccountId, overduePrincipal, vencimientoMasAntiguo);
             }
         });
     }

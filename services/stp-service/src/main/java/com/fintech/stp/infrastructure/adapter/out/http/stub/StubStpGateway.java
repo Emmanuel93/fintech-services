@@ -164,14 +164,14 @@ public class StubStpGateway implements StpGatewayPort {
 
         List<ReconciliationEntry> entries = new ArrayList<>();
         for (StubOrder order : all) {
-            String estado = order.scenario().reconciliationStatus();
-            if (estado == null) {
+            String status = order.scenario().reconciliationStatus();
+            if (status == null) {
                 continue;   // NEVER_SETTLES: nunca aparece, para ejercitar SO-06
             }
             if (order.getReceivedAt().plus(properties.getGateway().getStub().getSettleAfter()).isAfter(now)) {
                 continue;   // todavía "en tránsito"
             }
-            entries.add(toEntry(order, estado));
+            entries.add(toEntry(order, status));
 
             if (order.scenario() == StubScenario.UNMATCHED_ENTRY) {
                 entries.add(unmatchedEntry(order));   // SO-03
@@ -185,7 +185,7 @@ public class StubStpGateway implements StpGatewayPort {
         return new ReconciliationPage("0", "OK", entries.size(), entries.subList(from, to));
     }
 
-    private ReconciliationEntry toEntry(StubOrder order, String estado) {
+    private ReconciliationEntry toEntry(StubOrder order, String status) {
         long tsCaptura = order.getReceivedAt().toEpochMilli();
         long tsLiquidacion = order.getReceivedAt()
                 .plus(properties.getGateway().getStub().getSettleAfter()).toEpochMilli();
@@ -198,7 +198,7 @@ public class StubStpGateway implements StpGatewayPort {
         Map<String, Object> raw = new LinkedHashMap<>();
         raw.put("claveRastreo", order.getClaveRastreo());
         raw.put("empresa", order.getEmpresa());
-        raw.put("estado", estado);
+        raw.put("estado", status);
         raw.put("monto", order.getMonto());
         raw.put("cuentaBeneficiario", order.getCuentaBeneficiario());
         raw.put("cuentaOrdenante", order.getCuentaOrdenante());
@@ -217,17 +217,17 @@ public class StubStpGateway implements StpGatewayPort {
         raw.put("tipoCuentaOrdenante", order.getTipoCuentaOrdenante());
         raw.put("tsCaptura", tsCaptura);
         raw.put("tsLiquidacion", tsLiquidacion);
-        raw.put("causaDevolucion", estado.startsWith("D") ? 99 : null);
+        raw.put("causaDevolucion", status.startsWith("D") ? 99 : null);
         raw.put("urlCEP", CEP_BASE + order.getClaveRastreo());
 
         String rawPayload = serialize(raw);
-        String sello = signRaw(rawPayload, order.scenario());
+        String seal = signRaw(rawPayload, order.scenario());
 
         return new ReconciliationEntry(
-                order.getClaveRastreo(), estado,
-                estado.startsWith("D") ? "99" : null,
+                order.getClaveRastreo(), status,
+                status.startsWith("D") ? "99" : null,
                 CEP_BASE + order.getClaveRastreo(), nombreCep, order.getRfcCurpBeneficiario(),
-                sello, tsLiquidacion, tsCaptura, order.getMonto(),
+                seal, tsLiquidacion, tsCaptura, order.getMonto(),
                 // El stub firma exactamente el payload SIN el sello, que es lo único verificable.
                 order.getCuentaBeneficiario(), rawPayload, rawPayload);
     }
@@ -245,12 +245,12 @@ public class StubStpGateway implements StpGatewayPort {
 
     /** Firma real. SO-04 sólo vale si el sello se puede verificar y se puede romper a propósito. */
     private String signRaw(String rawPayload, StubScenario scenario) {
-        String sello = StpSigner.sign(rawPayload, stubKeyPair.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
+        String seal = StpSigner.sign(rawPayload, stubKeyPair.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
         if (scenario == StubScenario.INVALID_SIGNATURE) {
             // Alterar un carácter basta: la verificación tiene que fallar.
-            return sello.substring(0, sello.length() - 2) + (sello.endsWith("A") ? "B" : "A") + "=";
+            return seal.substring(0, seal.length() - 2) + (seal.endsWith("A") ? "B" : "A") + "=";
         }
-        return sello;
+        return seal;
     }
 
     /**
@@ -276,14 +276,14 @@ public class StubStpGateway implements StpGatewayPort {
         if (company.isEmpty()) {
             return null;
         }
-        String firma = request.firma();
-        if (firma == null || firma.isBlank()) {
+        String signature = request.firma();
+        if (signature == null || signature.isBlank()) {
             return Boolean.FALSE;
         }
         try {
             int expectedBytes = signingKeyProvider.activeKeyMetadata(
                     company.get().getCompanyId(), KeyPurpose.SIGNING).getKeySize() / 8;
-            return Base64.getDecoder().decode(firma).length == expectedBytes;
+            return Base64.getDecoder().decode(signature).length == expectedBytes;
         } catch (RuntimeException e) {
             // Base64 mal formado, o la empresa sin llave activa. En ambos casos el stub responde
             // como respondería STP: la firma no es aceptable.

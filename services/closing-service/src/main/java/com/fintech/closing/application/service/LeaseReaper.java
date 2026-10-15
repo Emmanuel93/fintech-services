@@ -40,10 +40,10 @@ public class LeaseReaper {
 
     @Transactional
     public int reap(int limit) {
-        List<CloseUnit> vencidas = units.findExpiredLeases(Instant.now(), limit);
+        List<CloseUnit> overdue = units.findExpiredLeases(Instant.now(), limit);
         int devueltas = 0;
 
-        for (CloseUnit unit : vencidas) {
+        for (CloseUnit unit : overdue) {
             LockKey key = LockKey.of("closing", "unit", unit.getRunId(), unit.getUnitKey());
 
             // Si se puede tomar el candado, es que nadie lo tiene: el pod que la reclamó murió.

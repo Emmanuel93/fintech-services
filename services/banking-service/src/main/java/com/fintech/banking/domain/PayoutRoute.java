@@ -82,19 +82,19 @@ public class PayoutRoute {
         return r;
     }
 
-    public boolean cubre(UUID candidata, PayoutRail candidatoRail, BigDecimal monto) {
+    public boolean covers(UUID candidata, PayoutRail candidatoRail, BigDecimal amount) {
         if (!enabled) return false;
         if (companyId != null && !companyId.equals(candidata)) return false;
         if (!rail.equals(candidatoRail.name())) return false;
-        if (monto.compareTo(minAmount) < 0) return false;
-        return maxAmount == null || monto.compareTo(maxAmount) <= 0;
+        if (amount.compareTo(minAmount) < 0) return false;
+        return maxAmount == null || amount.compareTo(maxAmount) <= 0;
     }
 
     /** A igual prioridad la regla específica de empresa manda sobre la genérica. */
-    public int especificidad() { return companyId != null ? 0 : 1; }
+    public int specificity() { return companyId != null ? 0 : 1; }
 
-    public void habilitar()    { this.enabled = true; }
-    public void deshabilitar() { this.enabled = false; }
+    public void enable()    { this.enabled = true; }
+    public void disable() { this.enabled = false; }
 
     public UUID getId()                 { return id; }
     public UUID getCompanyId()          { return companyId; }

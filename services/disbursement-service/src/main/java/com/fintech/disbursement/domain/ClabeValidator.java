@@ -20,11 +20,11 @@ public final class ClabeValidator {
     }
 
     public static boolean isValid(String clabe) {
-        return ClabeCheckDigit.esValida(clabe);
+        return ClabeCheckDigit.isValid(clabe);
     }
 
     public static int checkDigit(String first17Digits) {
-        return ClabeCheckDigit.de(first17Digits);
+        return ClabeCheckDigit.from(first17Digits);
     }
 
     /**
@@ -34,6 +34,6 @@ public final class ClabeValidator {
      * para rails que no son SPEI, donde la cuenta puede ser cualquier cosa.
      */
     public static Integer institutionOf(String clabe) {
-        return ClabeCheckDigit.institucionDe(clabe);
+        return ClabeCheckDigit.institutionOf(clabe);
     }
 }

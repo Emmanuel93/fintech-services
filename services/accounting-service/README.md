@@ -459,3 +459,14 @@ de apertura (`009`) y la baja del activo por quebranto (`010`).
 16 pruebas. Las que conviene no romper: el pago se desglosa entre capital e intereses, el quebranto
 consume la reserva antes que resultados, y un crédito visto a media vida se incorpora contra capital
 en vez de etiquetar el saldo entero como el hecho que llegó primero.
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

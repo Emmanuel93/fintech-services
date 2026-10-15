@@ -15,7 +15,7 @@ class JpaBankAccountAdapter implements BankAccountRepository {
 
     JpaBankAccountAdapter(SpringDataBankAccountRepository jpa) { this.jpa = jpa; }
 
-    @Override public BankAccount save(BankAccount cuenta)          { return jpa.save(cuenta); }
+    @Override public BankAccount save(BankAccount account)          { return jpa.save(account); }
     @Override public Optional<BankAccount> findById(UUID id)       { return jpa.findById(id); }
     @Override public Optional<BankAccount> findByClabe(String c)   { return jpa.findByClabe(c); }
     @Override public List<BankAccount> findByCompany(UUID company) { return jpa.findByCompanyId(company); }

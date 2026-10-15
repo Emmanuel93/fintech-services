@@ -49,8 +49,8 @@ public class ProductConfigVersionService {
         // el producto hace, y el síntoma aparece lejos y sin relación aparente. Con el WARN, el
         // día que alguien pregunte «por qué este producto no deja saltar pagos si el catálogo dice
         // que sí», la respuesta está en el log del arranque y no en una tarde de bisección.
-        if (caps.opciones() != null) {
-            for (String mal : caps.opciones().incoherencias()) {
+        if (caps.options() != null) {
+            for (String mal : caps.options().inconsistencies()) {
                 log.warn("Configuración contradictoria en {} v{}: {}", productCode, productVersion, mal);
             }
         }

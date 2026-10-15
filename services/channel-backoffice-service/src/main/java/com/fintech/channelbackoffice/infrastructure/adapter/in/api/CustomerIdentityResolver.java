@@ -61,10 +61,10 @@ public class CustomerIdentityResolver {
         if (hit != null && !hit.isExpired()) {
             return Optional.ofNullable(hit.identity());
         }
-        return Optional.ofNullable(consultar(id));
+        return Optional.ofNullable(query(id));
     }
 
-    private CustomerIdentity consultar(UUID partyId) {
+    private CustomerIdentity query(UUID partyId) {
         PartyClient.PartyResponse party;
         try {
             party = partyClient.getByPartyId(partyId);
@@ -84,7 +84,7 @@ public class CustomerIdentityResolver {
         Contacto contacto = contacto(party.prospectId());
         var identity = new CustomerIdentity(
                 party.partyId() != null ? party.partyId() : partyId,
-                nombre(party.firstName(), party.lastName1(), party.lastName2()),
+                name(party.firstName(), party.lastName1(), party.lastName2()),
                 party.curp(),
                 contacto.email(),
                 contacto.phone());
@@ -103,16 +103,16 @@ public class CustomerIdentityResolver {
             return Contacto.VACIO;
         }
         try {
-            var prospecto = originationClient.getProspect(prospectId);
-            return prospecto == null ? Contacto.VACIO
-                    : new Contacto(prospecto.email(), prospecto.phone());
+            var prospect = originationClient.getProspect(prospectId);
+            return prospect == null ? Contacto.VACIO
+                    : new Contacto(prospect.email(), prospect.phone());
         } catch (RuntimeException e) {
             log.debug("sin contacto del prospecto {}: {}", prospectId, e.toString());
             return Contacto.VACIO;
         }
     }
 
-    static String nombre(String firstName, String lastName1, String lastName2) {
+    static String name(String firstName, String lastName1, String lastName2) {
         String completo = java.util.stream.Stream.of(firstName, lastName1, lastName2)
                 .filter(s -> s != null && !s.isBlank())
                 .reduce((a, b) -> a + " " + b)

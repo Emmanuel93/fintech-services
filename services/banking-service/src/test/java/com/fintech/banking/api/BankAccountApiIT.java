@@ -36,14 +36,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class BankAccountApiIT extends AbstractIntegrationTest {
 
-    @Override protected List<String> esquemas() { return List.of("banking"); }
+    @Override protected List<String> schemas() { return List.of("banking"); }
 
     /**
      * El seed de ambiente bajo sobrevive al truncado. Sin esto, la primera prueba borra la cuenta y
      * la ruta que sembró Liquibase y a partir de ahí todo falla con «sin ruta» — el síntoma
-     * desconcertante que documenta {@code AbstractIntegrationTest#preservar()}.
+     * desconcertante que documenta {@code AbstractIntegrationTest#preserve()}.
      */
-    @Override protected List<String> preservar() { return List.of("bank_accounts", "payout_routes"); }
+    @Override protected List<String> preserve() { return List.of("bank_accounts", "payout_routes"); }
 
     @Autowired TestRestTemplate rest;
 
@@ -53,13 +53,13 @@ class BankAccountApiIT extends AbstractIntegrationTest {
      * <p>Aleatoria y no un contador: el contenedor de Postgres se reusa entre corridas, así que un
      * contador que arranca en cero volvería a chocar con las CLABEs de la corrida anterior.
      */
-    private static String clabeValida() {
+    private static String validClabe() {
         String base = "012180" + String.format("%011d",
                 java.util.concurrent.ThreadLocalRandom.current().nextLong(100_000_000_000L));
-        return base + Clabe.digitoVerificador(base);
+        return base + Clabe.checkDigit(base);
     }
 
-    private static HttpHeaders comoRol(String... roles) {
+    private static HttpHeaders asRole(String... roles) {
         HttpHeaders h = new HttpHeaders();
         h.set("X-User-Id", "tester");
         h.set("X-Roles", String.join(",", roles));
@@ -67,13 +67,13 @@ class BankAccountApiIT extends AbstractIntegrationTest {
         return h;
     }
 
-    private static Map<String, Object> alta(String clabe) {
+    private static Map<String, Object> register(String clabe) {
         return Map.of("institutionName", "BBVA",
                       "clabe", clabe,
                       "holderName", "FINTECH SA DE CV");
     }
 
-    private ResponseEntity<Map> postAlta(HttpHeaders headers, Map<String, Object> cuerpo) {
+    private ResponseEntity<Map> postRegister(HttpHeaders headers, Map<String, Object> cuerpo) {
         return rest.exchange("/api/v1/bank-accounts", HttpMethod.POST,
                 new HttpEntity<>(cuerpo, headers), Map.class);
     }
@@ -83,7 +83,7 @@ class BankAccountApiIT extends AbstractIntegrationTest {
     void sinToken() {
         HttpHeaders h = new HttpHeaders();
         h.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
-        assertThat(postAlta(h, alta(clabeValida())).getStatusCode())
+        assertThat(postRegister(h, register(validClabe())).getStatusCode())
                 .isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
@@ -92,15 +92,15 @@ class BankAccountApiIT extends AbstractIntegrationTest {
     void rolInsuficiente() {
         // Quien puede dar de alta una CLABE ordenante puede después apuntarle una ruta y hacer que
         // el dinero salga por ella. Es el permiso más sensible del servicio.
-        assertThat(postAlta(comoRol("AUDITOR"), alta(clabeValida())).getStatusCode())
+        assertThat(postRegister(asRole("AUDITOR"), register(validClabe())).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
     }
 
     @Test
     @DisplayName("AC-3 y AC-7 · el alta responde 201, enmascara la CLABE y trae las dos puentes")
     void altaComoAdmin() {
-        String clabe = clabeValida();
-        ResponseEntity<Map> r = postAlta(comoRol("ADMIN"), alta(clabe));
+        String clabe = validClabe();
+        ResponseEntity<Map> r = postRegister(asRole("ADMIN"), register(clabe));
 
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.CREATED);
         Map<?, ?> cuerpo = r.getBody();
@@ -119,10 +119,10 @@ class BankAccountApiIT extends AbstractIntegrationTest {
     @Test
     @DisplayName("AC-4 · una CLABE con el verificador mal rebota con 400")
     void clabeInvalida() {
-        String buena = clabeValida();
+        String buena = validClabe();
         String mala  = buena.substring(0, 17) + ((buena.charAt(17) - '0' + 1) % 10);
 
-        ResponseEntity<Map> r = postAlta(comoRol("ADMIN"), alta(mala));
+        ResponseEntity<Map> r = postRegister(asRole("ADMIN"), register(mala));
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
 
         // Y no quedó rastro: se valida antes de tocar la base.
@@ -134,11 +134,11 @@ class BankAccountApiIT extends AbstractIntegrationTest {
     @Test
     @DisplayName("AC-5 · la misma CLABE dos veces da 409 con motivo, no una violación de restricción")
     void clabeDuplicada() {
-        String clabe = clabeValida();
-        assertThat(postAlta(comoRol("ADMIN"), alta(clabe)).getStatusCode())
+        String clabe = validClabe();
+        assertThat(postRegister(asRole("ADMIN"), register(clabe)).getStatusCode())
                 .isEqualTo(HttpStatus.CREATED);
 
-        ResponseEntity<Map> segunda = postAlta(comoRol("ADMIN"), alta(clabe));
+        ResponseEntity<Map> segunda = postRegister(asRole("ADMIN"), register(clabe));
         assertThat(segunda.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
         assertThat(String.valueOf(segunda.getBody().get("detail")))
                 .contains("ya está dada de alta")
@@ -150,24 +150,24 @@ class BankAccountApiIT extends AbstractIntegrationTest {
     @DisplayName("AC-6 · una cuenta que no existe da 404")
     void noExiste() {
         ResponseEntity<Map> r = rest.exchange("/api/v1/bank-accounts/" + UUID.randomUUID(),
-                HttpMethod.GET, new HttpEntity<>(comoRol("ADMIN")), Map.class);
+                HttpMethod.GET, new HttpEntity<>(asRole("ADMIN")), Map.class);
         assertThat(r.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
     }
 
     @Test
     @DisplayName("AC-8 · suspender saca del ruteo y la cuenta sigue consultable")
     void suspender() {
-        Map<?, ?> creada = postAlta(comoRol("ADMIN"), alta(clabeValida())).getBody();
+        Map<?, ?> creada = postRegister(asRole("ADMIN"), register(validClabe())).getBody();
         String id = String.valueOf(creada.get("bankAccountId"));
 
         ResponseEntity<Map> s = rest.exchange("/api/v1/bank-accounts/" + id + "/suspend",
-                HttpMethod.POST, new HttpEntity<>(comoRol("ADMIN")), Map.class);
+                HttpMethod.POST, new HttpEntity<>(asRole("ADMIN")), Map.class);
         assertThat(s.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(s.getBody().get("status")).isEqualTo("SUSPENDED");
 
         // Lo que ya salió por ella se sigue conciliando: la cuenta no desaparece.
         ResponseEntity<Map> g = rest.exchange("/api/v1/bank-accounts/" + id,
-                HttpMethod.GET, new HttpEntity<>(comoRol("AUDITOR")), Map.class);
+                HttpMethod.GET, new HttpEntity<>(asRole("AUDITOR")), Map.class);
         assertThat(g.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(g.getBody().get("status")).isEqualTo("SUSPENDED");
     }

@@ -57,21 +57,21 @@ public class CustomerIdentityResolver {
         if (hit != null && !hit.isExpired()) {
             return Optional.ofNullable(hit.identity());
         }
-        return Optional.ofNullable(consultar(prospectId));
+        return Optional.ofNullable(query(prospectId));
     }
 
-    private CustomerIdentity consultar(UUID prospectId) {
-        OriginationClient.ProspectDetail prospecto = originationClient.getProspect(prospectId);
-        if (prospecto == null) {
+    private CustomerIdentity query(UUID prospectId) {
+        OriginationClient.ProspectDetail prospect = originationClient.getProspect(prospectId);
+        if (prospect == null) {
             cache.put(prospectId, new Cached(null, Instant.now().plus(TTL_NEG)));
             return null;
         }
         var identity = new CustomerIdentity(
                 partyId(prospectId),
-                nombre(prospecto.firstName(), prospecto.lastName1(), prospecto.lastName2()),
-                prospecto.curp(),
-                prospecto.email(),
-                prospecto.phone());
+                name(prospect.firstName(), prospect.lastName1(), prospect.lastName2()),
+                prospect.curp(),
+                prospect.email(),
+                prospect.phone());
         cache.put(prospectId, new Cached(identity, Instant.now().plus(TTL)));
         return identity;
     }
@@ -92,7 +92,7 @@ public class CustomerIdentityResolver {
         }
     }
 
-    static String nombre(String firstName, String lastName1, String lastName2) {
+    static String name(String firstName, String lastName1, String lastName2) {
         String completo = java.util.stream.Stream.of(firstName, lastName1, lastName2)
                 .filter(s -> s != null && !s.isBlank())
                 .reduce((a, b) -> a + " " + b)

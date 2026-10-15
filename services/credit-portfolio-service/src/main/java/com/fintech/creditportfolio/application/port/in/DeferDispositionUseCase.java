@@ -20,5 +20,5 @@ public interface DeferDispositionUseCase {
         public NoSePuedeDiferirException(String motivo) { super(motivo); }
     }
 
-    void diferir(DiferirCompra cmd);
+    void defer(DiferirCompra cmd);
 }

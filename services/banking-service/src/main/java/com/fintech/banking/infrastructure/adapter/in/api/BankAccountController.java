@@ -19,33 +19,33 @@ import java.util.UUID;
 @RequestMapping("/api/v1/bank-accounts")
 class BankAccountController {
 
-    private final ManageBankAccountsUseCase cuentas;
+    private final ManageBankAccountsUseCase accounts;
 
-    BankAccountController(ManageBankAccountsUseCase cuentas) { this.cuentas = cuentas; }
+    BankAccountController(ManageBankAccountsUseCase accounts) { this.accounts = accounts; }
 
     @PostMapping
-    ResponseEntity<BankAccountResponse> alta(@Valid @RequestBody CreateBankAccountRequest req) {
+    ResponseEntity<BankAccountResponse> register(@Valid @RequestBody CreateBankAccountRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(BankAccountResponse.de(cuentas.alta(req.aComando())));
+                .body(BankAccountResponse.from(accounts.register(req.aComando())));
     }
 
     @GetMapping("/{id}")
-    BankAccountResponse consultar(@PathVariable UUID id) {
-        return BankAccountResponse.de(cuentas.consultar(id));
+    BankAccountResponse query(@PathVariable UUID id) {
+        return BankAccountResponse.from(accounts.query(id));
     }
 
     @GetMapping
-    List<BankAccountResponse> listar(@RequestParam(required = false) UUID companyId) {
-        return cuentas.listar(companyId).stream().map(BankAccountResponse::de).toList();
+    List<BankAccountResponse> list(@RequestParam(required = false) UUID companyId) {
+        return accounts.list(companyId).stream().map(BankAccountResponse::from).toList();
     }
 
     @PostMapping("/{id}/suspend")
     BankAccountResponse suspender(@PathVariable UUID id) {
-        return BankAccountResponse.de(cuentas.suspender(id));
+        return BankAccountResponse.from(accounts.suspender(id));
     }
 
     @PostMapping("/{id}/reactivate")
-    BankAccountResponse reactivar(@PathVariable UUID id) {
-        return BankAccountResponse.de(cuentas.reactivar(id));
+    BankAccountResponse reactivate(@PathVariable UUID id) {
+        return BankAccountResponse.from(accounts.reactivate(id));
     }
 }

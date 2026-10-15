@@ -45,7 +45,7 @@ class FullIdentityPersistenceIT {
 
     @Autowired AuditService auditService;
 
-    private static AccessAuditCommand acceso(String partyId) {
+    private static AccessAuditCommand accessEvent(String partyId) {
         return new AccessAuditCommand(
                 "VIEW",
                 "77777777-8888-4999-8aaa-bbbbbbbbbbbb",
@@ -64,7 +64,7 @@ class FullIdentityPersistenceIT {
     void persiste_yReleeLaIdentidadCompletaDeQuienActuaYDeQuienEsActuado() {
         String partyId = UUID.randomUUID().toString();
 
-        UUID entryId = auditService.recordAccess(acceso(partyId)).getEntryId();
+        UUID entryId = auditService.recordAccess(accessEvent(partyId)).getEntryId();
         var leida = auditService.findById(entryId);
 
         // Quién actuó, identificado plenamente

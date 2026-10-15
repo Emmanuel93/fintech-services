@@ -21,7 +21,7 @@ import java.util.List;
  * <pre>{@code
  * @SpringBootTest
  * class MiFlujoIT extends AbstractIntegrationTest {
- *     @Override protected List<String> esquemas() { return List.of("closing"); }
+ *     @Override protected List<String> schemas() { return List.of("closing"); }
  * }
  * }</pre>
  *
@@ -36,7 +36,7 @@ public abstract class AbstractIntegrationTest {
     protected JdbcTemplate jdbcTemplate;
 
     @DynamicPropertySource
-    static void infraestructura(DynamicPropertyRegistry registry) {
+    static void infrastructure(DynamicPropertyRegistry registry) {
         registry.add("spring.datasource.url",      SharedContainers.POSTGRES::getJdbcUrl);
         registry.add("spring.datasource.username", SharedContainers.POSTGRES::getUsername);
         registry.add("spring.datasource.password", SharedContainers.POSTGRES::getPassword);
@@ -55,7 +55,7 @@ public abstract class AbstractIntegrationTest {
      * <p>Se declara y no se deduce: una prueba que sólo lee no necesita pagar el truncado, y una
      * que escribe en dos esquemas tiene que decirlo.
      */
-    protected List<String> esquemas() {
+    protected List<String> schemas() {
         return List.of();
     }
 
@@ -73,23 +73,23 @@ public abstract class AbstractIntegrationTest {
      *
      * <p>Por eso se declara aquí, en la prueba, que es quien sabe qué sembró su changelog.
      */
-    protected List<String> preservar() {
+    protected List<String> preserve() {
         return List.of();
     }
 
     @BeforeEach
-    void limpiarEsquema() {
-        if (jdbcTemplate == null || esquemas().isEmpty()) {
+    void truncateSchema() {
+        if (jdbcTemplate == null || schemas().isEmpty()) {
             return;
         }
-        for (String esquema : esquemas()) {
-            List<String> tablas = jdbcTemplate.queryForList("""
+        for (String esquema : schemas()) {
+            List<String> tables = jdbcTemplate.queryForList("""
                     SELECT table_name FROM information_schema.tables
                      WHERE table_schema = ? AND table_type = 'BASE TABLE'
                     """, String.class, esquema);
 
-            List<String> conservar = preservar().stream().map(String::toLowerCase).toList();
-            String objetivo = tablas.stream()
+            List<String> conservar = preserve().stream().map(String::toLowerCase).toList();
+            String objetivo = tables.stream()
                     .filter(t -> !INTOCABLES.contains(t.toLowerCase()))
                     .filter(t -> !conservar.contains(t.toLowerCase()))
                     .map(t -> esquema + "." + t)

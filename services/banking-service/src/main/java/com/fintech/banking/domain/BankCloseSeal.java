@@ -63,10 +63,10 @@ public class BankCloseSeal {
 
     protected BankCloseSeal() {}
 
-    public static BankCloseSeal calcular(UUID bankAccountId, LocalDate businessDate,
+    public static BankCloseSeal calculate(UUID bankAccountId, LocalDate businessDate,
                                          String periodType, BigDecimal saldoContable,
                                          BigDecimal saldoDelBanco, BigDecimal partidas,
-                                         int lineas, int cruzadas) {
+                                         int lines, int cruzadas) {
         BankCloseSeal s = new BankCloseSeal();
         s.id            = UUID.randomUUID();
         s.bankAccountId = bankAccountId;
@@ -77,7 +77,7 @@ public class BankCloseSeal {
         s.suspenseTotal = partidas;
         // saldo contable + partidas − saldo del banco. Cero = cuadra.
         s.difference    = saldoContable.add(partidas).subtract(saldoDelBanco);
-        s.lineCount     = lineas;
+        s.lineCount     = lines;
         s.matchedCount  = cruzadas;
         s.sealedAt      = OffsetDateTime.now();
         return s;

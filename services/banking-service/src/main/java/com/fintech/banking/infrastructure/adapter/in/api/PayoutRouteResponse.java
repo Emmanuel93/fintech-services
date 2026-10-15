@@ -16,7 +16,7 @@ public record PayoutRouteResponse(UUID payoutRouteId,
                                   int priority,
                                   boolean enabled) {
 
-    static PayoutRouteResponse de(PayoutRoute r) {
+    static PayoutRouteResponse from(PayoutRoute r) {
         return new PayoutRouteResponse(r.getId(), r.getCompanyId(), r.getRail(), r.getProvider(),
                 r.getBankAccountId(), r.getMinAmount(), r.getMaxAmount(), r.getPriority(),
                 r.isEnabled());

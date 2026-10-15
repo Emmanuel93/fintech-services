@@ -12,8 +12,9 @@ Este README es el **documento único de arquitectura y proceso** (incluye la dec
 
 1. [Decisión de arquitectura](#1-decisión-de-arquitectura)
 2. [API Gateway — capa de entrada](#2-api-gateway--capa-de-entrada)
-3. [Servicios (26 + gateway + observabilidad) — estado](#3-servicios-26--gateway--observabilidad--estado)
+3. [Servicios (27 + gateway + observabilidad) — estado](#3-servicios-27--gateway--observabilidad--estado)
 4. [El proceso de adquisición end-to-end](#4-el-proceso-de-adquisición-end-to-end)
+   · [4.b Los controles de KYC y AML](#4b--los-controles-de-kyc-y-aml)
 5. [Comunicación entre servicios](#5-comunicación-entre-servicios)
 6. [Máquina de estados — CreditApplication](#6-máquina-de-estados--creditapplication)
 7. [Base de datos](#7-base-de-datos)
@@ -260,7 +261,7 @@ Doc completa: [services/gateway-service/README.md](services/gateway-service/READ
 
 ---
 
-## 3. Servicios (26 + gateway + observabilidad) — estado
+## 3. Servicios (27 + gateway + observabilidad) — estado
 
 > **Puertos:** en Docker **todos los servicios de dominio corren en `:8080` internos** y se direccionan por nombre (`http://<servicio>:8080`); sólo el gateway (`:8080→host`), `channel-mobile` (`:8085`) y `channel-backoffice` (`:8099`) difieren. Los puertos distintos (8081–8101) de la columna son los **defaults de `bootRun`** para desarrollo local sin Docker.
 
@@ -290,6 +291,7 @@ Doc completa: [services/gateway-service/README.md](services/gateway-service/READ
 | D12 | **stp-service** | 8101 | `stp` | ✅ | [README](services/stp-service/README.md) — conector SPEI: cadena original, firma, poller de conciliación; **sin internet, sin webhooks**; backoff+DLT ([dominio](docs/dominios/11_stp_connector_domain.md)) |
 | D14 | **closing-service** | 8103 | `closing` | ✅ | [README](services/closing-service/README.md) — motor de **cierres y cortes**: seis fases por cuenta, reparto entre pods con candado Redis y **sello** del día. Saca el barrido nocturno del pool de cartera ([dominio](docs/dominios/14_closing_domain.md)) |
 | D15 | **banking-service** | 8104 | `banking` | 🔄 | [README](services/banking-service/README.md) — **tesorería**: cuentas propias, **de cuál sale cada pago**, conciliación bancaria y la cadena del dinero consultable en ambos sentidos. No conoce el dominio de crédito ([dominio](docs/dominios/15_banking_domain.md)) |
+| D16 | **compliance-service** | 8105 | `compliance` | 🔄 | [README](services/compliance-service/README.md) — **quién puede operar y quién no**: corre KYC y AML sobre cada persona al alta, mantiene las listas de gobierno cargadas y versionadas, y emite el veredicto que consultan las compuertas de originación y de disposición. Decide; la constancia la lleva `audit` ([brief](docs/BRIEF_CONTROLES_KYC_AML.md)) |
 | T2 | notifications-service | 8098 | `notifications` | ✅ | [README](services/notifications-service/README.md) — comunicaciones multicanal disparadas por eventos (sin `@Scheduled` que revise cuentas) |
 | T4 | accounting-service | 8095 | `accounting` | ✅ | [README](services/accounting-service/README.md) — libro mayor / partida doble; consume balance, comisión, riesgo, wallet |
 | T4b | invoicing-service | 8096 | `invoicing` | ✅ | [README](services/invoicing-service/README.md) — facturación (CFDI); consume `accounting.invoice-requested` y `party.fiscal-profile-updated` |
@@ -371,7 +373,9 @@ desde la UI.
 | `seed-expedientes.py` | Documentos del expediente —INE, comprobantes— de prospectos que ya tienen solicitud |
 | `seed-portfolio.py` | **Clientes, solicitudes y cartera** recorriendo el journey real: OTP → KYC → alta con expediente → solicitud → scoring → oferta → contrato → firma. Reparte los clientes entre los 52 ejecutivos, deja solicitudes vivas en cada estado y atrasa una parte de la cartera para que existan los tres tramos de IFRS-9 |
 | `verifica-identidad-auditoria.py` | **Comprueba la bitácora**: que un rol no-ADMIN deje nombre, CURP y correo; que abrir un expediente registre sobre *quién* se actuó; que el canal móvil se identifique y se atribuya a sí mismo; y que con identity-service caído la consola siga navegando y la entrada se escriba igual |
+| `remedia-verificaciones.py` | **La salida de la cartera que existía antes del control de KYC/AML.** Cruza a cada persona contra las listas vigentes —trabajo real— y reporta el padrón en tres cubetas. **No dictamina identidades**: eso lo firma un analista, y un script firmando por él sería fabricar la evidencia del control |
 | `_identidad.py` | CURP de demostración, derivada del correo para que los seeds sigan siendo idempotentes. No es un seed: lo importan los dos anteriores |
+| `_cumplimiento.py` | Cierra la cola de cumplimiento de la gente que los seeds crean. Sin esto la siembra no siembra nada: la primera solicitud rebota con `PersonNotVerifiedException`. Firma como `siembra-demo` **a propósito**, para que nadie confunda una adjudicación sembrada con una revisión real |
 
 ```bash
 python3 scripts/seed-sales-org.py
@@ -408,8 +412,11 @@ flowchart TB
         A1["POST /api/v1/origination/prospects<br/>{identidad, consentimientos}"] --> A2["origination: Prospect CAPTURED"]
         A2 --> A3(["origination.prospect-created"])
         A3 --> A4["scoring · PREFETCH del buró<br/>guarda el reporte, NO evalúa"]
-        A3 --> A5["party · crea Party PROSPECT"]
+        A3 --> A5["party · crea Party PROSPECT<br/>identidad y listas en PENDING"]
         A3 --> A6["identity · provisiona credenciales<br/>(hashea el password con BCrypt)"]
+        A3 --> A7["compliance · KYC + AML<br/>una vez, sin importar el rol"]
+        A7 --> A8(["compliance.verification-completed"])
+        A8 --> A5
     end
 
     subgraph P2["Paso 2 · Selección de producto"]
@@ -452,6 +459,137 @@ Este paso está **implementado** end-to-end (originación → cartera → desemb
 | **disbursement + stp** | Payout del desembolso vía SPEI y cierre del ciclo | ✅ |
 
 ---
+
+### 4.b · Los controles de KYC y AML
+
+**Toda persona registrada pasa por KYC y AML, una vez, al alta** — uso propio, distribuidor o
+beneficiaria de una línea. El rol sólo cambia *cuándo* ocurre el alta, no *si* se evalúa.
+
+```mermaid
+flowchart LR
+    classDef ok fill:#bbf7d0,stroke:#166534,color:#052e16,font-weight:bold
+    classDef gt fill:#fef08a,stroke:#854d0e,color:#422006,font-weight:bold
+    classDef mo fill:#ddd6fe,stroke:#5b21b6,color:#2e1065,font-weight:bold
+
+    subgraph O["ORIGINAR — una vez"]
+        K["KYC<br/>¿eres quien dices ser?"]:::ok
+        A1["AML<br/>¿estás en listas?"]:::ok
+    end
+    subgraph D["DISPONER — cada vez, durante años"]
+        N["NIP + OTP<br/>¿eres tú ahora?"]:::mo
+        A2["AML<br/>otra vez"]:::mo
+    end
+    O --> D
+    K -.->|"el KYC NO se repite:<br/>es el enrolamiento"| N
+    A1 -.->|"el AML SÍ:<br/>la lista cambia"| A2
+```
+
+| Control | Originación | Disposición | Por qué |
+|---|---|---|---|
+| **KYC** | ✅ una vez | ❌ | Es el **enrolamiento**. Repetir la biometría en cada disposición sería pedir una selfie para sacar dinero de la propia línea cada mes |
+| **Autenticación** | — | ✅ cada vez | Es el **uso**. El KYC ató la identidad a unas credenciales; usarlas es ser esa persona |
+| **AML** | ✅ | ✅ **cada vez** | No depende de la persona sino de la **lista**, y la lista cambia. Alguien limpio al abrir su línea puede estar publicado seis meses después |
+
+Y tres reglas que gobiernan todas las compuertas:
+
+1. **Pendiente bloquea.** No haber comprobado no es haber salido limpio.
+2. **Fallar cerrado.** Si no se puede comprobar, no se avanza — lo contrario es dar crédito o
+   desembolsar sin haber mirado listas porque un servicio estaba caído.
+3. **Siempre hay salida humana.** Un homónimo —el caso común— lo despeja cumplimiento con autor y
+   argumento. Sin esa salida, el control deja de ser una compuerta y se vuelve un muro.
+
+#### Dónde cae cada compuerta, hoy
+
+| Momento | Qué se exige | Dónde está |
+|---|---|---|
+| **Originar** crédito o línea | identidad `VERIFIED` **y** listas `CLEARED` | `CreditApplicationService.start` → `party.isVerificationClear()` |
+| **Dar de alta** a cualquier persona | KYC **y** listas, sin importar el rol: titular de uso propio, responsable de crédito del distribuidor o beneficiaria. La beneficiaria crea su prospecto al cerrar su KYC, así que entra por el mismo evento | `compliance` ← `origination.prospect-created` |
+| **Colocar** a una beneficiaria | identidad verificada **y** listas despejadas — las dos, por responsables distintos | `Placement.approve(riskAck, screening)` |
+| **Disponer** | listas `CLEARED` **de los dos papeles** —quien responde y quien recibe— con veredicto vigente, e identidad no revocada | `CreditAccountService.checkAml` → `PartyVerification.allowsDisposition()` |
+| **Rutear un intent** | no estar en lista negra; y **no poder comprobarlo detiene** | `IntentService` → `PartyStatusUnavailableException` |
+
+**Las dos colas tienen salida.** Adjudicar listas (`POST /verifications/{id}/adjudicate`) y
+dictaminar identidad (`POST /verifications/{id}/identity`), las dos con **autor y argumento
+obligatorios** — son decisiones regulatorias sobre una persona y ninguna se sustenta sin firma.
+
+#### El rastro: cada consulta queda, no sólo el veredicto
+
+El veredicto vigente **se sobrescribe** en cada re-cruce. Eso contesta «¿puede operar hoy?» y no
+contesta lo que pregunta una revisión:
+
+> «El 3 de septiembre le dieron un crédito a esta persona que **hoy** aparece en una lista. ¿La
+> consultaron? ¿Cuándo? ¿Qué decía la lista **ese** día?»
+
+`compliance.screening_checks` guarda **cada consulta** —al alta, en cada re-cruce y bajo demanda— con
+la fecha, el resultado de ese momento, **contra qué versiones de lista** corrió y **con qué datos** se
+consultó. Es **append-only**: sin mutadores y sin un `UPDATE` en todo el servicio.
+
+Tres propiedades que no son accidentales:
+
+1. **Se escribe también cuando nada cambió.** Lo que hay que demostrar es *que se miró*; guardando
+   sólo los cambios, el expediente de la persona más limpia de la cartera estaría vacío.
+2. **`list_versions` vacío significa «no se comprobó nada»**, que no es «salió limpia». Sin ese dato
+   el resultado no es reproducible.
+3. **El motivo de la consulta se guarda** (`ONBOARDING` · `RESCREEN` · `ON_DEMAND`) porque cambia lo
+   que la consulta demuestra.
+
+Se consulta con `GET /verifications/by-prospect/{id}/checks`. Retención: 10 años (LFPIORPI), la misma
+que `audit` ya documenta para registros de AML.
+
+#### Los dos papeles de una disposición, que no son el mismo
+
+**Toda disposición tiene un beneficiario.** Lo que cambia con el producto es quién es — y en un
+producto de distribuidor **nunca** es el titular de la línea:
+
+| Producto | Responsable de la línea | Quien recibe el dinero |
+|---|---|---|
+| Uso propio · nómina | el titular | **el mismo titular** — no es que falte beneficiario, es que es él |
+| Línea de distribuidor | la distribuidora | **la beneficiaria colocada — nunca la distribuidora** |
+
+El AML comprueba **a los dos**, por razones distintas: al receptor porque es a quien se le va a
+pagar, y al responsable porque no tiene sentido mover dinero de la línea de alguien en listas aunque
+el destino sea otra persona. En uso propio los dos papeles caen en la misma persona y se hace una
+sola comprobación. Lo garantizan dos reglas previas: una colocación de distribuidor **exige**
+beneficiaria (`BENEFICIARY_REQUIRED`) y **prohíbe** que sea la propia distribuidora
+(`BENEFICIARY_CANNOT_BE_OBLIGOR`) — sin ellas, una colocación sin beneficiaria pasaría el AML
+mirando sólo a quien no recibe el dinero.
+
+Y la **constancia** se guarda del receptor con la **misma lectura** que usó la compuerta, no con una
+segunda: decidir con un dato y archivar otro haría que el expediente hablara de una comprobación que
+no fue la que ocurrió.
+
+> ⚠️ **Lo que falta, dicho en claro.** La disposición comprueba listas de los dos papeles y **no
+> comprueba autenticación**: `POST /credit/dispose` sólo lleva `X-User-Id`. Quien debe autenticarse
+> es **el responsable de la línea** —el titular en uso propio, la distribuidora en una colocación—,
+> porque es quien autoriza; la beneficiaria recibe, no autoriza. El NIP + OTP del diseño no está
+> construido. Y sin adaptador de Incode/Jumio **toda** identidad va a revisión manual — es el modo
+> vigente y está asumido, pero significa que el 100 % del volumen pasa por un analista.
+
+#### Con qué se cruza: siempre por CURP — incluso donde la lista no lo trae
+
+El cruce es **por CURP** porque es el identificador que una persona tiene desde que nace. El problema
+medido es que **las listas casi nunca lo publican**: `SAT-69B` ni siquiera tiene la columna.
+
+Lo que lo hace posible es que los **diez primeros caracteres del CURP no los asigna nadie**: se
+calculan de los apellidos, el nombre y la fecha de nacimiento. Así que se **derivan** para las
+entradas que no lo traen, en las dos lecturas del orden de apellidos, y se comparan contra la raíz
+del CURP real de la persona.
+
+| Lista | CURP publicado | **Alcance con la raíz derivada** |
+|---|---|---|
+| `OFAC-SDN` | 36.51 % | **76.19 %** |
+| `PEP-MX` | 54.84 % | **77.42 %** |
+| `SAT-69B` | 0.00 % | **0.00 %** — no publica fecha; su documento es el RFC |
+
+La raíz absorbe las variantes de escritura sin umbral que calibrar —`GONZÁLEZ` y `GONZALES` dan la
+misma— y a la vez separa homónimos, porque lleva dentro la fecha de nacimiento exacta. Pero es una
+**hipótesis fuerte, no una identificación**: los caracteres que asigna RENAPO no son derivables. Por
+eso vale menos que un documento y más que un nombre, y el último renglón de la tabla es el que
+justifica publicar el número — sobre `SAT-69B`, «cruzamos por CURP» sería un control apagado.
+
+Detalle en [`docs/BRIEF_CONTROLES_KYC_AML.md`](docs/BRIEF_CONTROLES_KYC_AML.md), el as-is en
+[`docs/ANALISIS_KYC_AML_POR_PERSONA.md`](docs/ANALISIS_KYC_AML_POR_PERSONA.md) y la derivación en el
+[README de compliance](services/compliance-service/README.md).
 
 ## 5. Comunicación entre servicios
 
@@ -552,6 +690,8 @@ Consumidores tomados de los `@KafkaListener` reales del código; los tópicos si
 | `origination.contract-signed` | origination | audit |
 | `origination.credit-product-creation-requested` | origination | credit-portfolio |
 | `origination.application-approved` / `application-rejected` / `documents-requested` | origination | audit |
+| `compliance.verification-completed` | compliance | party · credit-portfolio — el veredicto que consultan las compuertas |
+| `compliance.confirmed-match` | compliance | audit — abre el `UIFReport` con el argumento de quien adjudicó, y lo deja `PENDING` porque alguien tiene que presentarlo |
 | `beneficiary.placement-invited` · `.kyc-started` · `.kyc-completed` · `.bureau-consent-granted` · `.bureau-ready` · `.placement-approved` · `.placement-rejected` · `.placement-disbursing` · `.placement-disbursed` · `.placement-paid-off` · `.placement-expired` · `.placement-cancelled` · `.placement-failed` | beneficiary | *ninguno* — audit **no** los suscribe todavía (ver [audit §2](services/audit-service/README.md#2-tópicos-consumidos-20)) |
 | `notifications.notification-requested` | **cualquier servicio** (hoy **ninguno** lo publica) | notifications |
 | `scoring.scoring-completed` | scoring | origination, audit |
@@ -777,8 +917,19 @@ código que hablará con el buró, el otro permite correr el journey sin él.
 ### El ciclo completo está implementado
 
 Onboarding → scoring → originación → cuenta viva → devengo / pagos / cobranza → desembolso →
-contabilidad, comisiones y auditoría. Los 26 servicios levantan, la siembra de demo corre de punta
-a punta y el backoffice consume el BFF.
+contabilidad, comisiones y auditoría. Los 26 servicios levantan y el backoffice consume el BFF.
+
+`compliance-service` (D16) es el vigesimoséptimo: **138 pruebas propias**, 30 contra Postgres real,
+y ya consume el alta de personas y publica veredictos. **Todavía no se ha levantado dentro del stack
+completo**, así que no entra en esa cuenta hasta que se verifique.
+
+> ⚠️ **La siembra de demo cambió con D16, y hay que decirlo.** Desde que las compuertas exigen
+> veredicto, un script que crea personas tiene que **cerrar su cola de cumplimiento** o la primera
+> solicitud rebota: `seed-portfolio.py` y `seed-distribuidoras.py` ya lo hacen vía
+> [`_cumplimiento.py`](scripts/_cumplimiento.py), firmando como `siembra-demo` para que nadie
+> confunda una adjudicación sembrada con una revisión real. **Esto está verificado por trazado de
+> código, no por una corrida del stack completo** — mientras no se corra, la frase «la siembra corre
+> de punta a punta» no está comprobada para el camino de alta.
 
 ### Las tres piezas que están a medias, y en qué exactamente
 
@@ -811,6 +962,31 @@ Las dos ausencias son deliberadas —el sistema no inventa canal ni texto— per
 Cerrarlo es sembrar filas, no escribir código. Detalle por tópico y por clave en el
 [README de notifications](services/notifications-service/README.md).
 
+### Convención de idioma
+
+> **Todo el código se escribe en inglés.** Clases, métodos, campos, enums, pruebas, tópicos y claves
+> de configuración.
+
+Tres excepciones, y ninguna es negociable:
+
+1. **Contratos de proveedores externos** — los DTO de STP conservan `claveRastreo` y `conceptoPago`
+   porque son los nombres del contrato de STP. Renombrarlos no ordena nada: **rompe el pago**.
+2. **Términos regulatorios sin equivalente** — `CLABE`, `CURP`, `RFC`, `CEP`, `cadena original`.
+   Traducir `CLABE` lo haría *menos* claro para quien concilia contra un estado de cuenta.
+3. **Comentarios y documentación**, que van en español y llevan el razonamiento.
+
+La distinción es deliberada: **los identificadores los leen las herramientas y los desconocidos;
+los comentarios los lee el equipo.** Un nombre tiene que ser encontrable; una explicación, entendible.
+
+Detalle y guía de migración —incluido qué renombres fallan en silencio— en
+[`docs/CONVENCION_IDIOMA.md`](docs/CONVENCION_IDIOMA.md).
+
+**Dónde va la migración.** Clases, métodos, variables locales, paquetes de prueba, constantes de
+enum y variables de plantilla: **en inglés**. Lo que sigue en español es deliberado o está
+bloqueado, y cada caso está dicho: los contratos de STP y Círculo (excepción 1), los **35 campos JPA
+sin `@Column`** —que hay que anotar antes de tocar—, las **claves JSON del BFF de backoffice**, cuyo
+consumidor no vive en este repo (deuda 14), y los comentarios (excepción 3).
+
 ### Deuda conocida, con su razón
 
 1. ~~**Camino wallet `THIRD_PARTY` de desembolso (2B.2)**~~ — **cerrada (BK-11…BK-14).** Cartera
@@ -842,6 +1018,44 @@ Cerrarlo es sembrar filas, no escribir código. Detalle por tópico y por clave 
    Ahora el fixture se ancla al **mismo comienzo de día que usa la consulta**. Verificado dentro de
    la ventana: con el fixture viejo falla, con el nuevo pasa.
 
+4.b ~~**`OtorgamientoMasivoTest` pasaba por un día de margen**~~ — **cerrada, y es la tercera de la
+   misma familia.** «El apoyo deja el DPD en CERO» afirmaba un resultado que depende de `hoy` sobre
+   un calendario **literal**: `PRIMERA = 2026-06-15`, el apoyo corre tres períodos, así que el primer
+   vencimiento quedaba el 15 de septiembre — y la prueba se escribió el **14**. Empezó a fallar al
+   día siguiente, sin que nada cambiara en el código: lo que cambió fue la fecha.
+
+   No era un fallo de producción. `recalculateDpd` usa `LocalDate.now()` **con razón** —el DPD es un
+   dato del calendario real—; lo que estaba mal era fijar el calendario en el pasado y afirmar una
+   consecuencia de hoy. Ahora `PRIMERA` se ancla a `now().minusMonths(2)`, con lo que el escenario
+   —vencimientos atrasados que el apoyo corre hasta el futuro— se sostiene el día que se corra, con
+   un mes de margen en vez de uno de día.
+
+   **El patrón, que es lo que vale:** una fecha literal en un fixture es una bomba de tiempo si
+   alguna aserción depende de `now()`. Las tres veces el síntoma fue el mismo —«falla y nadie tocó
+   nada»— y la causa estaba en el fixture, no en el reloj de producción.
+
+4.c ~~**`AccrualIdempotencyIT` fallaba según lo que tuvieras levantado**~~ — **cerrada, y destapó
+   algo más grande.** Fallaba en dos de cada tres corridas completas, con tiempos absurdos (120 s,
+   300 s, 480 s — múltiplos de 60) y `expected: 1 but was: 0`. Durante un rato lo llamé «flaky por
+   carga», y no era eso.
+
+   No tenía `@EmbeddedKafka`, así que `spring.kafka.bootstrap-servers` se quedaba en
+   `localhost:9092` — que en esta máquina es **el broker real de docker-compose** cuando el stack
+   está arriba, el estado normal mientras alguien trabaja. Ese broker se anuncia como `kafka:9092`,
+   que sólo resuelve dentro de la red de Docker: el productor conecta, pide metadatos, no resuelve
+   el host que le contestan y **se bloquea `max.block.ms` = 60 s por envío**. De ahí los múltiplos.
+   Pasaba sólo cuando **nada** escuchaba en el 9092. Con el broker embebido: **10 segundos y verde**,
+   contra 26 minutos.
+
+   **Y lo que destapó, que no es de la prueba:** al agotarse, `send(...)` lanza **de forma síncrona
+   dentro de la transacción del devengo** y el cargo se revierte. El publicador maneja con cuidado
+   las fallas *asíncronas* —las registra y se las traga— y deja la ruta síncrona desnuda, así que
+   «el broker está lento» no degrada en «se perdió un evento»: escala a **«no se devengó el
+   interés»**. Las dos rutas eligen cosas opuestas y ninguna es claramente la buena — el rollback es
+   recuperable, tragarse la falla divergente e irrecuperable. Está analizado en el
+   [README de charges §6](services/charges-service/README.md); la respuesta correcta es un outbox
+   para `charges`, y hasta entonces se queda escrito en vez de resuelto a medias.
+
 5. ~~**Los $8 250 de interés duplicado siguen en el mayor**~~ — **ya no existen.** La base se
    recreó desde cero y los cargos duplicados eran datos, no código. Lo que impedía que volvieran
    —el índice único de idempotencia del devengo— sí es código y sigue puesto: sobre base limpia
@@ -871,6 +1085,100 @@ Cerrarlo es sembrar filas, no escribir código. Detalle por tópico y por clave 
    se relee cada cinco minutos, así que cualquier desfase se cierra solo. El respaldo en código
    cubría «identity no contesta»; no cubría «identity contesta a medias», que es peor porque una
    foto parcial se parece a una completa.
+
+10. 🔴 **Un prefetch de buró fallido no se reintenta nunca.** `ScoreRequestedEventListener` sí
+   reintenta —cinco intentos con 600 ms— pero está diseñado para una **carrera**, no para un
+   **fallo**: tres segundos cubren «el prefetch va en camino», y no hacen nada si terminó en
+   `FAILED` durante el onboarding. Agotados los cinco, se registra un `WARN`, el mensaje se consume
+   y la solicitud queda en `PENDING_SCORING` sin dueño. El `TODO` del código lo nombra: *«prefetch
+   on-demand / reintento»*. Detalle en [`AS_IS_PROVEEDORES.md`](docs/AS_IS_PROVEEDORES.md) §3.
+
+11. 🔴 **La plataforma no es operable todavía, y no es cuestión de mocks.** Medido:
+   **0 consumidores de DLT · 0 endpoints de reproceso · 0 alertas de negocio con destinatario ·
+   0 runbooks.** Durante la revisión hubo que reponer una DLT a mano con `kafka-console-producer`,
+   reparar 16 CLABE con `UPDATE` y resetear filas del outbox: eso no es operación, es un ingeniero
+   con una consola. Los tres defectos más caros de la rama fueron **silenciosos**; el cuarto se vio
+   en minutos, y la única diferencia era que el outbox sí dejaba rastro y reintentaba. Análisis y
+   orden propuesto en [`ANALISIS_OPERAR_CON_MOCKS.md`](docs/ANALISIS_OPERAR_CON_MOCKS.md).
+
+12. **Un proveedor de ocho se comporta como un proveedor.** Sólo `StubStpGateway` tiene escenarios
+   —once, incluido fallar—. El resto siempre dice que sí: la firma electrónica es `return true`
+   sobre lo único que hace exigible un contrato, y los tres canales de aviso **registran como
+   entregado** lo que no salió. La regla D5 del plan decía *«nunca hay un camino que confirme y
+   ya»*; se cumplió en uno.
+
+13. **Dos plantillas de aviso al personal no las dispara nadie, y su texto no se completaría.**
+   `STAFF_DOCUMENTOS_RECIBIDOS` y `STAFF_SOLICITUD_RESUELTA` están sembradas en
+   `013-seed-backoffice-policies.sql` y **ningún servicio emite esos `event_key`**. Si algún día
+   alguien los emite, el mensaje sale roto: usan `{{solicitud}}` y `{{resultado}}`, que nadie
+   define, y `NotificationTemplate.render` **deja el placeholder crudo cuando falta la variable**
+   —así que el empleado leería literalmente *«La solicitud de Ana quedó {{resultado}}»*.
+   Se detectó cruzando los placeholders de las plantillas contra las variables que el código
+   escribe; no hay prueba que lo vigile.
+
+14. **Las claves JSON del BFF de backoffice siguen en español y no se pueden renombrar desde aquí.**
+   `BackofficeViews` y `AccountingController` arman la respuesta con `tasaAnual`, `plazoMeses`,
+   `tipoProspecto`, `folioFiscal`, `carteraVencida`. El consumidor es el front del backoffice, que
+   **no vive en este repo**: renombrarlas compila, pasa las 2 046 pruebas y rompe la pantalla.
+   Queda hasta que se coordine con ese código. Detalle en [`docs/CONVENCION_IDIOMA.md`](docs/CONVENCION_IDIOMA.md).
+
+19. **`amlRequired` sigue sin gobernar nada, aunque el AML ya exista.**
+   F3b la añadió a `Capabilities.kyc`, se sembró en `true` para los nueve productos y viaja del
+   catálogo a `beneficiary`. **Ahí muere**: la compuerta sólo consulta
+   `attemptsProvider() = kycRequired && automationEnabled && hasProvider()`, y `amlRequired` no se
+   evalúa en ningún punto. No le falta un adaptador: hasta `compliance-service` (D16) **no había
+   nada de AML** — `blacklistParty` recibía un `sourceList` que nunca consultaba, `UIFReport` no
+   tenía escritor, y no había screening contra ninguna lista. **Eso ya está**: D16 carga las listas,
+   cruza, emite veredicto, y las compuertas de originación, colocación y disposición lo exigen.
+   Lo que queda es menor y conviene no olvidarlo: el AML se aplica **siempre**, sin consultar la
+   bandera, así que `amlRequired=false` en un producto no tiene efecto. Es la polaridad segura, pero
+   una bandera que no gobierna nada hay que quitarla o hacerla gobernar —tenerla ahí sugiere que
+   alguien puede apagar el AML por configuración, y no puede. Análisis en
+   [`docs/ANALISIS_KYC_AML_POR_PERSONA.md`](docs/ANALISIS_KYC_AML_POR_PERSONA.md).
+
+20. ~~**El único control de listas que existe hoy falla ABIERTO**~~ — **cerrada.** `channels-service`
+   ya **detiene** el intent cuando no puede comprobar: el `catch (Exception)` que registraba un
+   `WARN` y continuaba ahora lanza `PartyStatusUnavailableException` (`IntentService.java:88-95`).
+   Y distingue dos cosas que antes se confundían: **«no sé»** rechaza el ruteo y es reintentable;
+   **«está en lista negra»** abandona el intent con motivo. Lo fija
+   `BlacklistCheckFailsClosedTest`.
+
+21. ~~**`ProspectType.DISTRIBUTOR` es una trampa armada**~~ — **desarmada.** `party` ya no convierte
+   sin red: un `prospectType` que `PartyType` no tenga **crea la persona igual**, como
+   `INDIVIDUAL`, y lo grita en el log. `DISTRIBUTOR` cae ahí a propósito y con el mapeo correcto —un
+   distribuidor es **persona física con actividad empresarial**, y su condición es un **rol**, no un
+   tipo de persona (I-03)—; mandarlo a `BUSINESS` habría sido un error peor que el crash, porque no
+   falla: produce datos equivocados en silencio. Y no crear la persona también sería peor, porque sin
+   fila en `party` no hay ficha ni veredicto y la persona queda bloqueada en todo sin explicación.
+   Lo fija `ProspectTypeDoesNotCrashPartyTest`. **Lo que sigue abierto es que party corre sin DLT** —
+   ver deuda 11.
+
+15. ~~**«El mismo KYC/AML para todos los registrados» todavía no es cierto**~~ — **cerrada.**
+   `origination` ya tiene compuerta: `CreditApplicationService.start(...)` consulta el veredicto de
+   la persona y **falla cerrado** —si party no contesta, el veredicto que llega bloquea—, y
+   `beneficiary` dejó de aprobar con sólo su propio dictamen de identidad:
+   `Placement.approve(...)` exige ahora **también** listas despejadas, que era la otra mitad de la
+   regla. El veredicto lo produce `compliance` (D16) una vez por persona, colgado del mismo
+   `origination.prospect-created` por el que pasan los cuatro caminos de alta.
+   **Lo que sigue abierto es río abajo, no aquí**: la disposición comprueba listas y no comprueba
+   autenticación — ver [`BRIEF_CONTROLES_KYC_AML.md`](docs/BRIEF_CONTROLES_KYC_AML.md) §5.
+
+16. **Hay dos modelos de KYC en `party`, y sólo uno está vivo.** El nuevo —`identity_status` y
+   `screening_status` en `parties`, alimentados por `compliance.verification-completed`— es el que
+   consultan todas las compuertas. El viejo —`party.kyc_verifications`, su repositorio, su DTO y
+   `PUT /parties/{id}/kyc-status`— **sigue sin que ningún flujo lo escriba**: sus únicos invocadores
+   son pruebas, y `KycVerification.verifyWithProvider(...)` no tiene llamadores de producción.
+   No rompe nada, pero es superficie que *parece* el modelo canónico y no lo es. Toca decidir si se
+   migra el histórico y se borra, o se deja como expediente documental de F3.
+
+17. **Dos eventos de KYC se publican y nadie los escucha.** `beneficiary.kyc-started` y
+   `beneficiary.kyc-completed` salen en cada transición y no tienen un solo `@KafkaListener`.
+   Es el mismo patrón que dejó tres listeners muertos y 42 tópicos huérfanos.
+
+18. **El riel de KYC de la app móvil no persiste ni autentica.** La sesión de `POST /kyc/submit`
+   vive en un `ConcurrentHashMap` —se pierde en cada reinicio— el endpoint es `permitAll()` y el
+   `preAuthToken` que emite `/otp/verify` **no se valida** (el propio código lo comenta).
+   `/ocr/extract` devuelve datos fijos.
 
 ### Cómo se verifica
 

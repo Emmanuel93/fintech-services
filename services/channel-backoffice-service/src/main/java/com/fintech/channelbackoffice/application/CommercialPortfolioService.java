@@ -84,12 +84,12 @@ public class CommercialPortfolioService {
         Set<UUID> deDistribuidor = cuentasDeDistribuidor == null ? Set.of() : cuentasDeDistribuidor;
         // 1. El árbol: cada unidad con su padre, para poder subir los montos.
         Map<UUID, UUID> padreDe = new LinkedHashMap<>();
-        Map<UUID, String> nombreDe = new LinkedHashMap<>();
+        Map<UUID, String> nameOf = new LinkedHashMap<>();
         for (Map<String, Object> u : safe(salesOrgClient.subtree(unitId))) {
             UUID id = uuid(u.get("unitId"));
             if (id == null) continue;
             padreDe.put(id, uuid(u.get("parentUnitId")));
-            nombreDe.put(id, String.valueOf(u.getOrDefault("name", "")));
+            nameOf.put(id, String.valueOf(u.getOrDefault("name", "")));
         }
 
         // 2. Quién está en qué unidad. Un empleado, una unidad vigente.
@@ -101,14 +101,14 @@ public class CommercialPortfolioService {
             if (staff != null && unidad != null) unidadDe.putIfAbsent(staff, unidad);
         }
         if (unidadDe.isEmpty()) {
-            return Rollup.vacio(unitId);
+            return Rollup.empty(unitId);
         }
 
         // 3. Los clientes con ejecutivo. Se piden todos de una vez y se filtran aquí: una
         //    consulta por ejecutivo serían cincuenta y dos peticiones para armar una pantalla.
         Map<UUID, UUID> ejecutivoDeObligado = new LinkedHashMap<>();
         try {
-            for (var p : todasLasPaginas(pag -> {
+            for (var p : allPages(pag -> {
                 var r = partyClient.search(null, null, null, null, pag, PAGINA, "createdAt,desc");
                 return r == null ? null : r.content();
             })) {
@@ -119,25 +119,25 @@ public class CommercialPortfolioService {
             }
         } catch (Exception ex) {
             log.warn("Sin clientes para el rollup de {}: {}", unitId, ex.getMessage());
-            return Rollup.vacio(unitId);
+            return Rollup.empty(unitId);
         }
         if (ejecutivoDeObligado.isEmpty()) {
-            return Rollup.vacio(unitId);
+            return Rollup.empty(unitId);
         }
 
         // 4. Las cuentas de esos obligados. Por `search(partyIds)` y no por `batch`: aquélla
         //    busca por id de **cuenta** y aquí lo que se tiene son ids de obligado. Pasarle los
         //    segundos devuelve una lista vacía sin error, que es la peor forma de equivocarse.
-        List<CreditAccountResponse> cuentas;
+        List<CreditAccountResponse> accounts;
         try {
-            cuentas = todasLasPaginas(pag -> {
+            accounts = allPages(pag -> {
                 var r = creditPortfolioClient.search(null, null, null, null, null,
                         ejecutivoDeObligado.keySet(), pag, PAGINA, "createdAt,desc");
                 return r == null ? null : r.content();
             });
         } catch (Exception ex) {
             log.warn("Sin cartera para el rollup de {}: {}", unitId, ex.getMessage());
-            return Rollup.vacio(unitId);
+            return Rollup.empty(unitId);
         }
 
         // 5. Cada cuenta suma en su ejecutivo, en su unidad y en cada ancestro hasta la raíz
@@ -147,19 +147,19 @@ public class CommercialPortfolioService {
         Map<UUID, Monto> porEjecutivo = new LinkedHashMap<>();
         Monto total = new Monto();
 
-        for (CreditAccountResponse c : cuentas) {
+        for (CreditAccountResponse c : accounts) {
             if (!"ACTIVE".equals(c.status()) && !"DELINQUENT".equals(c.status())) continue;
             UUID ejecutivo = ejecutivoDeObligado.get(c.obligorPartyId());
             if (ejecutivo == null) continue;
 
             boolean deTercero = deDistribuidor.contains(c.creditAccountId());
-            total.suma(c, deTercero);
-            porEjecutivo.computeIfAbsent(ejecutivo, k -> new Monto()).suma(c, deTercero);
+            total.sum(c, deTercero);
+            porEjecutivo.computeIfAbsent(ejecutivo, k -> new Monto()).sum(c, deTercero);
 
             UUID unidad = unidadDe.get(ejecutivo);
             int guarda = 0;   // el árbol no debería tener ciclos; si los tuviera, esto no cuelga
             while (unidad != null && guarda++ < 20) {
-                porUnidad.computeIfAbsent(unidad, k -> new Monto()).suma(c, deTercero);
+                porUnidad.computeIfAbsent(unidad, k -> new Monto()).sum(c, deTercero);
                 if (unidad.equals(unitId)) break;
                 unidad = padreDe.get(unidad);
             }
@@ -170,11 +170,11 @@ public class CommercialPortfolioService {
         padreDe.forEach((id, padre) -> {
             if (!unitId.equals(padre)) return;
             Monto m = porUnidad.getOrDefault(id, new Monto());
-            Map<String, Object> fila = new LinkedHashMap<>();
-            fila.put("unitId", id.toString());
-            fila.put("name", nombreDe.getOrDefault(id, ""));
-            fila.putAll(m.asMap());
-            hijos.add(fila);
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("unitId", id.toString());
+            row.put("name", nameOf.getOrDefault(id, ""));
+            row.putAll(m.asMap());
+            hijos.add(row);
         });
         hijos.sort((a, b) -> new BigDecimal(String.valueOf(b.get("principal")))
                 .compareTo(new BigDecimal(String.valueOf(a.get("principal")))));
@@ -203,23 +203,23 @@ public class CommercialPortfolioService {
      * solo número esa diferencia desaparece justo donde hay que decidir.
      */
     private static final class Monto {
-        private int cuentas;
+        private int accounts;
         private int cuentasVencidas;
         private BigDecimal principal = BigDecimal.ZERO;
-        private BigDecimal vencido = BigDecimal.ZERO;
+        private BigDecimal overdue = BigDecimal.ZERO;
         private BigDecimal atrasoTemprano = BigDecimal.ZERO;
         private BigDecimal sano = BigDecimal.ZERO;
         private BigDecimal devengado = BigDecimal.ZERO;
         private BigDecimal moratorios = BigDecimal.ZERO;
-        private BigDecimal exigibleVencido = BigDecimal.ZERO;
+        private BigDecimal overdueAmountDue = BigDecimal.ZERO;
         private BigDecimal aCobrar = BigDecimal.ZERO;
         private int cuentasDistribuidor;
         private BigDecimal principalDistribuidor = BigDecimal.ZERO;
 
-        void suma(CreditAccountResponse c, boolean porDistribuidor) {
-            cuentas++;
-            BigDecimal saldo = nz(c.principalBalance());
-            principal = principal.add(saldo);
+        void sum(CreditAccountResponse c, boolean porDistribuidor) {
+            accounts++;
+            BigDecimal balance = nz(c.principalBalance());
+            principal = principal.add(balance);
             // Interés ya devengado que todavía no entra a caja. Es ingreso reconocido y no
             // cobrado: crece solo con el tiempo y es lo primero que se pierde si la cuenta cae.
             devengado = devengado.add(nz(c.accruedInterestBalance()));
@@ -227,7 +227,7 @@ public class CommercialPortfolioService {
             // Lo exigible que ya se pasó de fecha, que no es lo mismo que el capital expuesto:
             // una cuenta de cien mil con una mensualidad vencida de tres mil debe tres mil hoy y
             // expone cien mil al riesgo. Cobranza persigue lo primero; riesgo mide lo segundo.
-            exigibleVencido = exigibleVencido.add(nz(c.overdueAmount()));
+            overdueAmountDue = overdueAmountDue.add(nz(c.overdueAmount()));
             aCobrar = aCobrar.add(nz(c.minimumPayment()));
 
             // ── Escala IFRS-9 / CNBV, la misma que el tablero global ──────────────────────
@@ -238,50 +238,50 @@ public class CommercialPortfolioService {
             int dpd = c.daysDelinquent();
             if (dpd > 90) {
                 cuentasVencidas++;
-                vencido = vencido.add(saldo);
+                overdue = overdue.add(balance);
             } else if (dpd > 30) {
-                atrasoTemprano = atrasoTemprano.add(saldo);
+                atrasoTemprano = atrasoTemprano.add(balance);
             } else {
-                sano = sano.add(saldo);
+                sano = sano.add(balance);
             }
 
             if (porDistribuidor) {
                 cuentasDistribuidor++;
-                principalDistribuidor = principalDistribuidor.add(saldo);
+                principalDistribuidor = principalDistribuidor.add(balance);
             }
         }
 
         Map<String, Object> asMap() {
-            BigDecimal mora = pct(vencido, principal);
+            BigDecimal delinquency = pct(overdue, principal);
             BigDecimal p = principal.setScale(2, RoundingMode.HALF_UP);
             BigDecimal d = devengado.setScale(2, RoundingMode.HALF_UP);
             BigDecimal mor = moratorios.setScale(2, RoundingMode.HALF_UP);
             Map<String, Object> m = new LinkedHashMap<>();
-            m.put("accounts", cuentas);
+            m.put("accounts", accounts);
             m.put("delinquentAccounts", cuentasVencidas);
             m.put("principal", p);
             // `overdue` conserva el nombre porque es lo que ya consume la consola, pero su
             // contenido pasa a ser la cartera vencida **oficial** (90+). Renombrarlo habría
             // dejado dos campos con nombres parecidos y significados distintos conviviendo en
             // la misma respuesta, que es peor que un nombre imperfecto.
-            m.put("overdue", vencido.setScale(2, RoundingMode.HALF_UP));
-            m.put("delinquencyRate", mora);
+            m.put("overdue", overdue.setScale(2, RoundingMode.HALF_UP));
+            m.put("delinquencyRate", delinquency);
             m.put("earlyArrears", atrasoTemprano.setScale(2, RoundingMode.HALF_UP));
             m.put("healthy", sano.setScale(2, RoundingMode.HALF_UP));
             // Lo que toca cobrar en el periodo y lo exigible que ya se pasó de fecha.
             m.put("dueThisPeriod", aCobrar.setScale(2, RoundingMode.HALF_UP));
-            m.put("pastDueAmount", exigibleVencido.setScale(2, RoundingMode.HALF_UP));
+            m.put("pastDueAmount", overdueAmountDue.setScale(2, RoundingMode.HALF_UP));
             m.put("accruedInterest", d);
             m.put("penalty", mor);
             // Lo que el cliente debe hoy, no lo que se le prestó: capital + devengado + moratorios.
             m.put("totalDebt", p.add(d).add(mor));
             // Ticket promedio: lo calcula quien suma, no la pantalla. Dividir en el front obliga a
             // repetir la misma división —y el mismo caso de cero cuentas— en cada tabla que lo pinte.
-            m.put("averageTicket", cuentas == 0 ? BigDecimal.ZERO
-                    : p.divide(BigDecimal.valueOf(cuentas), 2, RoundingMode.HALF_UP));
+            m.put("averageTicket", accounts == 0 ? BigDecimal.ZERO
+                    : p.divide(BigDecimal.valueOf(accounts), 2, RoundingMode.HALF_UP));
             m.put("distributorAccounts", cuentasDistribuidor);
             m.put("distributorPrincipal", principalDistribuidor.setScale(2, RoundingMode.HALF_UP));
-            m.put("ownAccounts", cuentas - cuentasDistribuidor);
+            m.put("ownAccounts", accounts - cuentasDistribuidor);
             m.put("ownPrincipal", p.subtract(principalDistribuidor.setScale(2, RoundingMode.HALF_UP)));
             m.put("distributorShare", pct(principalDistribuidor, principal));
             return m;
@@ -303,7 +303,7 @@ public class CommercialPortfolioService {
                          Map<String, Map<String, Object>> byExecutive,
                          Map<String, Map<String, Object>> byUnit) {
 
-        static Rollup vacio(UUID unitId) {
+        static Rollup empty(UUID unitId) {
             return new Rollup(unitId, new Monto().asMap(), List.of(), Map.of(), Map.of());
         }
     }
@@ -320,7 +320,7 @@ public class CommercialPortfolioService {
      * <p>Se detiene cuando llega un lote incompleto, que es la única señal fiable de final que
      * dan las dos APIs; el tope de páginas es el seguro por si una informa mal su tamaño.
      */
-    private static <T> List<T> todasLasPaginas(java.util.function.IntFunction<List<T>> pagina) {
+    private static <T> List<T> allPages(java.util.function.IntFunction<List<T>> pagina) {
         List<T> todo = new ArrayList<>();
         for (int p = 0; p < MAX_PAGINAS; p++) {
             List<T> lote = pagina.apply(p);

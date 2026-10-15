@@ -25,16 +25,16 @@ public final class ClabeValidator {
     }
 
     public static boolean isValid(String clabe) {
-        return ClabeCheckDigit.esValida(clabe);
+        return ClabeCheckDigit.isValid(clabe);
     }
 
     /** Calcula el verificador de los 17 primeros dígitos. */
     public static int checkDigit(String first17Digits) {
-        return ClabeCheckDigit.de(first17Digits);
+        return ClabeCheckDigit.from(first17Digits);
     }
 
     /** Completa una CLABE de 17 dígitos con su verificador. */
     public static String withCheckDigit(String first17Digits) {
-        return ClabeCheckDigit.completar(first17Digits);
+        return ClabeCheckDigit.complete(first17Digits);
     }
 }

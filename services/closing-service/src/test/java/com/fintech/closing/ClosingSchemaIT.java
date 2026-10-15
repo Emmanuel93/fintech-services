@@ -52,18 +52,18 @@ class ClosingSchemaIT {
     @Test
     @DisplayName("el changelog crea las nueve tablas del motor y NINGUNA de bancos")
     void elEsquemaAplica() {
-        List<String> tablas = jdbc.queryForList(
+        List<String> tables = jdbc.queryForList(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'closing' ORDER BY 1",
                 String.class);
 
-        assertThat(tablas).containsExactly(
+        assertThat(tables).containsExactly(
                 "account_close_profiles", "business_calendars", "calendar_days",
                 "close_cycle_policies", "close_runs", "close_seals", "close_units",
                 "cutoff_schedules", "reconciliation_findings");
 
         // BK-04: las cinco `bank_*` se mudaron a `banking`. Afirmarlo por ausencia y no sólo por
         // omisión de la lista: si un merge reviviera el changeset retirado, esta línea lo dice.
-        assertThat(tablas).noneMatch(t -> t.startsWith("bank_") || t.equals("suspense_entries"));
+        assertThat(tables).noneMatch(t -> t.startsWith("bank_") || t.equals("suspense_entries"));
     }
 
     @Test
@@ -140,7 +140,7 @@ class ClosingSchemaIT {
 
     @Test
     @DisplayName("una corrida no puede duplicarse para la misma fecha, fase y alcance")
-    void corridaUnicaPorFechaYFase() {
+    void oneRunPerDateAndPhase() {
         jdbc.update("INSERT INTO closing.close_runs (business_date, phase) VALUES (DATE '2026-08-24','ACCRUAL')");
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.update(
                 "INSERT INTO closing.close_runs (business_date, phase) VALUES (DATE '2026-08-24','ACCRUAL')"))
@@ -149,7 +149,7 @@ class ClosingSchemaIT {
 
     @Test
     @DisplayName("la fecha límite de un corte nunca es anterior al corte")
-    void limiteNuncaAntesDelCorte() {
+    void thedueDateIsNeverBeforeTheCutoff() {
         org.assertj.core.api.Assertions.assertThatThrownBy(() -> jdbc.update("""
                 INSERT INTO closing.cutoff_schedules
                     (credit_account_id, cycle_number, cutoff_date, payment_due_date)

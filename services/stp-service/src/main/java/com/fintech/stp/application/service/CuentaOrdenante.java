@@ -19,7 +19,7 @@ import java.util.UUID;
 record CuentaOrdenante(UUID id, String clabe, String holderName, String taxId,
                        String accountType, String clientNumber) {
 
-    static CuentaOrdenante deLaOrden(RegisterPaymentOrderCommand cmd) {
+    static CuentaOrdenante fromOrder(RegisterPaymentOrderCommand cmd) {
         return new CuentaOrdenante(cmd.orderingAccountId(), cmd.orderingClabe(), cmd.orderingHolderName(),
                 cmd.orderingTaxId(), "40", cmd.orderingClientNumber());
     }
@@ -31,7 +31,7 @@ record CuentaOrdenante(UUID id, String clabe, String holderName, String taxId,
      * la tabla retirada (BK-07b) esa entidad ya no existe, y fabricarla sólo para pasarla adelante
      * habría dejado en pie la ilusión de que el conector tiene catálogo de cuentas propias.
      */
-    static CuentaOrdenante deLaOrdenRegistrada(StpPaymentOrder orden) {
+    static CuentaOrdenante fromRegisteredOrder(StpPaymentOrder orden) {
         return new CuentaOrdenante(orden.getOrderingAccountId(), orden.getOrderingClabe(),
                 orden.getOrderingHolderName(), orden.getOrderingTaxId(),
                 orden.getOrderingAccountType(), orden.getOrderingClientNumber());

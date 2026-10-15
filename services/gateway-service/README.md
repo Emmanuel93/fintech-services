@@ -597,3 +597,14 @@ No hay variables de entorno propias — toda la configuración es en `nginx.conf
 - **Errores sanitizados**: los mensajes de error del gateway nunca exponen detalles internos (path de archivos, stack trace, razones de la librería jwt).
 - **Rate limit por IP**: la clave es `$binary_remote_addr`. Si el gateway corre detrás de otro proxy (load balancer en producción), cambiar la clave a `$http_x_forwarded_for` o `$http_x_real_ip` según el header que el proxy establezca.
 - **Multi-réplica**: el estado del rate limit es **en memoria por worker**. Si se despliegan múltiples réplicas del gateway, los límites no se comparten. Para producción distribuida, migrar a `lua-resty-limit-traffic` con Redis como backend (el Redis del `docker-compose.yml` ya está disponible en la misma red).
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

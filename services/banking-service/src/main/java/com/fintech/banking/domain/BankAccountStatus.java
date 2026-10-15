@@ -11,5 +11,5 @@ public enum BankAccountStatus {
     ACTIVE, SUSPENDED, CLOSED;
 
     /** Sólo una cuenta ACTIVE puede ser elegida para que salga un pago por ella. */
-    public boolean puedeOperar() { return this == ACTIVE; }
+    public boolean canOperate() { return this == ACTIVE; }
 }

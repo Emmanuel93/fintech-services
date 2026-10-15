@@ -3,6 +3,7 @@ package com.fintech.beneficiary.application.service;
 import com.fintech.beneficiary.application.CreatePlacementCommand;
 import com.fintech.beneficiary.application.port.in.PlacementLifecycleUseCase;
 import com.fintech.beneficiary.application.port.out.IdentityVerificationGateway;
+import com.fintech.beneficiary.application.port.out.PersonScreeningReader;
 import com.fintech.beneficiary.application.port.out.PlacementEventPublisher;
 import com.fintech.beneficiary.application.port.out.PlacementRepository;
 import com.fintech.beneficiary.application.port.out.PlacementTransitionRepository;
@@ -44,15 +45,21 @@ public class PlacementService implements PlacementLifecycleUseCase {
     private final PlacementTransitionRepository transitionRepository;
     private final PlacementEventPublisher eventPublisher;
     private final IdentityVerificationGateway verificationGateway;
+    private final KycPolicyResolver kycPolicyResolver;
+    private final PersonScreeningReader personScreening;
 
     public PlacementService(PlacementRepository placementRepository,
                             PlacementTransitionRepository transitionRepository,
                             PlacementEventPublisher eventPublisher,
-                            IdentityVerificationGateway verificationGateway) {
+                            IdentityVerificationGateway verificationGateway,
+                            KycPolicyResolver kycPolicyResolver,
+                            PersonScreeningReader personScreening) {
         this.placementRepository  = placementRepository;
         this.transitionRepository = transitionRepository;
         this.eventPublisher       = eventPublisher;
         this.verificationGateway  = verificationGateway;
+        this.kycPolicyResolver    = kycPolicyResolver;
+        this.personScreening      = personScreening;
     }
 
     @Override
@@ -62,7 +69,7 @@ public class PlacementService implements PlacementLifecycleUseCase {
         }
 
         Placement placement = Placement.draft(
-                cmd.distributorPartyId(), cmd.distributorCreditAccountId(),
+                cmd.distributorPartyId(), cmd.distributorCreditAccountId(), cmd.productCode(),
                 cmd.beneficiaryFullName(), cmd.beneficiaryPhone(), cmd.beneficiaryRelationship(),
                 cmd.amount(), cmd.termFortnights(), cmd.fortnightlyPayment(),
                 cmd.verificationMode(), cmd.inviteExpiresAt(),
@@ -109,7 +116,9 @@ public class PlacementService implements PlacementLifecycleUseCase {
                 p -> p.completeKyc(prospectId, partyId, clabe),
                 PlacementTransition.Actor.BENEFICIARY, null);
 
-        var outcome = verificationGateway.evaluate(placementId, prospectId);
+        // F3b · la política sale del producto de la línea, no de una bandera del servicio.
+        var policy  = kycPolicyResolver.resolve(placement);
+        var outcome = verificationGateway.evaluate(placementId, prospectId, policy);
         placement.recordVerificationNotes(outcome.reasonSummary());
 
         if (outcome.requiresHumanReview()) {
@@ -118,7 +127,7 @@ public class PlacementService implements PlacementLifecycleUseCase {
             // El proveedor resolvió dentro de sus umbrales. El veredicto se escribe con su nombre
             // como autor: un expediente tiene que poder decir que aquí no firmó una persona.
             placement.reviewIdentity(outcome.decision(), outcome.source(),
-                    verificationGateway.describeStrategy(), null);
+                    verificationGateway.describeStrategy(policy), null);
             transitionRepository.save(PlacementTransition.of(
                     placementId, placement.getStatus(), placement.getStatus(),
                     PlacementTransition.Actor.SYSTEM, null,
@@ -142,7 +151,12 @@ public class PlacementService implements PlacementLifecycleUseCase {
         Placement placement = loadOwnedBy(placementId, distributorPartyId);
         PlacementStatus from = placement.getStatus();
 
-        placement.approve(riskAcknowledged);
+        // Se consulta AQUÍ y no al crear la colocación: entre que la beneficiaria se da de alta y
+        // que la distribuidora decide colocar pueden pasar días, y las listas se publican de nuevo
+        // cada semana. El veredicto que importa es el del momento en que el dinero va a salir.
+        ScreeningVerdict screening = personScreening.screeningOf(placement.getBeneficiaryProspectId());
+
+        placement.approve(riskAcknowledged, screening);
 
         placementRepository.save(placement);
         recordTransition(placement, from, PlacementTransition.Actor.DISTRIBUTOR, distributorPartyId);

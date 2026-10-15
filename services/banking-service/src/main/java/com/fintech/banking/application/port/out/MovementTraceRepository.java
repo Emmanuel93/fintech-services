@@ -21,5 +21,5 @@ public interface MovementTraceRepository {
     List<MovementTrace> findByVoucherRef(String voucherRef);
 
     /** Las que se quedaron a medias. Es el reporte que alguien mira cada mañana. */
-    List<MovementTrace> findIncompletas(int limite);
+    List<MovementTrace> findIncomplete(int limite);
 }

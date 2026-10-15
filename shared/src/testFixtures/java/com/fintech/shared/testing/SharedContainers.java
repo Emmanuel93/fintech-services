@@ -17,7 +17,7 @@ import org.testcontainers.utility.DockerImageName;
  * justo lo que hace lenta la suite.
  *
  * <p><b>El aislamiento no viene de reiniciar el contenedor, viene de limpiar el esquema.</b> Ver
- * {@link AbstractIntegrationTest#limpiarEsquema}.
+ * {@link AbstractIntegrationTest#truncateSchema}.
  */
 public final class SharedContainers {
 

@@ -50,11 +50,11 @@ public class ExecutiveAssignedListener {
         // Determinista: Kafka entrega al menos una vez y reasignar el mismo cliente al mismo
         // ejecutivo no debe sonar dos veces.
         String sourceEventId = "party:executive-assigned:" + p.partyId() + ":" + p.executiveId();
-        String cliente = (p.clientName() == null || p.clientName().isBlank()) ? "un cliente" : p.clientName();
+        String customer = (p.clientName() == null || p.clientName().isBlank()) ? "un cliente" : p.clientName();
 
         try {
             service.notify(sourceEventId, "STAFF", p.executiveId(), EVENT_KEY,
-                    Map.of("cliente", cliente), null);
+                    Map.of("cliente", customer), null);
         } catch (UnknownRecipientException | InvalidRecipientException ex) {
             // Se descarta en vez de reintentar: un ejecutivo que no está registrado como
             // destinatario no va a aparecer porque volvamos a intentarlo, y dejar el mensaje

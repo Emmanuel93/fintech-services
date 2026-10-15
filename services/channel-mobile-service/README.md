@@ -342,3 +342,14 @@ docker compose --profile channel-mobile-service up -d
 - **OCR stub**: `POST /ocr/extract` devuelve datos ficticios. La integración real con Incode/Jumio es un TODO.
 - **Sin JWT_SECRET**: la validación JWT la hace el gateway. El BFF lee identidad desde headers `X-User-Id`/`X-Roles` inyectados por el gateway después de verificar la firma RS256.
 - **Rate limiting de OTP**: implementado en memoria (Redis). Máx `OTP_MAX_SENDS_PER_WINDOW` envíos en `OTP_SEND_WINDOW_MINUTES` minutos por número.
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

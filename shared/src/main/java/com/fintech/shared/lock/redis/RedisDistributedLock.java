@@ -110,18 +110,18 @@ public class RedisDistributedLock implements DistributedLock {
      * @return {@code true} si la acción se ejecutó; {@code false} si el candado ya no era nuestro.
      */
     private boolean compareAndRun(LockHandle handle, java.util.function.Consumer<RedisOperations<String, String>> accion) {
-        String llave = handle.key().value();
+        String key = handle.key().value();
 
         @SuppressWarnings("unchecked")
-        List<Object> resultado = redis.execute(new SessionCallback<>() {
+        List<Object> result = redis.execute(new SessionCallback<>() {
             @Override
             @SuppressWarnings("unchecked")
             public List<Object> execute(RedisOperations operations) {
                 RedisOperations<String, String> ops = (RedisOperations<String, String>) operations;
 
-                ops.watch(llave);
-                String actual = ops.opsForValue().get(llave);
-                if (!handle.token().equals(actual)) {
+                ops.watch(key);
+                String current = ops.opsForValue().get(key);
+                if (!handle.token().equals(current)) {
                     ops.unwatch();
                     return null;              // ya no somos el titular: no se toca nada
                 }
@@ -132,7 +132,7 @@ public class RedisDistributedLock implements DistributedLock {
             }
         });
 
-        return resultado != null && !resultado.isEmpty();
+        return result != null && !result.isEmpty();
     }
 
     private static void requirePositive(Duration ttl) {

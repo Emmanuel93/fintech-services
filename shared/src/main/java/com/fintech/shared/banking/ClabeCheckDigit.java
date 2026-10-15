@@ -24,7 +24,7 @@ public final class ClabeCheckDigit {
     private ClabeCheckDigit() {}
 
     /** El verificador que le corresponde a los 17 primeros dígitos. */
-    public static int de(String primeros17) {
+    public static int from(String primeros17) {
         if (primeros17 == null || primeros17.length() != CUERPO
                 || !primeros17.chars().allMatch(Character::isDigit)) {
             throw new IllegalArgumentException(
@@ -44,17 +44,17 @@ public final class ClabeCheckDigit {
      * beneficiario lo hace sobre un dato que llega de fuera, y una excepción convertiría un rechazo
      * previsible en un 500.
      */
-    public static boolean esValida(String clabe) {
+    public static boolean isValid(String clabe) {
         if (clabe == null || clabe.length() != LONGITUD
                 || !clabe.chars().allMatch(Character::isDigit)) {
             return false;
         }
-        return de(clabe.substring(0, CUERPO)) == (clabe.charAt(CUERPO) - '0');
+        return from(clabe.substring(0, CUERPO)) == (clabe.charAt(CUERPO) - '0');
     }
 
     /** Completa una CLABE de 17 dígitos. Útil para sembrar datos que no se pudren. */
-    public static String completar(String primeros17) {
-        return primeros17 + de(primeros17);
+    public static String complete(String primeros17) {
+        return primeros17 + from(primeros17);
     }
 
     /**
@@ -64,7 +64,7 @@ public final class ClabeCheckDigit {
      * para rails que no son SPEI, donde la cuenta puede ser un número de teléfono o una tarjeta.
      * Lanzar aquí convertiría un dato opcional en un HTTP 500.
      */
-    public static Integer institucionDe(String clabe) {
+    public static Integer institutionOf(String clabe) {
         if (clabe == null || clabe.length() < 3) {
             return null;
         }

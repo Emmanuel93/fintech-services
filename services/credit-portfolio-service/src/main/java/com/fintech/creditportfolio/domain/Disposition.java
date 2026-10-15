@@ -57,6 +57,24 @@ public class Disposition {
     @Column(name = "deferred_term")
     private Integer deferredTerm;
 
+    // ── Qué se sabía de listas cuando salió el dinero ────────────────────────────────────────
+    //
+    // Es una FOTO, y su valor está en que no cambie cuando cambie el veredicto vigente. El negocio
+    // asumió la ventana entre que se activa una lista y que termina el re-cruce; esto es lo que
+    // permite distinguir después «no lo sabíamos» de «lo dejamos pasar».
+
+    @Column(name = "aml_screening_status", length = 20)
+    private String amlScreeningStatus;
+
+    @Column(name = "aml_list_versions", length = 1000)
+    private String amlListVersions;
+
+    @Column(name = "aml_verdict_at")
+    private Instant amlVerdictAt;
+
+    @Column(name = "aml_checked_at")
+    private Instant amlCheckedAt;
+
     /** En qué ciclo de corte se facturó. Nulo = todavía no entró a ningún exigible. */
     @Column(name = "billed_cycle")
     private Integer billedCycle;
@@ -98,7 +116,7 @@ public class Disposition {
      * <p>Es la mecánica de una tarjeta. El titular puede diferirla después con {@link #diferir},
      * antes de que corte el ciclo.
      */
-    public Disposition comoRevolventePura() {
+    public Disposition asPureRevolving() {
         this.planMode = DispositionPlanMode.REVOLVING;
         return this;
     }
@@ -110,7 +128,7 @@ public class Disposition {
      * Quien intenta re-diferir una ya diferida se encuentra el rechazo aquí y no un segundo
      * calendario colgando de la misma disposición.
      */
-    public void diferir(int plazo) {
+    public void defer(int plazo) {
         if (planMode == DispositionPlanMode.AMORTIZED) {
             throw new IllegalStateException(
                     "La disposición " + dispositionId + " ya tiene plan: no se difiere dos veces");
@@ -121,7 +139,7 @@ public class Disposition {
     }
 
     /** Exigible entera en el próximo corte: nació revolvente, sigue sin diferirse y sin facturar. */
-    public boolean esExigibleEnElCorte() {
+    public boolean isDueAtCutoff() {
         return planMode == DispositionPlanMode.REVOLVING && billedCycle == null;
     }
 
@@ -131,7 +149,7 @@ public class Disposition {
      * <p>Sin la marca, el corte siguiente volvería a exigir las mismas compras: {@code planMode}
      * sigue siendo {@code REVOLVING} después de facturarla.
      */
-    public void facturarEnCiclo(int ciclo) {
+    public void billInCycle(int ciclo) {
         if (billedCycle != null) {
             throw new IllegalStateException("La disposición " + dispositionId
                     + " ya se facturó en el ciclo " + billedCycle);
@@ -178,4 +196,34 @@ public class Disposition {
     public Integer getBilledCycle()     { return billedCycle; }
     public Instant getCreatedAt()       { return createdAt; }
     public Instant getCompletedAt()     { return completedAt; }
+
+    /**
+     * Guarda qué decía el veredicto de listas en el instante de esta disposición.
+     *
+     * <p>No se actualiza nunca después. Si el re-cruce de las 10:30 marca a esta persona, esta foto
+     * sigue diciendo lo que se sabía a las 10:06 — que es exactamente lo que hace defendible el
+     * riesgo asumido.
+     */
+    public void recordAmlSnapshot(String screeningStatus, String listVersions, Instant verdictAt) {
+        this.amlScreeningStatus = screeningStatus;
+        this.amlListVersions    = listVersions;
+        this.amlVerdictAt       = verdictAt;
+        this.amlCheckedAt       = Instant.now();
+    }
+
+    /**
+     * Cuán viejo era el dato con el que se dejó salir el dinero.
+     *
+     * <p>Es la medida real de la ventana asumida, disposición por disposición: no «cuánto puede
+     * durar el re-cruce» en teoría, sino cuánto tiempo de desfase hubo de verdad en cada caso.
+     */
+    public java.time.Duration amlDataAge() {
+        return amlVerdictAt == null || amlCheckedAt == null
+                ? null : java.time.Duration.between(amlVerdictAt, amlCheckedAt);
+    }
+
+    public String getAmlScreeningStatus() { return amlScreeningStatus; }
+    public String getAmlListVersions()    { return amlListVersions; }
+    public Instant getAmlVerdictAt()      { return amlVerdictAt; }
+    public Instant getAmlCheckedAt()      { return amlCheckedAt; }
 }

@@ -89,7 +89,7 @@ public class ReliefProgram {
 
     protected ReliefProgram() {}
 
-    public static ReliefProgram proponer(String name, String reason, int deferredPeriods,
+    public static ReliefProgram propose(String name, String reason, int deferredPeriods,
                                          LocalDate validFrom, LocalDate validTo,
                                          String productCode, String originUnitCode, String region,
                                          Integer maxDaysDelinquent, LocalDate eligibilityCutoffDate,
@@ -132,7 +132,7 @@ public class ReliefProgram {
      * la reserva; que una sola persona pueda hacerlo sin contraparte es el tipo de facultad que una
      * revisión pregunta primero.
      */
-    public void autorizar(String approvedBy) {
+    public void authorize(String approvedBy) {
         if (!"PROPOSED".equals(status)) {
             throw new IllegalStateException("El programa " + id + " está en " + status
                     + ": sólo se autoriza uno PROPOSED");
@@ -146,7 +146,7 @@ public class ReliefProgram {
         this.approvedAt = Instant.now();
     }
 
-    public void rechazar(String rejectedBy) {
+    public void reject(String rejectedBy) {
         if (!"PROPOSED".equals(status)) {
             throw new IllegalStateException("Sólo se rechaza un programa PROPOSED");
         }
@@ -155,14 +155,14 @@ public class ReliefProgram {
         this.approvedAt = Instant.now();
     }
 
-    public void cerrar() { this.status = "CLOSED"; }
+    public void close() { this.status = "CLOSED"; }
 
-    public boolean estaAutorizado() { return "APPROVED".equals(status); }
+    public boolean isAuthorized() { return "APPROVED".equals(status); }
 
     /** Durante el apoyo el crédito no devenga: el interés de esos períodos se condona. */
-    public boolean condonaDevengo() { return "WAIVED".equals(accrualDuringRelief); }
+    public boolean waivesAccrual() { return "WAIVED".equals(accrualDuringRelief); }
 
-    public boolean vigenteEl(LocalDate dia) {
+    public boolean activeOn(LocalDate dia) {
         return !dia.isBefore(validFrom) && !dia.isAfter(validTo);
     }
 
@@ -172,7 +172,7 @@ public class ReliefProgram {
      * <p>Los filtros nulos no filtran, y se combinan con AND: un programa sin criterios alcanza a
      * toda la cartera, que es una decisión legítima y que alguien tiene que autorizar a propósito.
      */
-    public boolean alcanzaA(String producto, String unidad, String regionDeLaCuenta, int dpdAlCorte) {
+    public boolean reaches(String producto, String unidad, String regionDeLaCuenta, int dpdAlCorte) {
         if (productCode != null && !productCode.equalsIgnoreCase(producto)) return false;
         if (originUnitCode != null && !originUnitCode.equalsIgnoreCase(unidad)) return false;
         if (region != null && !region.equalsIgnoreCase(regionDeLaCuenta)) return false;

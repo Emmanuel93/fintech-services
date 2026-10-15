@@ -88,3 +88,21 @@ databaseChangeLog:
             path: db/changelog/party/010-create-party-roles.sql
             relativeToChangelogFile: false
             splitStatements: true
+
+  - changeSet:
+      id: 011-kyc-canonico
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/party/011-kyc-canonico.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 012-verificacion-por-persona
+      author: party-service
+      changes:
+        - sqlFile:
+            path: db/changelog/party/012-verificacion-por-persona.sql
+            relativeToChangelogFile: false
+            splitStatements: false

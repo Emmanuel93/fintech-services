@@ -43,6 +43,35 @@ public class RestClientPartyAdapter implements PartyReader {
         }
     }
 
+    @Override
+    public Verification verificationOf(UUID prospectId) {
+        try {
+            PartyApiResponse response = partyRestClient
+                    .get()
+                    .uri("/api/v1/parties/by-prospect/{id}", prospectId)
+                    .retrieve()
+                    .body(PartyApiResponse.class);
+
+            if (response == null) {
+                // No es lo mismo que «no existe»: es que la respuesta no se pudo leer. Bloquea.
+                return Verification.unavailable("party devolvió una respuesta vacía");
+            }
+            return new Verification(
+                    response.identityStatus(), response.screeningStatus(),
+                    response.verificationClear(), response.verificationBlockReason());
+
+        } catch (RestClientException e) {
+            // **Falla cerrado.** La indisponibilidad de una comprobación regulatoria tiene que
+            // detener, no dejar pasar: lo contrario significa originar crédito a alguien sin haber
+            // comprobado que no está en una lista, porque un servicio estaba caído.
+            log.error("No se pudo comprobar la verificación de prospectId={} — NO se origina: {}",
+                    prospectId, e.getMessage());
+            return Verification.unavailable(e.getMessage());
+        }
+    }
+
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record PartyApiResponse(UUID prospectId, String partyType) {}
+    private record PartyApiResponse(UUID prospectId, String partyType,
+                                    String identityStatus, String screeningStatus,
+                                    boolean verificationClear, String verificationBlockReason) {}
 }

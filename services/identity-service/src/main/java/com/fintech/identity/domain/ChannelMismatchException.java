@@ -9,8 +9,8 @@ import com.fintech.shared.exception.DomainException;
  */
 public class ChannelMismatchException extends DomainException {
 
-    public ChannelMismatchException(Channel expected, Channel actual) {
+    public ChannelMismatchException(Channel expected, Channel current) {
         super("AUTH_CHANNEL_MISMATCH",
-              "Token belongs to channel " + actual + " but " + expected + " was required");
+              "Token belongs to channel " + current + " but " + expected + " was required");
     }
 }

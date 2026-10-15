@@ -68,7 +68,7 @@ public class CreditPortfolioClient {
     // reenvía. El BFF no lo replica: dos sitios decidiendo quién puede autorizar es un sitio de más
     // donde la separación de funciones puede aflojarse sin que nadie lo note.
 
-    public Map<String, Object> proponerPrograma(Object cuerpo) {
+    public Map<String, Object> proposeProgram(Object cuerpo) {
         log.info("-> POST credit-portfolio-service /api/v1/portfolio/relief-programs");
         return webClient.post()
                 .uri("/api/v1/portfolio/relief-programs")
@@ -81,10 +81,10 @@ public class CreditPortfolioClient {
     }
 
     /** Simula el padrón: a cuántas cuentas alcanza, sin mover un solo vencimiento. */
-    public Map<String, Object> padronDelPrograma(UUID programId) {
-        log.info("-> GET credit-portfolio-service /api/v1/portfolio/relief-programs/{}/padron", programId);
+    public Map<String, Object> programRoster(UUID programId) {
+        log.info("-> GET credit-portfolio-service /api/v1/portfolio/relief-programs/{}/roster", programId);
         return webClient.get()
-                .uri("/api/v1/portfolio/relief-programs/{id}/padron", programId)
+                .uri("/api/v1/portfolio/relief-programs/{id}/roster", programId)
                 .headers(staffIdentity())
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("credit-portfolio-service", r))
@@ -92,7 +92,7 @@ public class CreditPortfolioClient {
                 .block();
     }
 
-    public Map<String, Object> autorizarPrograma(UUID programId) {
+    public Map<String, Object> authorizeProgram(UUID programId) {
         log.info("-> POST credit-portfolio-service /api/v1/portfolio/relief-programs/{}/approve", programId);
         return webClient.post()
                 .uri("/api/v1/portfolio/relief-programs/{id}/approve", programId)
@@ -103,7 +103,7 @@ public class CreditPortfolioClient {
                 .block();
     }
 
-    public Map<String, Object> otorgarPrograma(UUID programId) {
+    public Map<String, Object> grantProgram(UUID programId) {
         log.info("-> POST credit-portfolio-service /api/v1/portfolio/relief-programs/{}/grant", programId);
         return webClient.post()
                 .uri("/api/v1/portfolio/relief-programs/{id}/grant", programId)

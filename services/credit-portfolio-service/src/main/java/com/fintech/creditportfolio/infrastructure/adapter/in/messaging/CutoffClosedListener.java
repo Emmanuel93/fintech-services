@@ -18,10 +18,10 @@ public class CutoffClosedListener {
 
     private static final Logger log = LoggerFactory.getLogger(CutoffClosedListener.class);
 
-    private final CloseCutoffCycleUseCase cierreDeCiclo;
+    private final CloseCutoffCycleUseCase cycleClose;
 
-    public CutoffClosedListener(CloseCutoffCycleUseCase cierreDeCiclo) {
-        this.cierreDeCiclo = cierreDeCiclo;
+    public CutoffClosedListener(CloseCutoffCycleUseCase cycleClose) {
+        this.cycleClose = cycleClose;
     }
 
     @KafkaListener(
@@ -32,7 +32,7 @@ public class CutoffClosedListener {
         log.debug("cutoff-closed recibido creditAccountId={} ciclo={} vence={}",
                 event.creditAccountId(), event.cycleNumber(), event.paymentDueDate());
 
-        cierreDeCiclo.onCutoffClosed(new CorteCerrado(
+        cycleClose.onCutoffClosed(new CorteCerrado(
                 event.creditAccountId(), event.cycleNumber(), event.cutoffDate(),
                 event.paymentDueDate(), event.balanceAtCutoff()));
     }

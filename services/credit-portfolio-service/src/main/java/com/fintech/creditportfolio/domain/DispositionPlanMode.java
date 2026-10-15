@@ -18,5 +18,5 @@ package com.fintech.creditportfolio.domain;
 public enum DispositionPlanMode {
     REVOLVING, AMORTIZED;
 
-    public boolean tienePlan() { return this == AMORTIZED; }
+    public boolean hasPlan() { return this == AMORTIZED; }
 }

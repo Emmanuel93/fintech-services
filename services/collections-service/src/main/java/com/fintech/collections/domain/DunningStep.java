@@ -43,7 +43,7 @@ public enum DunningStep {
     DunningStep(int dia) { this.dia = dia; }
 
     /** Día del ciclo, contado desde el primer día de mora. */
-    public int dia() { return dia; }
+    public int day() { return dia; }
 
     /** El escalón que toca en ese día de mora, o vacío si el ciclo automático ya terminó. */
     public static DunningStep forDay(int diasDeMora) {
@@ -54,5 +54,5 @@ public enum DunningStep {
     }
 
     /** Cuántos días dura el ciclo completo. */
-    public static int cicloDias() { return values().length; }
+    public static int cycleDays() { return values().length; }
 }

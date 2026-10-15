@@ -30,7 +30,7 @@ class KafkaReconciliationAlertPublisher implements ReconciliationAlertPublisher 
     }
 
     @Override
-    public void publicarDescuadre(UUID bankAccountId, LocalDate businessDate,
+    public void publishMismatch(UUID bankAccountId, LocalDate businessDate,
                                   BigDecimal saldoContable, BigDecimal saldoDelBanco,
                                   BigDecimal partidasEnConciliacion, BigDecimal diferencia,
                                   int partidasAbiertas) {

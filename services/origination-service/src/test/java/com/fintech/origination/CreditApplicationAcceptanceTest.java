@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import com.fintech.origination.application.port.out.PartyReader;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
@@ -76,6 +77,17 @@ class CreditApplicationAcceptanceTest {
 
     @MockBean KafkaTemplate<String, Object> kafkaTemplate;
 
+    /**
+     * La compuerta de KYC/AML consulta a party, que aquí no existe.
+     *
+     * <p>Se sustituye por un veredicto limpio porque estas pruebas examinan el ciclo de la
+     * solicitud, no la compuerta — ésa tiene las suyas en {@code KycGateOnApplicationTest}, donde el
+     * bloqueo es el sujeto y no el estorbo. Sin este doble, el adaptador real no alcanzaría a party,
+     * devolvería un veredicto que bloquea —que es lo correcto— y todas fallarían por un motivo que
+     * no es el que miden.
+     */
+    @MockBean PartyReader partyReader;
+
     private final ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -88,6 +100,8 @@ class CreditApplicationAcceptanceTest {
     private UUID onboardProspect(String curp, String phone) throws Exception {
         given(kafkaTemplate.send(any(), any(), any()))
                 .willReturn(CompletableFuture.completedFuture(null));
+        given(partyReader.verificationOf(any()))
+                .willReturn(new PartyReader.Verification("VERIFIED", "CLEARED", true, null));
 
         RegisterProspectRequest req = new RegisterProspectRequest(
                 ProspectType.INDIVIDUAL,

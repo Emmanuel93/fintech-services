@@ -97,7 +97,7 @@ public class CreditPortfolioClient {
                 // "el que traiga el producto"— y Map.of no admite nulos.
                 .bodyValue(java.util.Collections.singletonMap("termPeriods", termPeriods))
                 .retrieve()
-                .onStatus(HttpStatusCode::isError, CreditPortfolioClient::conMotivo)
+                .onStatus(HttpStatusCode::isError, CreditPortfolioClient::withReason)
                 .toBodilessEntity()
                 .block();
     }
@@ -110,13 +110,13 @@ public class CreditPortfolioClient {
                 .uri("/api/v1/portfolio/accounts/{id}/installments/{iid}/skip", creditAccountId, installmentId)
                 .header("X-User-Id", userId)
                 .retrieve()
-                .onStatus(HttpStatusCode::isError, CreditPortfolioClient::conMotivo)
+                .onStatus(HttpStatusCode::isError, CreditPortfolioClient::withReason)
                 .toBodilessEntity()
                 .block();
     }
 
     /** Conserva el status y el cuerpo del dominio: el motivo del rechazo es la mitad de la respuesta. */
-    private static Mono<? extends Throwable> conMotivo(org.springframework.web.reactive.function.client.ClientResponse resp) {
+    private static Mono<? extends Throwable> withReason(org.springframework.web.reactive.function.client.ClientResponse resp) {
         return resp.bodyToMono(String.class)
                 .defaultIfEmpty("")
                 .map(cuerpo -> new ResponseStatusException(resp.statusCode(),

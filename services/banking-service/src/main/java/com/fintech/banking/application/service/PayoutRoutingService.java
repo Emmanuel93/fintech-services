@@ -36,20 +36,20 @@ public class PayoutRoutingService implements ResolvePayoutRouteUseCase {
     private static final Logger log = LoggerFactory.getLogger(PayoutRoutingService.class);
 
     private final PayoutRouteRepository rutas;
-    private final BankAccountRepository cuentas;
+    private final BankAccountRepository accounts;
 
-    public PayoutRoutingService(PayoutRouteRepository rutas, BankAccountRepository cuentas) {
+    public PayoutRoutingService(PayoutRouteRepository rutas, BankAccountRepository accounts) {
         this.rutas   = rutas;
-        this.cuentas = cuentas;
+        this.accounts = accounts;
     }
 
     @Override
     @Transactional(readOnly = true)
-    public PayoutDecision resolver(Peticion p) {
+    public PayoutDecision resolve(Request p) {
         List<PayoutRoute> candidatas = rutas.findAllEnabled().stream()
-                .filter(r -> r.cubre(p.companyId(), p.rail(), p.amount()))
+                .filter(r -> r.covers(p.companyId(), p.rail(), p.amount()))
                 .sorted(Comparator.comparingInt(PayoutRoute::getPriority)
-                        .thenComparingInt(PayoutRoute::especificidad)
+                        .thenComparingInt(PayoutRoute::specificity)
                         // Los dos desempates finales existen porque `findAllEnabled()` NO garantiza
                         // orden: con dos rutas de igual prioridad y especificidad, la base puede
                         // devolverlas en cualquier orden y el pago saldría un día por una cuenta y
@@ -64,17 +64,17 @@ public class PayoutRoutingService implements ResolvePayoutRouteUseCase {
         // suspendida aquí y no antes es lo que hace que suspender una cuenta SIGNIFIQUE algo: si la
         // ruta ganara igual, el pago fallaría en el proveedor, que es donde ya no se puede corregir.
         for (PayoutRoute ruta : candidatas) {
-            BankAccount cuenta = cuentas.findById(ruta.getBankAccountId()).orElseThrow(
+            BankAccount account = accounts.findById(ruta.getBankAccountId()).orElseThrow(
                     () -> new IllegalStateException("La ruta " + ruta.getId()
                             + " apunta a una cuenta que no existe: " + ruta.getBankAccountId()));
 
-            if (!cuenta.puedeOperar()) {
+            if (!account.canOperate()) {
                 log.warn("Ruta {} descartada: la cuenta {} está {}",
-                        ruta.getId(), cuenta.getId(), cuenta.getStatus());
+                        ruta.getId(), account.getId(), account.getStatus());
                 continue;
             }
 
-            PayoutDecision decision = PayoutDecision.de(ruta, cuenta);
+            PayoutDecision decision = PayoutDecision.from(ruta, account);
             log.info("Ruta resuelta {}", decision);   // toString() enmascara la CLABE
             return decision;
         }

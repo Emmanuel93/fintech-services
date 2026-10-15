@@ -81,7 +81,7 @@ public class BankAccount {
 
     protected BankAccount() {}
 
-    public static BankAccount alta(UUID companyId,
+    public static BankAccount register(UUID companyId,
                                    String institutionCode,
                                    String institutionName,
                                    Clabe clabe,
@@ -95,22 +95,22 @@ public class BankAccount {
         BankAccount c = new BankAccount();
         c.id                    = UUID.randomUUID();
         c.companyId             = companyId;
-        c.institutionCode       = exigir(institutionCode, "institución");
-        c.institutionName       = exigir(institutionName, "nombre de la institución");
-        c.clabe                 = clabe.valor();
-        c.holderName            = exigir(holderName, "titular");
+        c.institutionCode       = require(institutionCode, "institución");
+        c.institutionName       = require(institutionName, "nombre de la institución");
+        c.clabe                 = clabe.value();
+        c.holderName            = require(holderName, "titular");
         c.taxId                 = taxId;
         c.currency              = currency == null ? "MXN" : currency;
-        c.ledgerAccount         = exigir(ledgerAccount, "cuenta contable");
-        c.suspenseCreditAccount = exigir(suspenseCreditAccount, "puente de abonos");
-        c.suspenseDebitAccount  = exigir(suspenseDebitAccount, "puente de cargos");
+        c.ledgerAccount         = require(ledgerAccount, "cuenta contable");
+        c.suspenseCreditAccount = require(suspenseCreditAccount, "puente de abonos");
+        c.suspenseDebitAccount  = require(suspenseDebitAccount, "puente de cargos");
         c.providerClientRef     = providerClientRef;
         c.status                = BankAccountStatus.ACTIVE;
         c.createdAt             = OffsetDateTime.now();
         return c;
     }
 
-    private static String exigir(String v, String campo) {
+    private static String require(String v, String campo) {
         if (v == null || v.isBlank()) {
             throw new IllegalArgumentException("Falta " + campo + " en la cuenta bancaria");
         }
@@ -129,23 +129,23 @@ public class BankAccount {
         this.status = BankAccountStatus.SUSPENDED;
     }
 
-    public void reactivar() {
+    public void reactivate() {
         if (status == BankAccountStatus.CLOSED) {
             throw new IllegalStateException("Una cuenta CLOSED no se reactiva");
         }
         this.status = BankAccountStatus.ACTIVE;
     }
 
-    public void cerrar() { this.status = BankAccountStatus.CLOSED; }
+    public void close() { this.status = BankAccountStatus.CLOSED; }
 
-    public boolean puedeOperar() { return status.puedeOperar(); }
+    public boolean canOperate() { return status.canOperate(); }
 
     public UUID getId()                       { return id; }
     public UUID getCompanyId()                { return companyId; }
     public String getInstitutionCode()        { return institutionCode; }
     public String getInstitutionName()        { return institutionName; }
     public String getClabe()                  { return clabe; }
-    public String getClabeEnmascarada()       { return "****" + clabe.substring(14); }
+    public String getMaskedClabe()       { return "****" + clabe.substring(14); }
     public String getHolderName()             { return holderName; }
     public String getTaxId()                  { return taxId; }
     public String getCurrency()               { return currency; }

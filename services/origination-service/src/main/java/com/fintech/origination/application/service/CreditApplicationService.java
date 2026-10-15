@@ -15,6 +15,8 @@ import com.fintech.origination.application.port.out.CreditApplicationRepository;
 import com.fintech.origination.application.port.out.PromoterResolver;
 import com.fintech.origination.application.port.out.ProspectRepository;
 import com.fintech.origination.application.port.out.ScoreRequestPublisher;
+import com.fintech.origination.application.port.out.PartyReader;
+import com.fintech.origination.domain.PersonNotVerifiedException;
 import com.fintech.origination.domain.ApplicationStatus;
 import com.fintech.origination.domain.CooldownActiveException;
 import com.fintech.origination.domain.CreditApplication;
@@ -57,6 +59,7 @@ public class CreditApplicationService
     private final ScoreRequestPublisher scoreRequestPublisher;
     private final ApplicationEventPublisher applicationEventPublisher;
     private final PromoterResolver promoterResolver;
+    private final PartyReader partyReader;
     private final OriginationProperties properties;
 
     public CreditApplicationService(CreditApplicationRepository applicationRepository,
@@ -64,12 +67,14 @@ public class CreditApplicationService
                                      ScoreRequestPublisher scoreRequestPublisher,
                                      ApplicationEventPublisher applicationEventPublisher,
                                      PromoterResolver promoterResolver,
+                                     PartyReader partyReader,
                                      OriginationProperties properties) {
         this.applicationRepository    = applicationRepository;
         this.prospectRepository       = prospectRepository;
         this.scoreRequestPublisher    = scoreRequestPublisher;
         this.applicationEventPublisher = applicationEventPublisher;
         this.promoterResolver         = promoterResolver;
+        this.partyReader              = partyReader;
         this.properties               = properties;
     }
 
@@ -80,6 +85,25 @@ public class CreditApplicationService
 
         Prospect prospect = prospectRepository.findById(cmd.prospectId())
                 .orElseThrow(() -> new ProspectNotFoundException(cmd.prospectId().toString()));
+
+        // ── La compuerta de KYC/AML ──────────────────────────────────────────────────────────
+        //
+        // Toda persona registrada pasa por KYC y listas al alta, sin importar su rol — self-use,
+        // distribuidor o beneficiaria de una línea—. **Nada avanza sin veredicto.**
+        //
+        // Va la PRIMERA de las tres comprobaciones a propósito. Decirle a alguien «ya tienes una
+        // solicitud activa» o «estás en periodo de espera» cuando además no está verificado lo
+        // manda a resolver algo que no destraba nada — y le revela información de su expediente
+        // antes de haber comprobado quién es.
+        //
+        // Y **falla cerrado**: si party no contesta, el veredicto que llega bloquea. Lo contrario
+        // sería originar crédito sin haber comprobado listas porque un servicio estaba caído.
+        PartyReader.Verification verification = partyReader.verificationOf(cmd.prospectId());
+        if (!verification.allowsToProceed()) {
+            log.warn("Solicitud bloqueada prospectId={} productType={} — {}",
+                    cmd.prospectId(), cmd.productType(), verification.blockReason());
+            throw new PersonNotVerifiedException(cmd.prospectId(), verification.blockReason());
+        }
 
         // OA-03: one active application per (prospectId, productType)
         if (applicationRepository.existsActiveByProspectIdAndProductType(

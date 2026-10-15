@@ -65,7 +65,7 @@ public class BusinessDayRunner {
     }
 
     public record ResultadoDelDia(LocalDate businessDate, Map<ClosePhase, ResultadoDeFase> fases) {
-        public boolean todoSellado() { return fases.values().stream().allMatch(ResultadoDeFase::sellada); }
+        public boolean allSealed() { return fases.values().stream().allMatch(ResultadoDeFase::sellada); }
     }
 
     public record ResultadoDeFase(int unidades, int hechas, int fallidas, int omitidas, boolean sellada) {}
@@ -77,22 +77,22 @@ public class BusinessDayRunner {
      *                 para acortar el tiempo: cada uno tiene su candado, su corrida y su sello.
      */
     public ResultadoDelDia runBusinessDay(LocalDate businessDate, String scopeKey) {
-        Map<ClosePhase, ResultadoDeFase> resultados = new LinkedHashMap<>();
+        Map<ClosePhase, ResultadoDeFase> results = new LinkedHashMap<>();
 
         for (ClosePhase fase : ClosePhase.dailyOrder()) {
             if (fase == ClosePhase.SEAL || fase == ClosePhase.PROPAGATE) continue;   // no son de unidades
             if (!procesadores.containsKey(fase) && fase != ClosePhase.RECONCILE) continue;
 
-            resultados.put(fase, runPhase(businessDate, fase, scopeKey));
+            results.put(fase, runPhase(businessDate, fase, scopeKey));
         }
 
-        log.info("Día de negocio {} corrido alcance={} fases={}", businessDate, scopeKey, resultados.size());
-        return new ResultadoDelDia(businessDate, resultados);
+        log.info("Día de negocio {} corrido alcance={} fases={}", businessDate, scopeKey, results.size());
+        return new ResultadoDelDia(businessDate, results);
     }
 
     /** Una fase: planificar, trabajar hasta agotar, sellar. */
     public ResultadoDeFase runPhase(LocalDate businessDate, ClosePhase fase, String scopeKey) {
-        var plan = planner.plan(businessDate, fase, scopeKey, run -> materializar(run, businessDate, fase));
+        var plan = planner.plan(businessDate, fase, scopeKey, run -> materialize(run, businessDate, fase));
         if (plan.isEmpty()) {
             // Otro pod tiene el candado de planificación. No es un fallo: se reintenta en el
             // siguiente tick y mientras tanto ese pod ya está materializando.
@@ -107,7 +107,7 @@ public class BusinessDayRunner {
 
         CloseUnitProcessor procesador = procesadores.get(fase);
         if (procesador != null) {
-            trabajarHastaAgotar(run, businessDate, procesador);
+            workUntilDrained(run, businessDate, procesador);
         }
 
         int hechas   = units.countByStatus(run.getRunId(), UnitStatus.DONE.name());
@@ -118,7 +118,7 @@ public class BusinessDayRunner {
         boolean sellada = false;
         if (fallidas == 0) {
             run.seal();
-            sellarCifras(businessDate, fase, scopeKey, hechas + omitidas);
+            sealFigures(businessDate, fase, scopeKey, hechas + omitidas);
             sellada = true;
         } else {
             log.warn("Fase {} de {} NO sella: {} unidades fallidas", fase, businessDate, fallidas);
@@ -129,11 +129,11 @@ public class BusinessDayRunner {
     }
 
     /** Trabaja lotes hasta que no queden pendientes. El tope evita un bucle infinito si algo se atasca. */
-    private void trabajarHastaAgotar(CloseRun run, LocalDate businessDate, CloseUnitProcessor procesador) {
+    private void workUntilDrained(CloseRun run, LocalDate businessDate, CloseUnitProcessor procesador) {
         int vueltasMax = Math.max(10, run.getPlannedUnits() / Math.max(properties.getBatchSize(), 1) + 5);
         for (int i = 0; i < vueltasMax; i++) {
             var r = worker.workBatch(run.getRunId(), businessDate, procesador, 0);
-            if (!r.huboTrabajo()) break;
+            if (!r.didWork()) break;
         }
     }
 
@@ -143,7 +143,7 @@ public class BusinessDayRunner {
      * <p>Recorrer las cuentas en memoria para sumarlas sería repetir el error que este servicio
      * existe para corregir — y en la parte serial del cierre, que es la que manda el techo.
      */
-    private void sellarCifras(LocalDate businessDate, ClosePhase fase, String scopeKey, int unidades) {
+    private void sealFigures(LocalDate businessDate, ClosePhase fase, String scopeKey, int unidades) {
         if (seals.find(businessDate, fase, scopeKey).isPresent()) return;   // idempotente
 
         var t = seals.aggregateActive();
@@ -156,7 +156,7 @@ public class BusinessDayRunner {
     }
 
     /** Las unidades de la corrida: una por cuenta viva. */
-    private List<CloseUnit> materializar(CloseRun run, LocalDate businessDate, ClosePhase fase) {
+    private List<CloseUnit> materialize(CloseRun run, LocalDate businessDate, ClosePhase fase) {
         List<CloseUnit> unidades = new ArrayList<>();
         for (var perfil : profiles.findActiveForClosing(businessDate, 100_000)) {
             unidades.add(CloseUnit.of(run.getRunId(), perfil.getCreditAccountId().toString(),

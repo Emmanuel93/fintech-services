@@ -33,10 +33,10 @@ class InterestAccrualServiceTest {
 
     InterestAccrualService service;
 
-    static AccrualSchedule buildSchedule(BigDecimal principal, BigDecimal nominal, BigDecimal mora) {
+    static AccrualSchedule buildSchedule(BigDecimal principal, BigDecimal nominal, BigDecimal delinquency) {
         AccrualSchedule s = AccrualSchedule.create(
                 UUID.randomUUID(), UUID.randomUUID(), "PERSONAL_LOAN", "AMORTIZING",
-                nominal, mora, principal, principal, 3);
+                nominal, delinquency, principal, principal, 3);
         return s;
     }
 
@@ -101,7 +101,7 @@ class InterestAccrualServiceTest {
         BigDecimal principal = new BigDecimal("10000.00");
         AccrualSchedule schedule = buildSchedule(principal, new BigDecimal("0.24"), new BigDecimal("0.36"));
         LocalDate vencio = LocalDate.of(2026, 1, 5);
-        schedule.actualizarMora(new BigDecimal("1000.00"), vencio, LocalDate.of(2026, 1, 15), 3);
+        schedule.updateMoratorium(new BigDecimal("1000.00"), vencio, LocalDate.of(2026, 1, 15), 3);
         LocalDate today = LocalDate.of(2026, 1, 15);
 
         when(scheduleRepo.findById(schedule.getScheduleId())).thenReturn(Optional.of(schedule));

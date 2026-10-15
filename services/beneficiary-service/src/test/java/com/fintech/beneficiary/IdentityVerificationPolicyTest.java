@@ -3,7 +3,7 @@ package com.fintech.beneficiary;
 import com.fintech.beneficiary.application.port.out.IdentityVerificationGateway.VerificationOutcome;
 import com.fintech.beneficiary.application.port.out.KycProviderPort;
 import com.fintech.beneficiary.domain.IdentityDecision;
-import com.fintech.beneficiary.domain.IdentityVerificationMode;
+import com.fintech.beneficiary.domain.KycPolicy;
 import com.fintech.beneficiary.domain.VerificationSource;
 import com.fintech.beneficiary.infrastructure.adapter.out.verification.ConfigurableIdentityVerificationGateway;
 import com.fintech.beneficiary.infrastructure.adapter.out.verification.UnavailableKycProviderAdapter;
@@ -32,6 +32,10 @@ class IdentityVerificationPolicyTest {
     private static final UUID PLACEMENT = UUID.randomUUID();
     private static final UUID PROSPECT  = UUID.randomUUID();
 
+    /** F3b · la política ya no es una propiedad del servicio: la trae el producto de la colocación. */
+    private static final KycPolicy MANUAL    = KycPolicy.requiredManual();
+    private static final KycPolicy AUTOMATIC = new KycPolicy(true, true, true, "INCODE", true);
+
     private BeneficiaryProperties properties;
 
     @BeforeEach
@@ -53,58 +57,51 @@ class IdentityVerificationPolicyTest {
         };
     }
 
-    // ── Modo manual ──────────────────────────────────────────────────────────────────────────
+    // ── Producto sin automatización ──────────────────────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("configurado en MANUAL — el modo vigente, sin contrato de KYC")
+    @DisplayName("producto sin automatización — el caso vigente, sin contrato de KYC")
     class ManualMode {
 
         @Test
         @DisplayName("todo va a revisión humana y no se llama a nadie")
         void everythingGoesToAHuman() {
-            properties.getIdentityVerification().setMode(IdentityVerificationMode.MANUAL);
-
             // Un proveedor que explota si lo tocan: en manual no debe tocarse.
             KycProviderPort noLlamar = new KycProviderPort() {
                 @Override public Assessment assess(UUID p, UUID pr) {
-                    throw new AssertionError("En modo MANUAL no se debe consultar al proveedor");
+                    throw new AssertionError("Sin automatización no se debe consultar al proveedor");
                 }
                 @Override public String providerName() { return "NO_LLAMAR"; }
             };
 
-            VerificationOutcome outcome = gatewayWith(noLlamar).evaluate(PLACEMENT, PROSPECT);
+            VerificationOutcome outcome = gatewayWith(noLlamar).evaluate(PLACEMENT, PROSPECT, MANUAL);
 
             assertThat(outcome.requiresHumanReview()).isTrue();
             assertThat(outcome.decision()).isEqualTo(IdentityDecision.PENDING);
             // El motivo viaja: la cola tiene que decir por qué está ahí.
-            assertThat(outcome.reasonSummary()).isEqualTo("REVISION_MANUAL_CONFIGURADA");
+            assertThat(outcome.reasonSummary()).isEqualTo("REVISION_MANUAL_POR_PRODUCTO");
         }
 
         @Test
         @DisplayName("la estrategia se puede consultar, para que la consola la diga en vez de adivinarla")
         void theStrategyIsVisible() {
-            properties.getIdentityVerification().setMode(IdentityVerificationMode.MANUAL);
-            assertThat(gatewayWith(new UnavailableKycProviderAdapter()).describeStrategy()).isEqualTo("MANUAL");
+            assertThat(gatewayWith(new UnavailableKycProviderAdapter()).describeStrategy(MANUAL))
+                    .isEqualTo("MANUAL");
         }
     }
 
-    // ── Modo automático ──────────────────────────────────────────────────────────────────────
+    // ── Producto con automatización ──────────────────────────────────────────────────────────────────────
 
     @Nested
-    @DisplayName("configurado en AUTOMATIC — el analista recibe sólo las excepciones")
+    @DisplayName("producto con automatización — el analista recibe sólo las excepciones")
     class AutomaticMode {
-
-        @BeforeEach
-        void enableAutomatic() {
-            properties.getIdentityVerification().setMode(IdentityVerificationMode.AUTOMATIC);
-        }
 
         @Test
         @DisplayName("con todos los umbrales cumplidos verifica solo, sin tocar a una persona")
         void allThresholdsMetVerifiesAutomatically() {
             var outcome = gatewayWith(provider(KycProviderPort.Assessment.of(
                     Map.of("facialMatch", 0.97, "liveness", 0.95), List.of())))
-                    .evaluate(PLACEMENT, PROSPECT);
+                    .evaluate(PLACEMENT, PROSPECT, AUTOMATIC);
 
             assertThat(outcome.requiresHumanReview()).isFalse();
             assertThat(outcome.decision()).isEqualTo(IdentityDecision.VERIFIED);
@@ -116,7 +113,7 @@ class IdentityVerificationPolicyTest {
         void belowThresholdGoesToTheQueue() {
             var outcome = gatewayWith(provider(KycProviderPort.Assessment.of(
                     Map.of("facialMatch", 0.82, "liveness", 0.95), List.of())))
-                    .evaluate(PLACEMENT, PROSPECT);
+                    .evaluate(PLACEMENT, PROSPECT, AUTOMATIC);
 
             assertThat(outcome.requiresHumanReview()).isTrue();
             assertThat(outcome.reasonSummary()).contains("UMBRAL_NO_ALCANZADO", "facialMatch", "0.82", "0.9");
@@ -129,7 +126,7 @@ class IdentityVerificationPolicyTest {
             // pasó — y no saberlo es exactamente el caso que va a una persona.
             var outcome = gatewayWith(provider(KycProviderPort.Assessment.of(
                     Map.of("facialMatch", 0.99), List.of())))
-                    .evaluate(PLACEMENT, PROSPECT);
+                    .evaluate(PLACEMENT, PROSPECT, AUTOMATIC);
 
             assertThat(outcome.requiresHumanReview()).isTrue();
             assertThat(outcome.reasonSummary()).contains("UMBRAL_SIN_MEDIR", "liveness");
@@ -140,7 +137,7 @@ class IdentityVerificationPolicyTest {
         void aFailedDocumentCheckGoesToTheQueue() {
             var outcome = gatewayWith(provider(KycProviderPort.Assessment.of(
                     Map.of("facialMatch", 0.99, "liveness", 0.99), List.of("INE_ILEGIBLE"))))
-                    .evaluate(PLACEMENT, PROSPECT);
+                    .evaluate(PLACEMENT, PROSPECT, AUTOMATIC);
 
             assertThat(outcome.requiresHumanReview()).isTrue();
             assertThat(outcome.reasonSummary()).contains("DOCUMENTO_NO_VALIDADO", "INE_ILEGIBLE");
@@ -153,7 +150,7 @@ class IdentityVerificationPolicyTest {
         void anUnavailableProviderFallsBackToManual() {
             var outcome = gatewayWith(provider(
                     KycProviderPort.Assessment.unavailable("timeout tras 3 reintentos")))
-                    .evaluate(PLACEMENT, PROSPECT);
+                    .evaluate(PLACEMENT, PROSPECT, AUTOMATIC);
 
             assertThat(outcome.requiresHumanReview()).isTrue();
             assertThat(outcome.reasonSummary()).contains("PROVEEDOR_NO_DISPONIBLE", "timeout");
@@ -171,7 +168,7 @@ class IdentityVerificationPolicyTest {
 
             // El puerto promete no lanzar, pero un adaptador nuevo podría olvidarlo. Que eso tumbe
             // una colocación es justo lo que el bloque de contención impide.
-            var outcome = gatewayWith(malPortado).evaluate(PLACEMENT, PROSPECT);
+            var outcome = gatewayWith(malPortado).evaluate(PLACEMENT, PROSPECT, AUTOMATIC);
 
             assertThat(outcome.requiresHumanReview()).isTrue();
             assertThat(outcome.reasonSummary()).contains("PROVEEDOR_ERROR", "connection reset");
@@ -180,9 +177,9 @@ class IdentityVerificationPolicyTest {
         @Test
         @DisplayName("sin adaptador de proveedor se degrada igual — el servicio arranca y opera")
         void withoutAProviderItStillWorks() {
-            // Es el estado real hoy: modo automático encendido y sin contrato. **No revienta**: la
-            // bandera controla el flujo, no el arranque.
-            var outcome = gatewayWith(new UnavailableKycProviderAdapter()).evaluate(PLACEMENT, PROSPECT);
+            // Es el estado real hoy: un producto que declara automatización y todavía no hay
+            // contrato. **No revienta**: la política controla el flujo, no el arranque.
+            var outcome = gatewayWith(new UnavailableKycProviderAdapter()).evaluate(PLACEMENT, PROSPECT, AUTOMATIC);
 
             assertThat(outcome.requiresHumanReview()).isTrue();
             assertThat(outcome.reasonSummary()).contains("PROVEEDOR_NO_DISPONIBLE", "Sin contrato");
@@ -191,14 +188,14 @@ class IdentityVerificationPolicyTest {
         @Test
         @DisplayName("ninguna rama devuelve nunca un veredicto sin decisión")
         void everyBranchProducesAnOutcome() {
-            List<KycProviderPort.Assessment> casos = List.of(
+            List<KycProviderPort.Assessment> cases = List.of(
                     KycProviderPort.Assessment.unavailable("caído"),
                     KycProviderPort.Assessment.of(Map.of(), List.of()),
                     KycProviderPort.Assessment.of(Map.of("facialMatch", 0.5), List.of("X")),
                     KycProviderPort.Assessment.of(Map.of("facialMatch", 0.99, "liveness", 0.99), List.of()));
 
-            for (var caso : casos) {
-                var outcome = gatewayWith(provider(caso)).evaluate(PLACEMENT, PROSPECT);
+            for (var caso : cases) {
+                var outcome = gatewayWith(provider(caso)).evaluate(PLACEMENT, PROSPECT, AUTOMATIC);
                 assertThat(outcome.decision()).isNotNull();
                 // Todo lo que va a una persona lleva motivo. Un caso sin explicación en la cola es
                 // un caso que el analista tiene que revisar de cero.

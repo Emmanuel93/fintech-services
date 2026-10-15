@@ -72,6 +72,7 @@ public class CreditProductCatalogService {
         validateStructuralFields(productType, minTerm, maxTerm, defaultTerm,
                 minAmount, maxAmount, defaultCreditLine, minCreditLine, maxCreditLine);
         validateInstallmentFields(productType, amortizationType, defaultPaymentFrequency, allowedPaymentFrequencies);
+        validateKycOptions(productCode, capabilities);
 
         int nextVersion = repository.findMaxVersionByProductCode(productCode) + 1;
 
@@ -187,7 +188,7 @@ public class CreditProductCatalogService {
      */
     @org.springframework.context.event.EventListener(
             org.springframework.boot.context.event.ApplicationReadyEvent.class)
-    public void republicarCatalogoAlArrancar() {
+    public void republishCatalogOnStartup() {
         List<CreditProductDefinition> activos = repository.findByStatus(ProductStatus.ACTIVE);
         int publicados = 0;
         for (CreditProductDefinition d : activos) {
@@ -381,6 +382,25 @@ public class CreditProductCatalogService {
                 throw new IllegalArgumentException(
                         productType + " (INSTALLMENT) requires minAmount and maxAmount");
             }
+        }
+    }
+
+    /**
+     * F3b · la verificación de identidad se rechaza al declararla, no se avisa al consumirla.
+     *
+     * <p>Las opciones de pago siguen el otro camino —cartera las registra con un {@code WARN}— y
+     * ahí está bien: una contradicción de diferimiento hace que un producto mienta sobre lo que
+     * ofrece. Aquí no. Las dos formas de equivocarse tienen consecuencias que no se pueden dejar
+     * pasar con una línea de log: o alguien queda registrado sin verificar, o toda solicitud del
+     * producto se atora sin camino para resolverse. Un catálogo que acepta eso y lo cuenta después
+     * ya publicó el producto.
+     */
+    private void validateKycOptions(String productCode, Capabilities capabilities) {
+        if (capabilities == null) return;   // el default de Capabilities ya exige KYC manual
+        List<String> males = capabilities.kycOptions().inconsistencies();
+        if (!males.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Configuración de KYC incoherente en " + productCode + ": " + String.join(" · ", males));
         }
     }
 

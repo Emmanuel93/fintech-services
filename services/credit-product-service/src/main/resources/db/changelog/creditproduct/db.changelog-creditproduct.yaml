@@ -161,3 +161,12 @@ databaseChangeLog:
             path: db/changelog/creditproduct/019-opciones-de-pago-coherentes.sql
             relativeToChangelogFile: false
             splitStatements: true
+
+  - changeSet:
+      id: 020-kyc-por-producto
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/020-kyc-por-producto.sql
+            relativeToChangelogFile: false
+            splitStatements: false

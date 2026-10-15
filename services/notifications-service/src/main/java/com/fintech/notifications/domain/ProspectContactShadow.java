@@ -9,7 +9,7 @@ import java.util.UUID;
  * Paso 1 del prerequisito de contacto (ver T2_notifications.md §Prerequisito crítico): ningún
  * servicio persiste phone/email contra un partyId — se capturan aquí desde
  * {@code origination.prospect-created}, el único punto del sistema donde ese dato viaja hoy.
- * {@code firstName} se lleva también para personalizar el copy ({@code {{nombre}}}).
+ * {@code firstName} se lleva también para personalizar el copy ({@code {{firstName}}}).
  */
 @Entity
 @Table(name = "prospect_contact_shadow", schema = "notifications")

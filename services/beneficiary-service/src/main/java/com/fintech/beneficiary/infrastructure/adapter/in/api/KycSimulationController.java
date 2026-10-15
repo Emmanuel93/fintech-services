@@ -133,11 +133,11 @@ class KycSimulationController {
     private static String syntheticCurp(String[] names, String phone) {
         String paterno = ascii(names[1]);
         String materno = ascii(names[2]);
-        String nombre  = ascii(names[0]);
-        String initials = letter(paterno, 0) + vowel(paterno) + letter(materno, 0) + letter(nombre, 0);
+        String name  = ascii(names[0]);
+        String initials = letter(paterno, 0) + vowel(paterno) + letter(materno, 0) + letter(name, 0);
         // AAAAdddddd H|M EE CCC d — 18 posiciones exactas.
         return (initials + "900612" + "MDF"
-                + letter(paterno, 1) + letter(materno, 1) + letter(nombre, 1)
+                + letter(paterno, 1) + letter(materno, 1) + letter(name, 1)
                 + phone.charAt(8) + phone.charAt(9)).toUpperCase();
     }
 

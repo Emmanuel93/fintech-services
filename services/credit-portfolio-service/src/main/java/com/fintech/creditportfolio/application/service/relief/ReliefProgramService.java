@@ -40,16 +40,16 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
     /** Tamaño de la muestra que devuelve el padrón simulado; no es un tope del otorgamiento. */
     private static final int MUESTRA = 20;
 
-    private final ReliefProgramRepository programas;
+    private final ReliefProgramRepository programs;
     private final CreditAccountRepository accounts;
     private final InstallmentRepository installments;
     private final CreditPortfolioEventPublisher eventPublisher;
 
-    public ReliefProgramService(ReliefProgramRepository programas,
+    public ReliefProgramService(ReliefProgramRepository programs,
                                 CreditAccountRepository accounts,
                                 InstallmentRepository installments,
                                 CreditPortfolioEventPublisher eventPublisher) {
-        this.programas      = programas;
+        this.programs      = programs;
         this.accounts       = accounts;
         this.installments   = installments;
         this.eventPublisher = eventPublisher;
@@ -57,63 +57,63 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
 
     @Override
     @Transactional
-    public ReliefProgram proponer(Proponer alta, String proposedBy) {
-        ReliefProgram p = ReliefProgram.proponer(alta.name(), alta.reason(), alta.deferredPeriods(),
+    public ReliefProgram propose(Proponer alta, String proposedBy) {
+        ReliefProgram p = ReliefProgram.propose(alta.name(), alta.reason(), alta.deferredPeriods(),
                 alta.validFrom(), alta.validTo(), alta.productCode(), alta.originUnitCode(),
                 alta.region(), alta.maxDaysDelinquent(), alta.eligibilityCutoffDate(),
                 alta.accrualDuringRelief(), proposedBy);
         log.info("Programa de apoyo PROPUESTO id={} nombre='{}' motivo={} períodos={} por={}",
                 p.getId(), p.getName(), p.getReason(), p.getDeferredPeriods(), proposedBy);
-        return programas.save(p);
+        return programs.save(p);
     }
 
     @Override
     @Transactional
-    public ReliefProgram autorizar(UUID programId, String approvedBy) {
-        ReliefProgram p = requerir(programId);
-        p.autorizar(approvedBy);
+    public ReliefProgram authorize(UUID programId, String approvedBy) {
+        ReliefProgram p = require(programId);
+        p.authorize(approvedBy);
         log.warn("Programa de apoyo AUTORIZADO id={} nombre='{}' por={} — la reserva de la cartera "
                         + "alcanzada SUBIRÁ por el paso a STAGE_2",
                 p.getId(), p.getName(), approvedBy);
-        return programas.save(p);
+        return programs.save(p);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Padron simularPadron(UUID programId) {
-        ReliefProgram p = requerir(programId);
-        List<CreditAccount> alcanzadas = alcanzadasPor(p);
-        List<UUID> elegibles = alcanzadas.stream()
-                .filter(c -> !yaEstaApoyada(c.getCreditAccountId()))
+    public EligibilityRoster simulateRoster(UUID programId) {
+        ReliefProgram p = require(programId);
+        List<CreditAccount> reached = reachedBy(p);
+        List<UUID> eligible = reached.stream()
+                .filter(c -> !isAlreadyUnderRelief(c.getCreditAccountId()))
                 .map(CreditAccount::getCreditAccountId)
                 .toList();
-        return new Padron(programId, elegibles.size(), alcanzadas.size() - elegibles.size(),
-                elegibles.stream().limit(MUESTRA).toList());
+        return new EligibilityRoster(programId, eligible.size(), reached.size() - eligible.size(),
+                eligible.stream().limit(MUESTRA).toList());
     }
 
     @Override
     @Transactional
-    public int otorgar(UUID programId) {
-        ReliefProgram p = requerir(programId);
-        if (!p.estaAutorizado()) {
+    public int grant(UUID programId) {
+        ReliefProgram p = require(programId);
+        if (!p.isAuthorized()) {
             throw new IllegalStateException("El programa " + programId + " está en " + p.getStatus()
                     + ": sólo se otorga uno APPROVED");
         }
 
         int inscritas = 0;
-        int yaApoyadas = 0;
-        for (CreditAccount cuenta : alcanzadasPor(p)) {
+        int alreadySupported = 0;
+        for (CreditAccount account : reachedBy(p)) {
             // Reejecutar el otorgamiento —que es lo que pasa cuando alguien reintenta un lote que
             // pareció fallar— no debe correr los vencimientos otra vez.
-            if (programas.existsEnrollment(programId, cuenta.getCreditAccountId())) {
+            if (programs.existsEnrollment(programId, account.getCreditAccountId())) {
                 continue;
             }
             // Y tampoco si viene de OTRO programa vigente: dos apoyos no se suman.
-            if (yaEstaApoyada(cuenta.getCreditAccountId())) {
-                yaApoyadas++;
+            if (isAlreadyUnderRelief(account.getCreditAccountId())) {
+                alreadySupported++;
                 continue;
             }
-            inscribir(p, cuenta);
+            enroll(p, account);
             inscritas++;
         }
 
@@ -121,14 +121,14 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
         // un segmento entero. Que haya cartera excluida por venir de otro programa es justo lo que
         // quien revisa necesita ver sin ir a buscarlo.
         log.warn("Programa de apoyo OTORGADO id={} nombre='{}' cuentas={} yaApoyadas={} períodos={} devengo={}",
-                programId, p.getName(), inscritas, yaApoyadas, p.getDeferredPeriods(),
+                programId, p.getName(), inscritas, alreadySupported, p.getDeferredPeriods(),
                 p.getAccrualDuringRelief());
         return inscritas;
     }
 
-    private void inscribir(ReliefProgram p, CreditAccount cuenta) {
+    private void enroll(ReliefProgram p, CreditAccount account) {
         List<Installment> calendario = installments
-                .findByScheduleIdOrdered(cuenta.getCreditAccountId()).stream()
+                .findByScheduleIdOrdered(account.getCreditAccountId()).stream()
                 .filter(i -> i.getStatus() != InstallmentStatus.PAID)
                 .sorted(Comparator.comparing(Installment::getDueDate))
                 .toList();
@@ -137,20 +137,20 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
 
         // Se corren TODAS las pendientes, no sólo las primeras N: dejar las de atrás quietas
         // amontonaría los vencimientos justo cuando la vigencia termina.
-        String cadencia = cuenta.isRevolving() ? "MONTHLY" : "MONTHLY";
-        for (Installment cuota : calendario) {
-            LocalDate nuevo = cuota.getDueDate();
+        String cadencia = account.isRevolving() ? "MONTHLY" : "MONTHLY";
+        for (Installment installment : calendario) {
+            LocalDate updated = installment.getDueDate();
             for (int i = 0; i < p.getDeferredPeriods(); i++) {
-                nuevo = AmortizationEngine.firstDueDate(nuevo, cadencia);
+                updated = AmortizationEngine.firstDueDate(updated, cadencia);
             }
-            cuota.correrVencimiento(nuevo);
+            installment.shiftDueDate(updated);
         }
         installments.saveAll(calendario);
 
         LocalDate despues = calendario.isEmpty() ? null : calendario.get(0).getDueDate();
 
-        int dpdAlEntrar = cuenta.getDaysDelinquent();
-        programas.saveEnrollment(ReliefEnrollment.de(p.getId(), cuenta.getCreditAccountId(),
+        int dpdAlEntrar = account.getDaysDelinquent();
+        programs.saveEnrollment(ReliefEnrollment.from(p.getId(), account.getCreditAccountId(),
                 dpdAlEntrar, calendario.size(), antes, despues));
 
         // **El apoyo surte efecto por el mecanismo que ya existe, no por uno nuevo.** Con los
@@ -159,14 +159,14 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
         //
         // Se recalcula y publica AQUÍ en vez de esperar al job nocturno: entre el otorgamiento y la
         // medianoche, cobranza seguiría escalando a alguien a quien se le acaba de dar un respiro.
-        recalcularDpd(cuenta, calendario);
+        recalculateDpd(account, calendario);
 
         // BK-35 · el otorgamiento marca forborne. Riesgo aplica el piso STAGE_2 y reinicia el reloj
         // de cura, igual que con cualquier reestructura. Es el costo asumido del apoyo.
         eventPublisher.publishReliefGranted(new ReliefGrantedEvent(
-                p.getId(), p.getName(), p.getReason(), cuenta.getCreditAccountId(),
-                cuenta.getObligorPartyId(), p.getDeferredPeriods(), p.getValidTo(),
-                p.condonaDevengo(), antes, despues));
+                p.getId(), p.getName(), p.getReason(), account.getCreditAccountId(),
+                account.getObligorPartyId(), p.getDeferredPeriods(), p.getValidTo(),
+                p.waivesAccrual(), antes, despues));
     }
 
     /**
@@ -176,7 +176,7 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
      * pagar— aplicado en el momento, para que el efecto del apoyo no dependa de a qué hora se
      * otorgó.
      */
-    private void recalcularDpd(CreditAccount cuenta, List<Installment> calendario) {
+    private void recalculateDpd(CreditAccount account, List<Installment> calendario) {
         LocalDate hoy = LocalDate.now();
         LocalDate masAntigua = calendario.stream()
                 .map(Installment::getDueDate)
@@ -186,18 +186,18 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
 
         int dias = masAntigua == null ? 0
                 : (int) java.time.temporal.ChronoUnit.DAYS.between(masAntigua, hoy);
-        java.math.BigDecimal capitalVencido = masAntigua == null ? java.math.BigDecimal.ZERO
+        java.math.BigDecimal overduePrincipal = masAntigua == null ? java.math.BigDecimal.ZERO
                 : calendario.stream()
                         .filter(i -> i.getDueDate().isBefore(hoy))
                         .map(Installment::getPrincipalAmount)
                         .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
 
-        cuenta.updateDelinquency(dias);
-        accounts.save(cuenta);
+        account.updateDelinquency(dias);
+        accounts.save(account);
 
         eventPublisher.publishDelinquencyStatusUpdated(new DelinquencyStatusUpdatedEvent(
-                cuenta.getCreditAccountId(), cuenta.getObligorPartyId(), cuenta.getContractNumber(),
-                dias, capitalVencido, masAntigua));
+                account.getCreditAccountId(), account.getObligorPartyId(), account.getContractNumber(),
+                dias, overduePrincipal, masAntigua));
     }
 
     /**
@@ -208,11 +208,11 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
      * programa anunciado hoy alcanzaría a quien dejó de pagar al enterarse de que venía.
      */
     /** Las que cumplen el criterio del programa, sin mirar todavía si ya vienen de otro. */
-    private List<CreditAccount> alcanzadasPor(ReliefProgram p) {
+    private List<CreditAccount> reachedBy(ReliefProgram p) {
         // Sólo cuentas ACTIVE: una liquidada o quebrantada no tiene vencimientos que correr, y
         // meterla al padrón inflaría la cifra que alguien mira para autorizar.
         return accounts.findAllByStatus(CreditAccountStatus.ACTIVE).stream()
-                .filter(c -> p.alcanzaA(c.getProductType(), c.getOriginUnitCode(), null,
+                .filter(c -> p.reaches(c.getProductType(), c.getOriginUnitCode(), null,
                         c.getDaysDelinquent()))
                 .toList();
     }
@@ -230,12 +230,12 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
      * cuenta: <b>un crédito no puede estar bajo dos apoyos a la vez</b>. Si hace falta extender el
      * apoyo, se otorga un programa con más períodos, no uno encima de otro.
      */
-    private boolean yaEstaApoyada(UUID creditAccountId) {
-        return !programas.findActiveEnrollmentsByAccount(creditAccountId).isEmpty();
+    private boolean isAlreadyUnderRelief(UUID creditAccountId) {
+        return !programs.findActiveEnrollmentsByAccount(creditAccountId).isEmpty();
     }
 
-    private ReliefProgram requerir(UUID id) {
-        return programas.findById(id).orElseThrow(
+    private ReliefProgram require(UUID id) {
+        return programs.findById(id).orElseThrow(
                 () -> new NoSuchElementException("Sin programa de apoyo " + id));
     }
 }

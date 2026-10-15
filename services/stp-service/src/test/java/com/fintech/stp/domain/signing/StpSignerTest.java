@@ -16,53 +16,53 @@ class StpSignerTest {
 
     private static final String CADENA = "||846|empresa|20230516|clave|90646|100.00||";
 
-    private static KeyPair empresaA;
-    private static KeyPair empresaB;
+    private static KeyPair companyA;
+    private static KeyPair companyB;
 
     @BeforeAll
     static void keys() throws NoSuchAlgorithmException {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
         generator.initialize(2048);
-        empresaA = generator.generateKeyPair();
-        empresaB = generator.generateKeyPair();
+        companyA = generator.generateKeyPair();
+        companyB = generator.generateKeyPair();
     }
 
     @Test
     @DisplayName("SG-T07 · SHA256withRSA es determinista: la misma cadena da el mismo sello")
     void deterministicSignature() {
-        String first = StpSigner.sign(CADENA, empresaA.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
-        String second = StpSigner.sign(CADENA, empresaA.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
+        String first = StpSigner.sign(CADENA, companyA.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
+        String second = StpSigner.sign(CADENA, companyA.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
         assertThat(first).isEqualTo(second);
     }
 
     @Test
     @DisplayName("SG-T08 · el sello verifica, y alterar un byte lo invalida")
     void verifyRoundTrip() {
-        String sello = StpSigner.sign(CADENA, empresaA.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
+        String seal = StpSigner.sign(CADENA, companyA.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
 
-        assertThat(StpSigner.verify(CADENA, sello, empresaA.getPublic(),
+        assertThat(StpSigner.verify(CADENA, seal, companyA.getPublic(),
                 SignatureAlgorithm.SHA256_WITH_RSA)).isTrue();
-        assertThat(StpSigner.verify(CADENA.replace("100.00", "100.01"), sello, empresaA.getPublic(),
+        assertThat(StpSigner.verify(CADENA.replace("100.00", "100.01"), seal, companyA.getPublic(),
                 SignatureAlgorithm.SHA256_WITH_RSA)).isFalse();
     }
 
     @Test
     @DisplayName("SG-T08 · un sello corrupto devuelve false, no lanza — SO-04 es un resultado esperado")
     void corruptSignatureReturnsFalse() {
-        assertThat(StpSigner.verify(CADENA, "no-es-base64!!", empresaA.getPublic(),
+        assertThat(StpSigner.verify(CADENA, "no-es-base64!!", companyA.getPublic(),
                 SignatureAlgorithm.SHA256_WITH_RSA)).isFalse();
-        assertThat(StpSigner.verify(CADENA, null, empresaA.getPublic(),
+        assertThat(StpSigner.verify(CADENA, null, companyA.getPublic(),
                 SignatureAlgorithm.SHA256_WITH_RSA)).isFalse();
     }
 
     @Test
     @DisplayName("SG-T09 · aislamiento entre empresas: sellos distintos y verificación cruzada falla")
     void multiTenantIsolation() {
-        String selloA = StpSigner.sign(CADENA, empresaA.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
-        String selloB = StpSigner.sign(CADENA, empresaB.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
+        String sealA = StpSigner.sign(CADENA, companyA.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
+        String sealB = StpSigner.sign(CADENA, companyB.getPrivate(), SignatureAlgorithm.SHA256_WITH_RSA);
 
-        assertThat(selloA).isNotEqualTo(selloB);
-        assertThat(StpSigner.verify(CADENA, selloA, empresaB.getPublic(),
+        assertThat(sealA).isNotEqualTo(sealB);
+        assertThat(StpSigner.verify(CADENA, sealA, companyB.getPublic(),
                 SignatureAlgorithm.SHA256_WITH_RSA)).isFalse();
     }
 

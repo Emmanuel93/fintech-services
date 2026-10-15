@@ -76,34 +76,34 @@ public class CutoffPhaseProcessor implements CloseUnitProcessor {
             throw new CloseRunWorker.UnitSkipped("no le toca corte el " + businessDate);
         }
 
-        CutoffSchedule corte = hoy.get();
-        ClosePolicy politica = policyResolver.require(null, perfil.getProductType(), businessDate);
+        CutoffSchedule cutoff = hoy.get();
+        ClosePolicy policy = policyResolver.require(null, perfil.getProductType(), businessDate);
 
         BigDecimal principal = perfil.getPrincipalBalance();
-        BigDecimal saldo     = perfil.getTotalDebt();
-        BigDecimal devengado = saldo.subtract(principal).max(BigDecimal.ZERO);
+        BigDecimal balance     = perfil.getTotalDebt();
+        BigDecimal devengado = balance.subtract(principal).max(BigDecimal.ZERO);
 
-        BigDecimal exigible = perfil.isRevolving() ? saldo : null;
+        BigDecimal amountDue = perfil.isRevolving() ? balance : null;
         BigDecimal minimo   = perfil.isRevolving()
-                ? saldo.multiply(PAGO_MINIMO_PCT).setScale(2, RoundingMode.HALF_UP)
+                ? balance.multiply(PAGO_MINIMO_PCT).setScale(2, RoundingMode.HALF_UP)
                 : null;
 
-        corte.seal(principal, devengado, BigDecimal.ZERO, exigible, minimo, 0);
-        cutoffs.save(corte);
+        cutoff.seal(principal, devengado, BigDecimal.ZERO, amountDue, minimo, 0);
+        cutoffs.save(cutoff);
 
         // Se agenda el ciclo siguiente si el calendario no lo tenía materializado — es lo que
         // mantiene vivo el ciclo de un revolvente, que no tiene plazo.
-        int siguiente = corte.getCycleNumber() + 1;
-        if (cutoffs.find(perfil.getCreditAccountId(), siguiente).isEmpty()) {
-            deriver.derive(perfil, politica, siguiente).ifPresent(cutoffs::save);
+        int next = cutoff.getCycleNumber() + 1;
+        if (cutoffs.find(perfil.getCreditAccountId(), next).isEmpty()) {
+            deriver.derive(perfil, policy, next).ifPresent(cutoffs::save);
         }
-        cutoffs.find(perfil.getCreditAccountId(), siguiente)
-                .ifPresent(c -> perfil.scheduleNextCutoff(siguiente, c.getCutoffDate()));
+        cutoffs.find(perfil.getCreditAccountId(), next)
+                .ifPresent(c -> perfil.scheduleNextCutoff(next, c.getCutoffDate()));
         profiles.save(perfil);
 
-        publisher.publishCutoffClosed(corte, perfil.getObligorPartyId(), perfil.getProductType());
+        publisher.publishCutoffClosed(cutoff, perfil.getObligorPartyId(), perfil.getProductType());
 
         log.info("Corte sellado cuenta={} ciclo={} fecha={} saldo={} minimo={}",
-                perfil.getCreditAccountId(), corte.getCycleNumber(), businessDate, saldo, minimo);
+                perfil.getCreditAccountId(), cutoff.getCycleNumber(), businessDate, balance, minimo);
     }
 }

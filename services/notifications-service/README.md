@@ -191,6 +191,36 @@ está bien y parece que funciona.
 
 Cerrar esto es sembrar filas, no escribir código.
 
+## Variables de plantilla
+
+Una plantilla es texto en español con huecos `{{variable}}`; los llena
+`NotificationTriggerService` antes de mandar. **El nombre de la variable no es texto: es contrato
+entre el código que la escribe y la plantilla que la lee.**
+
+| Variable | Qué lleva | Quién la escribe |
+|---|---|---|
+| `firstName` | nombre de pila del destinatario | `baseVars` — va en **todas** |
+| `offeredAmount` · `offeredTerm` · `nominalRate` · `cat` · `validUntil` | la oferta | oferta emitida |
+| `productType` · `creditLimit` | el producto dado de alta | cuenta activada |
+| `amount` | importe de la disposición | disposición completada |
+| `installmentAmount` · `dueDate` | el próximo pago | recordatorio de pago |
+| `installmentNumber` · `totalInstallments` · `totalAmount` · `remainingInstallments` | el avance del plan | pago aplicado |
+| `daysPastDue` · `daysDelinquent` · `totalDebt` | el atraso | mora |
+| `amountPaid` · `hasOutstandingBalance` | el pago recibido | pago en mora |
+| `link` | liga a la app | varias |
+| `cliente` | nombre del cliente asignado | `ExecutiveAssignedListener` (avisos al personal) |
+
+**Por qué importa que estén cuadradas.** `NotificationTemplate.render` **deja el hueco crudo cuando
+falta la variable** — no falla, no avisa: manda el mensaje con `{{resultado}}` literal al
+destinatario. Así que agregar un hueco a una plantilla obliga a escribir la variable, y renombrar una
+variable obliga a migrar las plantillas ya sembradas en la misma entrega (ver
+`015-rename-template-placeholders.sql`).
+
+Hoy hay dos huecos sin dueño —`{{solicitud}}` y `{{resultado}}`, en las dos plantillas de personal
+que **nadie dispara**—; están anotados como deuda 13 en el README raíz. El cruce que lo detecta es
+comparar los `{{…}}` de los changelogs contra los `vars.put(…)` del código; no hay prueba que lo
+vigile.
+
 ## Canales y sus adaptadores
 
 `NotificationChannel`: `PUSH_NOTIFICATION` · `EMAIL` · `WHATSAPP` · `SMS` · `IVR_CALLBACK` · `IN_APP`.
@@ -299,3 +329,14 @@ demás es el correcto.
 
 Análisis por perfil y orden sugerido en
 [`docs/NOTIFICATIONS_EVENT_PLAN.md`](../../docs/NOTIFICATIONS_EVENT_PLAN.md) §6.
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

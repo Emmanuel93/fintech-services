@@ -9,7 +9,7 @@ import java.util.UUID;
 /** «¿Por dónde sale este pago?» — cuenta, rail y proveedor en una sola respuesta. */
 public interface ResolvePayoutRouteUseCase {
 
-    record Peticion(UUID companyId, PayoutRail rail, BigDecimal amount) {}
+    record Request(UUID companyId, PayoutRail rail, BigDecimal amount) {}
 
-    PayoutDecision resolver(Peticion peticion);
+    PayoutDecision resolve(Request request);
 }

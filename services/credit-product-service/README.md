@@ -91,6 +91,43 @@ Cada definición lleva una matriz de capacidades que gobierna el motor de `credi
 
 Si no se envían en el `POST`, se derivan automáticamente del `productType`. Se pueden sobrescribir para configuraciones no estándar.
 
+### El bloque `kyc` — qué verificación de identidad exige el producto (F3b)
+
+```json
+"kyc": {
+  "kycRequired": true,
+  "amlRequired": true,
+  "automationEnabled": false,
+  "provider": "NONE",
+  "manualFallbackAllowed": true
+}
+```
+
+Era una variable de entorno del servicio que verifica (`BENEFICIARY_IDENTITY_VERIFICATION_MODE`), y
+por eso todos los productos de un ambiente compartían regla. Aquí es del producto: una línea de
+distribuidor y una tarjeta de uso propio pueden exigir cosas distintas, y cambiarlo es versionar el
+producto en vez de redesplegar con otra variable.
+
+Dos campos para el proveedor y no uno: *«no hay automatización»* y *«hay automatización con
+Incode»* son estados distintos de *«hay automatización y no sé con quién»*.
+
+**El default va al revés que el de `opcionesDePago`.** Ahí, lo que no se declara no se tiene — un
+producto viejo no debe amanecer permitiendo diferir compras. Aquí, un bloque ausente significa
+**exigido y manual**, nunca «sin KYC»: un hueco de configuración debe costar trabajo de analista,
+no gente registrada sin verificar.
+
+**Las combinaciones incoherentes se rechazan al declararlas**, no se avisan al consumirlas — a
+diferencia de `opcionesDePago`, que `credit-portfolio` registra con un `WARN`. Las dos formas de
+equivocarse tienen consecuencias que no admiten una línea de log: o alguien queda registrado sin
+verificar, o toda solicitud del producto se atora sin camino para resolverse.
+
+| Combinación | Por qué se rechaza |
+|---|---|
+| `automationEnabled` sin `provider` | la automatización está declarada y no se puede ejercer nunca |
+| `provider` sin `automationEnabled` | un proveedor configurado al que nadie llama |
+| `kycRequired=false` con lo demás encendido | parámetros para algo que el producto no hace |
+| exigido, sin automatización y sin `manualFallbackAllowed` | no queda ningún camino: todo se atora |
+
 ---
 
 ## Rate cards — precios por banda
@@ -537,3 +574,14 @@ docker compose --profile credit-product-service up -d
 
 **Reintentos:** régimen por defecto de la plataforma. Ver
 [README raíz §5.4](../../README.md#54-política-de-reintentos-y-dlt-kafka).
+
+---
+
+## Convención de idioma
+
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
+y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+
+Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
+regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
+[`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).

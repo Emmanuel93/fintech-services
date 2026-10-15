@@ -61,11 +61,11 @@ class AccountingAcceptanceTest {
         return journalRepository.save(JournalEntry.post(
                 "seed-" + UUID.randomUUID(), "CHARGE_ORDINARY_INTEREST", creditAccountId, partyId,
                 "1203", "4101", new BigDecimal("100"), "MXN", "Interés seed",
-                null, "S_SEED", periodoVigente(), java.time.Instant.now(), (short) 1));
+                null, "S_SEED", currentPeriod(), java.time.Instant.now(), (short) 1));
     }
 
     /** El período tal como lo deriva contabilidad: en su zona, no en la de la máquina. */
-    private static String periodoVigente() {
+    private static String currentPeriod() {
         return YearMonth.now(ZONA_CONTABLE).toString().replace("-", "");
     }
 
@@ -97,7 +97,7 @@ class AccountingAcceptanceTest {
     @Test
     void ac4_trialBalance_returns200() {
         seedEntry(UUID.randomUUID(), UUID.randomUUID());
-        String period = periodoVigente();
+        String period = currentPeriod();
         var resp = getList("/api/v1/accounting/trial-balance?period=" + period);
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(resp.getBody()).isNotEmpty();
@@ -105,7 +105,7 @@ class AccountingAcceptanceTest {
 
     @Test
     void ac5_billingRun_returns200() {
-        String period = periodoVigente();
+        String period = currentPeriod();
         var resp = restTemplate.exchange("/api/v1/accounting/billing-runs?period=" + period,
                 HttpMethod.POST, new HttpEntity<>(userHeaders()),
                 new ParameterizedTypeReference<Map<String, Object>>() {});

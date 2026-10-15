@@ -2,6 +2,8 @@ package com.fintech.beneficiary.application.service;
 
 import com.fintech.beneficiary.application.CreatePlacementCommand;
 import com.fintech.beneficiary.application.port.out.IdentityVerificationGateway;
+import com.fintech.beneficiary.domain.KycPolicy;
+import com.fintech.beneficiary.application.port.out.PersonScreeningReader;
 import com.fintech.beneficiary.application.port.out.PlacementEventPublisher;
 import com.fintech.beneficiary.application.port.out.PlacementRepository;
 import com.fintech.beneficiary.application.port.out.PlacementTransitionRepository;
@@ -53,6 +55,11 @@ class PlacementServiceTest {
     @Mock PlacementTransitionRepository transitionRepository;
     @Mock PlacementEventPublisher eventPublisher;
     @Mock IdentityVerificationGateway verificationGateway;
+    @Mock KycPolicyResolver kycPolicyResolver;
+    @Mock PersonScreeningReader personScreening;
+
+    /** El veredicto que deja pasar. Se nombra para que cada aprobación diga con qué pasó. */
+    private static final ScreeningVerdict DESPEJADA = new ScreeningVerdict("CLEARED", null);
 
     @Captor ArgumentCaptor<PlacementEvent> eventCaptor;
     @Captor ArgumentCaptor<PlacementTransition> transitionCaptor;
@@ -62,18 +69,18 @@ class PlacementServiceTest {
     @BeforeEach
     void setUp() {
         service = new PlacementService(placementRepository, transitionRepository, eventPublisher,
-                verificationGateway);
+                verificationGateway, kycPolicyResolver, personScreening);
     }
 
     private static CreatePlacementCommand command() {
-        return new CreatePlacementCommand(DISTRIBUTOR, LINE, "María Luisa Cortés Hernández",
+        return new CreatePlacementCommand(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa Cortés Hernández",
                 "5541829037", "Clienta de mi tienda desde 2023",
                 new BigDecimal("18000"), 12, PAYMENT, VerificationMode.SELF_SERVICE_LINK, EXPIRY,
                 LIMITS, new BigDecimal("205000"), "corr-1");
     }
 
     private Placement stored(PlacementStatus target) {
-        Placement p = Placement.draft(DISTRIBUTOR, LINE, "María Luisa Cortés Hernández", "5541829037",
+        Placement p = Placement.draft(DISTRIBUTOR, LINE, "DISTRIBUIDORA-QUINCENAL", "María Luisa Cortés Hernández", "5541829037",
                 null, new BigDecimal("18000"), 12, PAYMENT, VerificationMode.SELF_SERVICE_LINK, EXPIRY, LIMITS, null);
         switch (target) {
             case INVITED -> { }
@@ -86,17 +93,17 @@ class PlacementServiceTest {
             case APPROVED -> {
                 p.startKyc(); p.completeKyc(PROSPECT, PARTY, CLABE); p.bureauReady();
                 p.reviewIdentity(IdentityDecision.VERIFIED, VerificationSource.MANUAL, "analista-1", null);
-                p.approve(true);
+                p.approve(true, DESPEJADA);
             }
             case DISBURSING -> {
                 p.startKyc(); p.completeKyc(PROSPECT, PARTY, CLABE); p.bureauReady();
                 p.reviewIdentity(IdentityDecision.VERIFIED, VerificationSource.MANUAL, "analista-1", null);
-                p.approve(true); p.markDisbursing(DISPOSITION);
+                p.approve(true, DESPEJADA); p.markDisbursing(DISPOSITION);
             }
             case DISBURSED -> {
                 p.startKyc(); p.completeKyc(PROSPECT, PARTY, CLABE); p.bureauReady();
                 p.reviewIdentity(IdentityDecision.VERIFIED, VerificationSource.MANUAL, "analista-1", null);
-                p.approve(true); p.markDisbursing(DISPOSITION); p.markDisbursed();
+                p.approve(true, DESPEJADA); p.markDisbursing(DISPOSITION); p.markDisbursed();
             }
             default -> throw new IllegalArgumentException("estado no soportado por el helper: " + target);
         }
@@ -151,7 +158,7 @@ class PlacementServiceTest {
         service.startKyc(invited.getPlacementId());
 
         Placement inProgress = stored(PlacementStatus.KYC_IN_PROGRESS);
-        given(verificationGateway.evaluate(any(), any()))
+        given(verificationGateway.evaluate(any(), any(), any()))
                 .willReturn(IdentityVerificationGateway.VerificationOutcome
                         .requiresHumanReview("REVISION_MANUAL_CONFIGURADA"));
         service.completeKyc(inProgress.getPlacementId(), PROSPECT, PARTY, CLABE);
@@ -172,6 +179,7 @@ class PlacementServiceTest {
     @DisplayName("aprobar exige aceptación de riesgo y la evidencia viaja en el evento")
     void approvalCarriesTheRiskAcknowledgement() {
         given(placementRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+        given(personScreening.screeningOf(any())).willReturn(DESPEJADA);
         Placement p = stored(PlacementStatus.BUREAU_READY);
         UUID riskAckId = UUID.randomUUID();
 
@@ -190,6 +198,7 @@ class PlacementServiceTest {
     @DisplayName("sin aceptación de riesgo no se aprueba, no se guarda y no se publica nada")
     void approvalWithoutRiskAckChangesNothing() {
         Placement p = stored(PlacementStatus.BUREAU_READY);
+        given(personScreening.screeningOf(any())).willReturn(DESPEJADA);
 
         assertThatThrownBy(() -> service.approve(p.getPlacementId(), DISTRIBUTOR, false, null))
                 .isInstanceOf(PlacementValidationException.class);

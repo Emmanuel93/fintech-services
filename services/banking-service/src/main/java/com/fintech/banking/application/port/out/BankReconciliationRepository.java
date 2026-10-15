@@ -12,7 +12,7 @@ import java.util.UUID;
 
 public interface BankReconciliationRepository {
 
-    BankStatementLine saveLine(BankStatementLine linea);
+    BankStatementLine saveLine(BankStatementLine line);
 
     Optional<BankStatementLine> findLineByExternalId(UUID bankAccountId, String externalId);
 
@@ -25,7 +25,7 @@ public interface BankReconciliationRepository {
     /** Las partidas abiertas de una cuenta hasta una fecha. Son las que el sello tiene que sumar. */
     List<SuspenseEntry> findOpenSuspenseUpTo(UUID bankAccountId, LocalDate businessDate);
 
-    BankCloseSeal saveSeal(BankCloseSeal sello);
+    BankCloseSeal saveSeal(BankCloseSeal seal);
 
     Optional<BankCloseSeal> findSeal(UUID bankAccountId, LocalDate businessDate, String periodType);
 }

@@ -26,6 +26,13 @@ public record PartyResponse(
         String    cfdiUse,
         UUID      assignedExecutiveId,   // ejecutivo de cuenta (backoffice) — null si sin asignar
         String    assignedExecutiveName,
+        // ── Verificación de la persona (D16) ────────────────────────────────────────────────
+        // Van en la ficha y no en un endpoint aparte porque son de la persona y quien la consulta
+        // casi siempre necesita saber si puede operar con ella.
+        String    identityStatus,
+        String    screeningStatus,
+        boolean   verificationClear,
+        String    verificationBlockReason,
         Instant   createdAt
 ) {
     public static PartyResponse from(Party p) {
@@ -37,6 +44,8 @@ public record PartyResponse(
                 p.getRiskLevel(), p.getTotalScore(),
                 p.getTaxName(), p.getTaxRegime(), p.getTaxZipCode(), p.getCfdiUse(),
                 p.getAssignedExecutiveId(), p.getAssignedExecutiveName(),
+                p.getIdentityStatus(), p.getScreeningStatus(),
+                p.isVerificationClear(), p.getVerificationBlockReason(),
                 p.getCreatedAt()
         );
     }

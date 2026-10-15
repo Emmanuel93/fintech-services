@@ -46,8 +46,15 @@ public interface IdentityVerificationGateway {
         }
     }
 
-    VerificationOutcome evaluate(java.util.UUID placementId, java.util.UUID prospectId);
+    /**
+     * @param policy la política del <b>producto</b> de esta colocación (F3b). Viaja como argumento
+     *               y no se lee de configuración: dos colocaciones del mismo ambiente pueden tener
+     *               reglas distintas si son de productos distintos, y un adaptador que consultara
+     *               una propiedad global no podría distinguirlas.
+     */
+    VerificationOutcome evaluate(java.util.UUID placementId, java.util.UUID prospectId,
+                                 com.fintech.beneficiary.domain.KycPolicy policy);
 
-    /** Cómo se está verificando ahora, para que la consola lo diga en vez de que se adivine. */
-    String describeStrategy();
+    /** Cómo se verifica bajo esa política, para que la consola lo diga en vez de que se adivine. */
+    String describeStrategy(com.fintech.beneficiary.domain.KycPolicy policy);
 }

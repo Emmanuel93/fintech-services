@@ -34,6 +34,8 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+
+import _cumplimiento
 from collections import Counter
 
 try:
@@ -327,7 +329,19 @@ def alta(c: Cliente) -> bool:
     c.prospect_id = creado.get("userId")
 
     c.token = entrar(c)
-    return bool(c.prospect_id and c.token)
+    if not (c.prospect_id and c.token):
+        return False
+
+    # Cumplimiento: sin esto el alta queda a medias y la primera solicitud rebota.
+    #
+    # Desde D16 toda persona registrada obtiene veredicto de KYC y de listas, y
+    # `CreditApplicationService.start(...)` lo exige. Sin proveedor de KYC la identidad cae en
+    # `IN_REVIEW` —es el modo vigente— y la resuelve un analista: aquí el script hace su papel, y
+    # firma como `siembra-demo` para que nadie confunda esto con una revisión real.
+    if not _cumplimiento.despeja(c.prospect_id):
+        print(f"      ✗ {c.nombre_completo} quedó bloqueada en cumplimiento")
+        return False
+    return True
 
 
 def entrar(c: Cliente, intentos=20, pausa=0.5) -> str | None:

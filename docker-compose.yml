@@ -483,6 +483,39 @@ services:
     networks:
       - fintech-network
 
+  # D16 · las listas de gobierno contra las que se comprueba a una persona.
+  # Sin Redis: cargar listas no reparte trabajo entre réplicas, no hay candado que tomar.
+  compliance-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: compliance-service
+    image: fintech/compliance-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: *otel-agent
+      OTEL_SERVICE_NAME: "compliance-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports:
+      - "${COMPLIANCE_PORT:-8105}:8080"
+    <<: *app-mem
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
   closing-service:
     build:
       context: .

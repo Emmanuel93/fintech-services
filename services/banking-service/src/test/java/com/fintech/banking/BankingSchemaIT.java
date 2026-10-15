@@ -22,24 +22,24 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest
 class BankingSchemaIT extends AbstractIntegrationTest {
 
-    @Override protected List<String> esquemas() { return List.of("banking"); }
+    @Override protected List<String> schemas() { return List.of("banking"); }
 
     /**
      * El seed de ambiente bajo sobrevive al truncado. Sin esto, la primera prueba borra la cuenta y
      * la ruta que sembró Liquibase y a partir de ahí todo falla con «sin ruta» — el síntoma
-     * desconcertante que documenta {@code AbstractIntegrationTest#preservar()}.
+     * desconcertante que documenta {@code AbstractIntegrationTest#preserve()}.
      */
-    @Override protected List<String> preservar() { return List.of("bank_accounts", "payout_routes"); }
+    @Override protected List<String> preserve() { return List.of("bank_accounts", "payout_routes"); }
 
     @Test
     @DisplayName("el changelog crea las ocho tablas del dominio")
     void elEsquemaAplica() {
-        List<String> tablas = jdbcTemplate.queryForList("""
+        List<String> tables = jdbcTemplate.queryForList("""
                 SELECT table_name FROM information_schema.tables
                  WHERE table_schema = 'banking' AND table_type = 'BASE TABLE' ORDER BY 1
                 """, String.class);
 
-        assertThat(tablas).containsExactly(
+        assertThat(tables).containsExactly(
                 "bank_accounts", "bank_close_seals", "bank_matches", "bank_statement_lines",
                 // La proyección de hechos internos que la conciliación cruza (BK-38): conciliar es
                 // barrer un día entero, y una consulta por línea al vecino ataría un proceso por
@@ -54,40 +54,40 @@ class BankingSchemaIT extends AbstractIntegrationTest {
     @Test
     @DisplayName("un movimiento bancario no se reingiere duplicado")
     void ingestaIdempotente() {
-        UUID cuenta = insertarCuenta();
+        UUID account = insertAccount();
         String sql = """
                 INSERT INTO banking.bank_statement_lines
                     (bank_account_id, business_date, direction, amount, external_id)
                 VALUES (?, DATE '2026-08-24','CREDIT',5000,'MOV-001')
                 """;
-        jdbcTemplate.update(sql, cuenta);
+        jdbcTemplate.update(sql, account);
 
         // La reingesta del mismo archivo es la norma, no la excepción: los bancos reenvían.
-        assertThatThrownBy(() -> jdbcTemplate.update(sql, cuenta))
+        assertThatThrownBy(() -> jdbcTemplate.update(sql, account))
                 .hasMessageContaining("uq_bank_line_external");
     }
 
     @Test
     @DisplayName("un movimiento bancario se cruza UNA sola vez")
     void cruceUnico() {
-        UUID cuenta = insertarCuenta();
-        UUID linea  = UUID.randomUUID();
+        UUID account = insertAccount();
+        UUID line  = UUID.randomUUID();
         jdbcTemplate.update("""
                 INSERT INTO banking.bank_statement_lines
                     (line_id, bank_account_id, business_date, direction, amount, external_id)
                 VALUES (?, ?, DATE '2026-08-24','CREDIT',5000,'MOV-002')
-                """, linea, cuenta);
+                """, line, account);
         jdbcTemplate.update("""
                 INSERT INTO banking.bank_matches (line_id, internal_type, internal_ref, amount, method)
                 VALUES (?,'STP_ORDER','CR-123',5000,'DETERMINISTIC')
-                """, linea);
+                """, line);
 
         // Sin `uq_bank_match_line`, un reintento del matcher cuadraría el mismo abono contra dos
         // hechos internos y la conciliación diría que todo cuadra habiendo cobrado una vez.
         assertThatThrownBy(() -> jdbcTemplate.update("""
                 INSERT INTO banking.bank_matches (line_id, internal_type, internal_ref, amount, method)
                 VALUES (?,'PAYMENT_ORDER','PG-999',5000,'HEURISTIC')
-                """, linea)).hasMessageContaining("uq_bank_match_line");
+                """, line)).hasMessageContaining("uq_bank_match_line");
     }
 
     @Test
@@ -116,17 +116,17 @@ class BankingSchemaIT extends AbstractIntegrationTest {
     /**
      * Una cuenta nueva por prueba.
      *
-     * <p>`preservar()` deja viva la tabla, y con ella lo que dejó la prueba anterior: un id fijo
+     * <p>`preserve()` deja viva la tabla, y con ella lo que dejó la prueba anterior: un id fijo
      * chocaría con su propio rastro en la segunda ejecución.
      */
-    private UUID insertarCuenta() {
+    private UUID insertAccount() {
         UUID id = UUID.randomUUID();
         String base = "012180" + String.format("%011d", Math.abs(id.getLeastSignificantBits() % 100_000_000_000L));
         jdbcTemplate.update("""
                 INSERT INTO banking.bank_accounts
                     (bank_account_id, institution_code, institution_name, clabe, holder_name, ledger_account)
                 VALUES (?,'012','BBVA', ?, 'FINTECH SA DE CV','1101')
-                """, id, base + Clabe.digitoVerificador(base));
+                """, id, base + Clabe.checkDigit(base));
         return id;
     }
 }
