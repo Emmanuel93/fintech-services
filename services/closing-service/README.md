@@ -76,11 +76,53 @@ Si no cuadra, **no se sella**: sellar «con observaciones» convierte el sello e
 
 ## Entradas / Salidas
 
-**Consume:** `credit-portfolio.credit-account-activated` (con cadencia y plazo, para derivar el
-calendario de corte sin consultar cartera en línea) · `credit-portfolio.balance-updated`.
+**Consume:** `credit-portfolio.credit-account-activated` (con **cadencia y plazo**, para derivar el
+calendario de corte sin consultar cartera en línea) · `credit-portfolio.balance-updated` (los saldos
+con los que se sella) · `credit-portfolio.delinquency-status-updated`.
+
+> Esta línea **era falsa hasta hoy**: el README declaraba estos consumidores y
+> `adapter/in/` estaba vacío — cero `@KafkaListener`. `AccountProjectionService` estaba escrito,
+> probado y **sin un solo llamador de producción**, así que `account_close_profiles` se poblaba sólo
+> desde las pruebas: en producción nacía vacía y el cierre diario no encontraba nada que cerrar.
+> Lo cubre `PortfolioEventListener`.
 
 **Produce:** `closing.unit-window-opened` · `closing.cutoff-closed` (que cartera proyecta de vuelta
 como el exigible del ciclo) · `closing.day-sealed`.
+
+## El ciclo de facturación lo fija el producto
+
+**La periodicidad del corte es la que el producto configura**: semanal, quincenal o mensual. Está en
+`credit_product.payment_frequencies` (con `CHECK` sobre los tres valores), viaja en
+`credit-account-activated` y el cierre la guarda en el perfil al activar — **no la vuelve a
+preguntar**, porque consultar cartera dentro de la ventana rompería su aislamiento.
+
+| Regla de corte | De dónde sale la fecha | Periodicidad |
+|---|---|---|
+| `INSTALLMENT_DUE_DATE` | la cadencia del plan, anclada al alta | del producto |
+| `CYCLE_FROM_ACTIVATION` | el **día** de la activación, avanzando por la cadencia | **del producto** |
+| `DAY_OF_MONTH` | día fijo del mes, igual para todo el producto | mensual por construcción |
+| `NONE` | el producto no corta | — |
+
+> **Esto cambió.** `CYCLE_FROM_ACTIVATION` era `activatedOn.plusMonths(cycle)`: **mensual a fuerza**.
+> Una línea configurada `WEEKLY` cortaba mensual y nada fallaba — el calendario se derivaba, se
+> persistía y se sellaba con la periodicidad equivocada. El dato siempre estuvo ahí; sólo esa línea
+> lo ignoraba.
+
+**El horizonte se mide en años, no en número de cortes.** Un revolvente no tiene plazo, así que el
+calendario se materializa por adelantado: dos años. Eran «24 cortes» —pensados como 24 meses— y sobre
+un producto semanal esos 24 se agotan en cinco meses; ahora son `periodsPerYear() × 2`, o sea 24, 52
+o 104 según la cadencia.
+
+**«Sin configurar» no es «mensual».** `PaymentCadence.parse` devuelve vacío ante nulo o un valor
+desconocido, y el derivador cae a mensual **diciéndolo en WARN**. Antes los dos casos daban el mismo
+resultado en silencio, así que una tarjeta semanal sin el dato cortaba mensual y la única forma de
+notarlo era comparar el catálogo con los cortes sellados a mano.
+
+**Y el pago mínimo también es del producto.** `close_cycle_policies.minimum_payment_rate`, versionado
+y con vigencia como el resto de la política. Era una constante del 5 % en `CutoffPhaseProcessor`:
+el mismo mínimo para una tarjeta de nómina y una de consumo, y cambiarlo exigía un despliegue. `NULL`
+significa «este producto no exige mínimo» —lo correcto para un producto a plazo, cuyo exigible sale
+del plan— y el corte se sella sin mínimo, con un WARN si el producto es revolvente.
 
 ## Configuración
 

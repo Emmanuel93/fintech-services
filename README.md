@@ -697,9 +697,9 @@ Consumidores tomados de los `@KafkaListener` reales del código; los tópicos si
 | `scoring.scoring-completed` | scoring | origination, audit |
 | `scoring.scoring-approved` | scoring | audit |
 | `product-catalog.product-activated` / `product-retired` | credit-product | credit-portfolio, audit |
-| `credit-portfolio.credit-account-activated` | credit-portfolio | accounting, audit, charges, collections, commission, notifications, origination, payments, risk, sales-org, wallet, **disbursement** (vía `disbursementInstruction`) |
-| `credit-portfolio.balance-updated` | credit-portfolio | accounting, audit, charges, collections, commission, notifications, payments, risk, wallet |
-| `credit-portfolio.delinquency-status-updated` | credit-portfolio | collections, risk |
+| `credit-portfolio.credit-account-activated` | credit-portfolio | accounting, audit, charges, collections, commission, notifications, origination, payments, risk, sales-org, wallet, **disbursement** (vía `disbursementInstruction`), **closing** (cadencia y plazo, para derivar el calendario de cortes) |
+| `credit-portfolio.balance-updated` | credit-portfolio | accounting, audit, charges, collections, commission, notifications, payments, risk, wallet, **closing** |
+| `credit-portfolio.delinquency-status-updated` | credit-portfolio | collections, risk, **closing** |
 | `credit-portfolio.installment-due` | credit-portfolio | notifications, wallet |
 | `credit-portfolio.installment-upcoming` | credit-portfolio | collections |
 | `credit-portfolio.disposition-completed` | credit-portfolio | beneficiary, notifications, wallet |
@@ -1346,3 +1346,4 @@ Los puertos listados son **internos** (dentro de la red Docker `fintech-network`
 - **Liquibase** YAML master + SQL por migración; nunca XML; sin `ALTER` en desarrollo (modificar el changeset base si aún no se desplegó).
 - **Snapshot inmutable** de términos del producto al originar — la cuenta no depende del catálogo en runtime.
 - **Tipificación explícita** — `partyType`, `productType`, `dispositionType` gobiernan la lógica; nunca se infiere por comparación de atributos.
+- **El repo es código.** Todo el material de pruebas, comercial y de arquitectura —videos, imágenes, grabaciones, reportes, mediciones de capacidad y respaldos de base— vive en `~/Documents/material-kredius` (`comercial/`, `arquitectura/`, `pruebas/`, `respaldos/`), nunca aquí: `.gitignore` lo excluye y las herramientas lo escriben directo afuera (`MATERIAL_DIR` cambia la raíz). Detalle en [tools/regresion-e2e](tools/regresion-e2e/README.md#material-fuera-del-repo).

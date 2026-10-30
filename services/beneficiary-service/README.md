@@ -21,6 +21,7 @@ flowchart LR
         DIST["PlacementController<br/>/api/v1/placements — el distribuidor"]
         BO["BackofficePlacementController<br/>mesa de KYC"]
         DQ["DistributorQueryController<br/>line-summary · beneficiaries"]
+        PUB["PublicKycController<br/>/api/v1/beneficiary/public — la beneficiaria"]
         KYCS["KycSimulationController 🧪<br/>/api/v1/internal/test-support"]
         L1["credit-portfolio.disposition-completed"]
     end
@@ -48,6 +49,7 @@ flowchart LR
 
     DIST & BO & DQ --> ORCH
     KYCS --> ORCH
+    PUB --> ORCH
     L1 --> ORCH
     BO --> IDV
     ORCH --> PL & PT & PLIM
@@ -266,18 +268,67 @@ Tres propiedades que no son accidentales:
    de listas **no hay nada que ella pueda hacer**, y por eso es
    `BeneficiaryScreeningBlockedException` y no el mismo error que la identidad.
 
-Sigue faltando **la evidencia que mirar** (OCR, prueba de vida, RENAPO): la ficha responde
-`identityEvidence.available=false` con su motivo.
+La evidencia que mirar es la captura del KYC web: la ficha trae `identityEvidence` con
+`documents[]` (sin bytes), `captured` (lo que ella confirmó, con la CLABE enmascarada) y
+`consents[]`, y `GET /api/v1/backoffice/placements/{id}/documents/{INE_FRONT|INE_BACK|SELFIE}/file`
+devuelve la foto `inline`. Sin capturas, `available=false` con su motivo. Sigue sin haber cotejo
+automático (OCR, prueba de vida, RENAPO): lo hace la persona que dictamina.
 
-### Pública — la beneficiaria (sin JWT, token de invitado de 15 min)
+### Pública — la beneficiaria (sin JWT, token de invitado de 15 min) — fase 3 ✅
 
-`/api/v1/beneficiary/public/**` — los 7 pasos del KYC web. ⬜ fase 3.
+Base `/api/v1/beneficiary/public`. Errores siempre como `{error, message, …}` —no `ProblemDetail`—:
+del otro lado hay una página que elige pantalla por el código (`PublicKycExceptionHandler`).
 
-Está en `permitAll` de Spring Security porque no hay JWT que validar: la credencial es el token
-de la liga y quien lo revisa es el filtro de token de la fase 2. El diseño le reserva un bloque
-`server` propio en el gateway (`kyc.*`) que **nunca** inyectaría `X-User-Id` ni `X-Roles` — ese
-bloque **todavía no existe** en `nginx.conf`: hoy sólo hay `mobile.*`, `backoffice.*` y el
-`default_server`.
+| Método | Ruta | Credencial | Respuesta · errores |
+|---|---|---|---|
+| `GET` | `/invites/{token}` | token de la liga | `{lenderName, beneficiaryFirstName, amount, fortnightlyPayment, termFortnights, totalToPay, phoneMask, status}` — sin más PII antes del OTP. Inválido, vencido, revocado o ya usado: **el mismo** `404 LIGA_NO_VALIDA` |
+| `POST` | `/invites/{token}/otp` | token de la liga | `{sent, phoneMask, resendInSeconds:45}` · 3 envíos / 15 min → `429 DEMASIADOS_INTENTOS` (`Retry-After`) |
+| `POST` | `/invites/{token}/otp/verify` | token de la liga | `{code}` → `{sessionToken, expiresAt}` · `422 CODIGO_INCORRECTO {attemptsLeft}`; 5 fallos congelan la liga 1 h → `429` |
+| `GET` | `/session` | `X-Kyc-Session` | `{step: INE·LIVENESS·DATA·CONSENTS·SUBMIT·DONE, documents, data, consentsAccepted}` |
+| `POST` | `/session/ine` | `X-Kyc-Session` | multipart `front`,`back` (foto/PDF ≤ 8 MB) → `{extracted:{…}}` |
+| `POST` | `/session/liveness` | `X-Kyc-Session` | multipart `selfie` → `{captured:true, review:"MANUAL"}` |
+| `PUT` | `/session/data` | `X-Kyc-Session` | CURP, RFC de 13, CLABE con dígito verificador Banxico, mayoría de edad → `{ok}` · `422 DATOS_INVALIDOS {fields}` con **todos** los campos malos |
+| `POST` | `/session/consents` | `X-Kyc-Session` | los tres o ninguno; un renglón por consentimiento con IP (primer salto de `X-Forwarded-For`), navegador, hora y versión del texto |
+| `POST` | `/session/submit` | `X-Kyc-Session` | `{code}` — **firma con el mismo OTP** → `{status, firstName, phoneMask}` · `409 EXPEDIENTE_INCOMPLETO {missing}` |
+
+Sin sesión o vencida: `401 SESION_EXPIRADA`. Cada llamada exitosa desliza los 15 minutos, sin pasar
+del vencimiento de la liga.
+
+**Dónde viaja cada credencial.** El token de la liga va en la ruta porque llega en una URL de
+WhatsApp y no hay otro lugar. El de sesión va en el header y **nunca** en la ruta: las rutas
+terminan en los access logs de nginx, y ése es el que abre el expediente. De ambos se guarda sólo
+el SHA-256 y se comparan en tiempo constante; el OTP se guarda salado con la liga.
+
+**El cierre (`submit`) hace el mismo trabajo real que el simulador**, con lo que ella capturó:
+prospecto `INDIVIDUAL` en origination con `channelType: WEB` (sexo y entidad de nacimiento salen
+de la CURP; contraseña aleatoria porque ella nunca inicia sesión), sus tres archivos al expediente
+de origination (mejor esfuerzo: un fallo es un `WARN`, no una beneficiaria atorada), espera del
+Party, `completeKyc`, relación con el distribuidor, `BUREAU_READY` y —por primera vez—
+`beneficiary.bureau-consent-granted` con la constancia. La liga se quema y la sesión se cierra.
+La identidad queda `PENDING`: no hay Incode, la compara una persona en la mesa de KYC.
+
+**Un solo prospecto aunque se envíe dos veces.** La fila de la liga se bloquea (`FOR UPDATE`)
+durante todo el cierre, y el `prospectId` se graba en la sesión en **su propia transacción** en
+cuanto origination lo devuelve: si party tarda y el cierre se cae, el reintento lo reusa en vez de
+chocar con la CURP duplicada. Verificar también bloquea la liga: un código abre una sola sesión.
+
+**Desviación consciente del plan:** OTP, rate limit y sesión viven en **Postgres**, no en Redis
+(§5/§6.2). El servicio no tenía código de Redis, y lo que se cuenta —envíos, fallos,
+congelamientos, consentimientos— es evidencia auditable que en Redis se evaporaría con su TTL.
+
+Toda colocación nace con su liga (`PlacementOrchestrator.create`). El token en claro **no** viaja
+en `placement-invited`.
+
+**Pendiente:**
+
+- **Entrega de la liga y del OTP por WhatsApp/SMS** — en notifications. Hoy el OTP sólo se
+  registra (`LoggingOtpSender`, que nunca escribe el código salvo el fijo de desarrollo) y la liga
+  se obtiene rotándola desde soporte de pruebas.
+- **OCR real** de la INE (`IneReaderPort`: hoy `StubIneReader`, que deriva la lectura del nombre
+  como el simulador) y **prueba de vida real** (`LivenessPort`: hoy guarda la selfie y declara
+  revisión `MANUAL`, nunca dictamina).
+- El bloque `server` propio en el gateway (`kyc.*`) que **nunca** inyecta `X-User-Id` ni `X-Roles`
+  y pone sus propios `limit_req` — el rate limit por IP le toca a ese bloque.
 
 ## Flujo completo de una colocación
 
@@ -315,13 +366,18 @@ sequenceDiagram
 | Qué se simula | Dónde | Cómo se enciende |
 |---|---|---|
 | **Completar el KYC de una colocación** sin pasar por los 7 pasos web | `KycSimulationController` — `POST /api/v1/internal/test-support/placements/{placementId}/complete-kyc` | `BENEFICIARY_KYC_SIMULATION_ENABLED=true` |
+| **Obtener una liga que funcione** (rota la viva y devuelve `{link, token, expiresAt}`) | `KycSimulationController` — `POST /api/v1/internal/test-support/placements/{placementId}/invite-link` | La misma variable · base de la liga en `BENEFICIARY_KYC_LINK_BASE_URL` |
+| **El código OTP** sin canal de entrega | Código fijo en vez de aleatorio | `BENEFICIARY_DEV_OTP_CODE=123456` (sólo local) |
+| **OCR de la INE y prueba de vida** | `StubIneReader` · `StubLivenessAdapter` | Siempre: no hay proveedor |
 | El mismo atajo, expuesto para la app | `channel-mobile-service` lo proxea en `/internal/test-support/placements/{id}/complete-kyc` | La misma variable, leída también por el BFF |
 | **Proveedor de verificación de identidad** | No hay integración: el modo `MANUAL` es el default y no llama a nadie | `fintech.beneficiary.identity-verification.mode` |
 
 El controlador de simulación devuelve `404`/error explícito cuando la bandera está apagada, y el
-gateway no enruta `/internal/*`. Existe porque la **fase 3** —el KYC web público
-(`/api/v1/beneficiary/public/**`)— todavía no está construida: sin este atajo, ninguna colocación
-podría pasar de `INVITED` en local y el journey B2B2C no sería demostrable.
+gateway no enruta `/internal/*`. Nació porque el KYC web público no existía; ahora que existe, el
+atajo `complete-kyc` sigue sirviendo para demos sin pasar por los 7 pasos (con `channelType:
+WHATSAPP`), y `invite-link` es la única forma de obtener una liga mientras WhatsApp no la entregue.
+El simulador y el OCR stub comparten `SyntheticIdentity`: la misma persona produce la misma CURP
+por los dos caminos.
 
 ## Eventos Kafka
 
@@ -361,14 +417,17 @@ todos sus productos activos al arrancar, la proyección se rellena sola: no hace
 
 ## Migraciones
 
-Liquibase (7 changesets) bajo `db/changelog/beneficiary/`. Los `CHECK` de `002` codifican
+Liquibase (8 changesets) bajo `db/changelog/beneficiary/`. Los `CHECK` de `002` codifican
 invariantes del dominio en la base, no sólo en Java: expediente todo-o-nada, disposición
 obligatoria para desembolsar y `FAILED` siempre con motivo. El `005` alinea con el contrato de
 la app y agrega el índice único parcial de **una sola liga viva por (distribuidor, celular)** —
 por distribuidor y no global, porque dos distribuidores distintos colocándole a la misma persona
 es negocio legítimo. El `006` añade el veredicto de identidad con su `CHECK` de firma —un
 «verificado» sin autor no puede existir— y el que impide aprobar sin identidad comprobada. El
-`007` es F3b: la proyección `product_kyc_policies` y el `product_code` de cada colocación.
+`007` es F3b: la proyección `product_kyc_policies` y el `product_code` de cada colocación. El
+`008` es la fase 3: `placement_invites` (con el índice de **una liga viva por colocación**),
+`kyc_sessions`, `kyc_documents` (una por tipo: volver a tomar la foto reemplaza) y
+`consent_records`, la constancia append-only.
 
 ## Conformidad con el contrato de la app
 
@@ -384,7 +443,7 @@ Dos detalles no son cosméticos:
 
 ## Tests
 
-**222 ✅**
+**315 ✅**
 
 | Grupo | Qué protege |
 |---|---|
@@ -397,6 +456,12 @@ Dos detalles no son cosméticos:
 | 11 · servicio de aplicación | |
 | 7 · WebMvcTest | Incluido que el celular crudo no salga nunca en la respuesta. |
 | 5 · IT con Postgres real | `ddl-auto: validate`, los `CHECK` y el índice de liga viva. |
+| 14 · la liga | Token y hash, vigencia, revocación, topes de envío, código consumido, congelamiento. |
+| 12 · «Tus datos» | CURP y su entidad, RFC de 13, **dígito verificador de la CLABE**, mayoría de edad, todos los errores a la vez. |
+| 19 · superficie pública | Que un token inválido y uno vencido sean indistinguibles, sesión deslizante y acotada por la liga, revocación a media captura. |
+| 7 · cierre | Expediente incompleto → 409, firma con otro código, **reintento que reusa el prospecto**, documentos de mejor esfuerzo. |
+| 12 · WebMvcTest público | El contrato que la página de React consume, campo por campo, y que un error interno no filtre detalle. |
+| 5 · IT del KYC web | El flujo entero contra Postgres (las 4 tablas, `BUREAU_READY`, identidad `PENDING`, constancia publicada) y **concurrencia real**: N pestañas verificando el mismo código abren una sesión, N enviando crean un solo prospecto. |
 
 ```bash
 # macOS: ./gradlew falla por `readlink -e`; se invoca el wrapper a mano.
