@@ -4,6 +4,7 @@ import com.fintech.origination.domain.CooldownActiveException;
 import com.fintech.origination.domain.CreditApplicationNotFoundException;
 import com.fintech.origination.domain.DuplicateActiveApplicationException;
 import com.fintech.origination.domain.DuplicateProspectException;
+import com.fintech.origination.domain.PersonNotVerifiedException;
 import com.fintech.origination.domain.PrivacyNoticeRequiredException;
 import com.fintech.origination.domain.PromoterCodeNotResolvableException;
 import com.fintech.origination.domain.ProspectNotFoundException;
@@ -52,6 +53,24 @@ class OriginationExceptionHandler {
     ProblemDetail handleCooldownActive(CooldownActiveException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
         pd.setType(URI.create("https://fintech.com/errors/" + ex.getErrorCode()));
+        return pd;
+    }
+
+    /**
+     * La persona todavía no pasó KYC y listas: 422 con el motivo, no un 500.
+     *
+     * <p>Sin este handler la compuerta funcionaba y se veía rota: la excepción llegaba a la página
+     * de error por defecto de Spring como «Internal Server Error», y quien la recibía —el BFF, la
+     * app, un analista— no podía distinguir «su identidad sigue en revisión» de «se cayó
+     * origination». Es un estado de negocio esperado y se dice como tal; el {@code reason} viaja
+     * aparte porque los dos bloqueos se le explican distinto a la persona.
+     */
+    @ExceptionHandler(PersonNotVerifiedException.class)
+    ProblemDetail handlePersonNotVerified(PersonNotVerifiedException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        pd.setType(URI.create("https://fintech.com/errors/ORIGINATION_PERSON_NOT_VERIFIED"));
+        pd.setProperty("prospectId", ex.prospectId());
+        pd.setProperty("reason", ex.reason());
         return pd;
     }
 

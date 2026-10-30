@@ -11,7 +11,9 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -63,9 +65,10 @@ public class KafkaStpEventPublisher implements StpEventPublisher {
                                     String cepBeneficiaryName, boolean beneficiaryNameMatches,
                                     ObservedVia observedVia) {
         send(TOPIC_ORDER_SETTLED, order, new StpOrderSettledPayload(
-                order.getPaymentRequestId(), order.getCompanyId(), order.getTrackingKey(),
-                cepUrl, cepBeneficiaryName, beneficiaryNameMatches, settledAt,
-                observedVia.name(), Instant.now()));
+                stableEventId(TOPIC_ORDER_SETTLED, order), order.getPaymentRequestId(),
+                order.getCompanyId(), order.getTrackingKey(), order.getAmount(),
+                order.getBusinessDate(), cepUrl, cepBeneficiaryName, beneficiaryNameMatches,
+                settledAt, observedVia.name(), Instant.now()));
     }
 
     @Override
@@ -77,6 +80,15 @@ public class KafkaStpEventPublisher implements StpEventPublisher {
     }
 
     private static final long SEND_TIMEOUT_SECONDS = 10L;
+
+    /**
+     * El mismo id para el mismo hecho de la misma orden. Liquidar ocurre una vez por orden —la
+     * transición exige que no sea terminal—, así que (topic, orden) basta.
+     */
+    static String stableEventId(String topic, StpPaymentOrder order) {
+        return UUID.nameUUIDFromBytes((topic + ":" + order.getPaymentRequestId())
+                .getBytes(StandardCharsets.UTF_8)).toString();
+    }
 
     /**
      * El payload se arma ahora —con la entidad cargada— y sólo el envío se difiere al commit, para

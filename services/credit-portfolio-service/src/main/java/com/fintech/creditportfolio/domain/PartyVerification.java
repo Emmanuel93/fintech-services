@@ -20,9 +20,22 @@ import java.util.UUID;
 @Table(name = "party_verifications", schema = "credit_portfolio")
 public class PartyVerification {
 
+    /** Llave técnica. Ni party ni prospecto sirven de PK: cualquiera de los dos puede faltar. */
     @Id
-    @Column(name = "party_id", nullable = false, updatable = false)
+    @Column(name = "projection_id", nullable = false, updatable = false)
+    private UUID projectionId;
+
+    /** Nulo mientras compliance no conoce el Party: se completa en una publicación posterior. */
+    @Column(name = "party_id")
     private UUID partyId;
+
+    /**
+     * La llave que la cartera usa para el titular: {@code credit_accounts.obligor_party_id} guarda
+     * su prospectId. Compliance la publica en cada veredicto, así que esta columna siempre se llena
+     * cuando el veredicto viene de un evento.
+     */
+    @Column(name = "prospect_id")
+    private UUID prospectId;
 
     @Column(name = "identity_status", length = 20, nullable = false)
     private String identityStatus;
@@ -57,8 +70,22 @@ public class PartyVerification {
     public static PartyVerification of(UUID partyId, String identityStatus, String screeningStatus,
                                        boolean allowsToProceed, String blockReason,
                                        String screenedListVersions, Instant verdictAt) {
+        return forPerson(partyId, null, identityStatus, screeningStatus, allowsToProceed, blockReason,
+                screenedListVersions, verdictAt);
+    }
+
+    /** El veredicto de una persona conocida por cualquiera de sus dos llaves, o por ambas. */
+    public static PartyVerification forPerson(UUID partyId, UUID prospectId,
+                                              String identityStatus, String screeningStatus,
+                                              boolean allowsToProceed, String blockReason,
+                                              String screenedListVersions, Instant verdictAt) {
+        if (partyId == null && prospectId == null) {
+            throw new IllegalArgumentException("Un veredicto sin persona no se puede proyectar");
+        }
         PartyVerification v = new PartyVerification();
-        v.partyId = partyId;
+        v.projectionId = UUID.randomUUID();
+        v.partyId      = partyId;
+        v.prospectId   = prospectId;
         v.apply(identityStatus, screeningStatus, allowsToProceed, blockReason,
                 screenedListVersions, verdictAt);
         return v;
@@ -121,7 +148,13 @@ public class PartyVerification {
     public String getScreenedListVersions() { return screenedListVersions; }
     public Instant getVerdictAt()           { return verdictAt; }
 
+    /** Completa el Party la primera vez que se conoce; uno ya conocido no se cambia. */
+    public void attachParty(UUID partyId) {
+        if (this.partyId == null && partyId != null) this.partyId = partyId;
+    }
+
     public UUID getPartyId()           { return partyId; }
+    public UUID getProspectId()        { return prospectId; }
     public String getIdentityStatus()  { return identityStatus; }
     public String getScreeningStatus() { return screeningStatus; }
     public boolean allowsToProceed()   { return allowsToProceed; }

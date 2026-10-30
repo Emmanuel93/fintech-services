@@ -48,8 +48,10 @@ public class SecurityConfig {
                                 .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "SERVICE")
                         .requestMatchers(HttpMethod.POST, "/api/v1/disbursements/*/cancel")
                                 .hasAnyRole("ADMIN", "OPS_SUPERVISOR")
+                        // Consultar pagos es el trabajo diario de tesorería (FINANCE) desde el
+                        // backoffice. Leer no mueve dinero; cancelar y dar de alta siguen arriba.
                         .requestMatchers(HttpMethod.GET, "/api/v1/disbursements/**")
-                                .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "AUDITOR")
+                                .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "AUDITOR", "FINANCE")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))

@@ -50,13 +50,16 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/v1/bank-accounts/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/payout-routes/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/v1/payout-routes/**").hasRole("ADMIN")
+                        // Consultar cuentas y rutas es lo que hace tesorería (FINANCE) a diario desde
+                        // el backoffice: la CLABE sale enmascarada y no hay nada que mover desde aquí.
                         .requestMatchers(HttpMethod.GET, "/api/v1/bank-accounts/**", "/api/v1/payout-routes/**")
-                                .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "AUDITOR")
+                                .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "AUDITOR", "FINANCE")
                         // La traza no expone CLABEs ni importes de terceros: son ids y estados. Se
                         // abre también a soporte, que es quien recibe la pregunta «¿dónde está mi
-                        // dinero?» y hoy la contesta preguntando por chat.
+                        // dinero?» y hoy la contesta preguntando por chat; y a tesorería, que la
+                        // pinta en la ficha de cada pago.
                         .requestMatchers(HttpMethod.GET, "/api/v1/traces/**")
-                                .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "AUDITOR", "SUPPORT")
+                                .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "AUDITOR", "SUPPORT", "FINANCE")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))

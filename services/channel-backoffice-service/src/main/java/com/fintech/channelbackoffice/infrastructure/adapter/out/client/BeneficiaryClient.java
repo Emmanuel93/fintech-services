@@ -102,4 +102,24 @@ public class BeneficiaryClient {
                 .bodyToMono(MAP)
                 .block();
     }
+
+    /**
+     * Los bytes de una pieza de evidencia de la beneficiaria —INE o selfie— que capturó en la web
+     * de su liga. Viven en beneficiary y no en origination porque se capturan antes de que exista
+     * su prospecto.
+     */
+    public OriginationClient.DocumentContent documentContent(UUID placementId, String documentType) {
+        log.info("-> GET beneficiary-service /backoffice/placements/{}/documents/{}/file", placementId, documentType);
+        var response = webClient.get()
+                .uri("/api/v1/backoffice/placements/{id}/documents/{type}/file", placementId, documentType)
+                .headers(DomainClientSupport.staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("beneficiary-service", r))
+                .toEntity(byte[].class)
+                .block();
+        if (response == null || response.getBody() == null) return null;
+        var mediaType = response.getHeaders().getContentType();
+        return new OriginationClient.DocumentContent(response.getBody(),
+                mediaType == null ? "application/octet-stream" : mediaType.toString());
+    }
 }

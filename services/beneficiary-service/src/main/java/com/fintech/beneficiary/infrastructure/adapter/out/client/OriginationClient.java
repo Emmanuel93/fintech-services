@@ -35,7 +35,12 @@ public class OriginationClient {
         this.webClient = webClient;
     }
 
-    public ProspectResponse createIndividualProspect(NewProspect p) {
+    /**
+     * @param channelType por dónde entró ella: {@code WEB} desde la liga, {@code WHATSAPP} desde el
+     *                    simulador —que representa el flujo conversacional del diseño—. Lo decide
+     *                    quien llama porque sólo quien llama sabe por qué puerta pasó.
+     */
+    public ProspectResponse createIndividualProspect(NewProspect p, String channelType) {
         Map<String, Object> body = new HashMap<>();
         body.put("prospectType", "INDIVIDUAL");
         body.put("firstName", p.firstName());
@@ -56,10 +61,9 @@ public class OriginationClient {
         body.put("state", p.state());
         body.put("postalCode", p.postalCode());
         body.put("country", "MX");
-        // El canal es el suyo, no el del distribuidor: a ella se le llega por WhatsApp y se
-        // verifica desde su propio teléfono. Es el valor que deja la trazabilidad correcta de
-        // por dónde entró esta persona al sistema.
-        body.put("channelType", "WHATSAPP");
+        // El canal es el suyo, no el del distribuidor: ella se verifica desde su propio teléfono.
+        // Es el valor que deja la trazabilidad correcta de por dónde entró esta persona al sistema.
+        body.put("channelType", channelType);
         body.put("privacyNoticeAccepted", true);
         body.put("circuloConsentAccepted", true);
         body.put("username", p.phone());
@@ -76,6 +80,34 @@ public class OriginationClient {
                         .flatMap(detail -> Mono.error(new ResponseStatusException(
                                 resp.statusCode(), "origination rechazó el prospecto: " + detail))))
                 .bodyToMono(ProspectResponse.class)
+                .block();
+    }
+
+    /**
+     * Sube un archivo al expediente del prospecto.
+     *
+     * <p>Mismo contrato que {@code ProspectDocumentController#upload} de origination: JSON con el
+     * contenido en base64, y volver a subir reemplaza. Por eso un reintento del cierre puede
+     * volver a subir sin duplicar nada.
+     */
+    public void uploadDocument(UUID prospectId, String documentType, String fileName,
+                               String contentType, byte[] content) {
+        Map<String, Object> body = Map.of(
+                "fileName", fileName,
+                "contentType", contentType,
+                "contentBase64", java.util.Base64.getEncoder().encodeToString(content));
+        log.info("-> PUT origination /prospects/{}/documents/{}/file ({} bytes)",
+                prospectId, documentType, content.length);
+        webClient.put()
+                .uri("/api/v1/origination/prospects/{p}/documents/{t}/file", prospectId, documentType)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, resp -> resp.bodyToMono(String.class)
+                        .defaultIfEmpty("")
+                        .flatMap(detail -> Mono.error(new ResponseStatusException(
+                                resp.statusCode(), "origination rechazó el documento: " + detail))))
+                .toBodilessEntity()
                 .block();
     }
 

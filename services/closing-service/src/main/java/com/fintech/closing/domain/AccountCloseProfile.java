@@ -126,7 +126,21 @@ public class AccountCloseProfile {
     public String getStatus()         { return status; }
     public LocalDate getActivatedOn() { return activatedOn; }
     public String getPaymentFrequency() { return paymentFrequency; }
-    public PaymentCadence cadence()   { return PaymentCadence.from(paymentFrequency); }
+    /**
+     * La periodicidad con la que esta cuenta corta, <b>tal como la configuró el producto</b>.
+     *
+     * <p>Cae a mensual cuando el producto no la declaró —es lo que hace cartera al amortizar, así que
+     * las dos coinciden— pero {@link #hasDeclaredCadence()} permite al llamador <b>notarlo</b> en vez
+     * de que un silencio se vea igual que una decisión.
+     */
+    public PaymentCadence cadence() {
+        return PaymentCadence.parse(paymentFrequency).orElse(PaymentCadence.MONTHLY);
+    }
+
+    /** Si el producto declaró su periodicidad. Falso significa que {@link #cadence()} es un default. */
+    public boolean hasDeclaredCadence() {
+        return PaymentCadence.parse(paymentFrequency).isPresent();
+    }
     public Integer getTermPeriods()   { return termPeriods; }
     public BigDecimal getNominalRate(){ return nominalRate; }
     public BigDecimal getPrincipalBalance() { return principalBalance; }

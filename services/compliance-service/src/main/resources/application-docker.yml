@@ -1,0 +1,21 @@
+# Perfil de Docker: el mismo que usan los demás servicios.
+#
+# Sin este archivo el contenedor arrancaba con el datasource de `application.yml`, que apunta a
+# `localhost:5432` — dentro del contenedor eso es él mismo, no Postgres. Compose no fija
+# SPRING_DATASOURCE_URL para este servicio, así que el perfil `docker` era la única pieza que
+# faltaba para que compliance arrancara junto con el resto.
+spring:
+  datasource:
+    url: jdbc:postgresql://postgres:5432/fintech
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+
+fintech:
+  compliance:
+    party-service-url: ${PARTY_SERVICE_URL:http://party-service:8080}
+
+logging:
+  level:
+    com.fintech: INFO

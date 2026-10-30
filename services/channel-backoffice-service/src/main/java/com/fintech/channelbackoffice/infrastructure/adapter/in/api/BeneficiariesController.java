@@ -1,7 +1,11 @@
 package com.fintech.channelbackoffice.infrastructure.adapter.in.api;
 
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.BeneficiaryClient;
+import com.fintech.channelbackoffice.infrastructure.adapter.out.client.ComplianceClient;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.PartyClient;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -36,10 +40,15 @@ class BeneficiariesController {
 
     private final BeneficiaryClient beneficiaryClient;
     private final PartyClient partyClient;
+    private final ComplianceClient complianceClient;
+    private final StaffIdentityResolver staffIdentities;
 
-    BeneficiariesController(BeneficiaryClient beneficiaryClient, PartyClient partyClient) {
+    BeneficiariesController(BeneficiaryClient beneficiaryClient, PartyClient partyClient,
+                            ComplianceClient complianceClient, StaffIdentityResolver staffIdentities) {
         this.beneficiaryClient = beneficiaryClient;
         this.partyClient       = partyClient;
+        this.complianceClient  = complianceClient;
+        this.staffIdentities   = staffIdentities;
     }
 
     @Operation(summary = "Bandeja de beneficiarios por verificar",
@@ -108,10 +117,99 @@ class BeneficiariesController {
         // El autor sale de la sesión y **nunca del cuerpo**: dejar que el cliente diga quién
         // dictamina permitiría firmar con el nombre de otro, y la firma es todo lo que vuelve
         // evidencia a un dictamen.
-        String decidedBy = currentStaffUserId();
+        // Se firma con el correo, como en la mesa de cumplimiento: el expediente se lee meses
+        // después, y «Firmó: 8f3c…» no le dice a nadie quién comprobó la identidad. Si identity no
+        // resuelve el correo, se firma con el id — un dictamen nunca se queda sin autor.
+        String userId = currentStaffUserId();
+        String decidedBy = staffIdentities.resolve(userId)
+                .map(StaffIdentityResolver.StaffIdentity::email)
+                .filter(e -> e != null && !e.isBlank())
+                .orElse(userId);
 
-        return ResponseEntity.ok(beneficiaryClient.reviewIdentity(
-                placementId, req.decision(), decidedBy, req.rejectionReason(), req.verificationSource()));
+        Map<String, Object> reviewed = beneficiaryClient.reviewIdentity(
+                placementId, req.decision(), decidedBy, req.rejectionReason(), req.verificationSource());
+
+        Map<String, Object> body = new LinkedHashMap<>(reviewed);
+        body.put("complianceSync", mirrorToCompliance(placementId, reviewed, req, decidedBy));
+        return ResponseEntity.ok(body);
+    }
+
+    @Operation(summary = "Ver una pieza de evidencia de la beneficiaria",
+               description = "INE (frente/reverso) o selfie, tal como la capturó en la web de su liga. "
+                           + "Dato personal: no se cachea.")
+    @GetMapping("/beneficiaries/placements/{placementId}/documents/{documentType}/file")
+    ResponseEntity<byte[]> documentFile(@PathVariable UUID placementId, @PathVariable String documentType) {
+        var content = beneficiaryClient.documentContent(placementId, documentType);
+        if (content == null) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Sin archivo de " + documentType);
+        }
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_TYPE, content.contentType())
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                .body(content.bytes());
+    }
+
+    /**
+     * Lleva el mismo dictamen al veredicto de la persona en compliance.
+     *
+     * <h2>Por qué</h2>
+     *
+     * La identidad de una persona se comprueba una vez y vale para todo — es la decisión del
+     * análisis de KYC/AML: un solo proceso para quien quede registrado. Pero la beneficiaria tenía
+     * dos expedientes: el de la colocación, que la mesa sí firmaba, y el de compliance, que se
+     * quedaba en {@code IN_REVIEW} para siempre porque nadie lo veía. Y es el de compliance el que
+     * consulta la compuerta de disposición: sin este espejo, su identidad comprobada nunca llegaba
+     * al camino del dinero.
+     *
+     * <p>Una sola firma, en las dos partes, con el mismo autor. Si compliance no contesta, el
+     * dictamen de la colocación ya quedó firmado y se informa en {@code complianceSync} en vez de
+     * fallar: la mesa no tiene que repetirlo, y lo pendiente queda visible en la mesa de
+     * cumplimiento, donde se puede terminar.
+     */
+    private Map<String, Object> mirrorToCompliance(UUID placementId, Map<String, Object> reviewed,
+                                                   IdentityReviewRequest req, String decidedBy) {
+        Map<String, Object> sync = new LinkedHashMap<>();
+        try {
+            UUID partyId = reviewed.get("placement") instanceof Map<?, ?> p
+                    ? uuid(p.get("beneficiaryPartyId")) : null;
+            UUID prospectId = partyId == null ? null
+                    : partyClient.batch(List.of(partyId), "partyId").stream()
+                            .findFirst().map(PartyClient.PartyResponse::prospectId).orElse(null);
+            if (prospectId == null) {
+                sync.put("done", false);
+                sync.put("reason", "La beneficiaria todavía no tiene expediente de persona");
+                return sync;
+            }
+            var verification = complianceClient.byProspect(prospectId).orElse(null);
+            if (verification == null) {
+                sync.put("done", false);
+                sync.put("reason", "Compliance aún no la evaluó");
+                return sync;
+            }
+            String status = String.valueOf(verification.get("identityStatus"));
+            if (!"PENDING".equals(status) && !"IN_REVIEW".equals(status)) {
+                // Ya dictaminada en la mesa de cumplimiento: no se pisa una firma con otra.
+                sync.put("done", true);
+                sync.put("identityStatus", status);
+                return sync;
+            }
+            String notes = "VERIFIED".equals(req.decision())
+                    ? "Identidad comprobada en la mesa de KYC de colocaciones (colocación " + placementId
+                      + "): INE y selfie de la liga cotejadas a mano, sin proveedor biométrico."
+                    : "Identidad rechazada en la mesa de KYC de colocaciones (colocación " + placementId
+                      + "): " + req.rejectionReason();
+            var after = complianceClient.decideIdentity(
+                    uuid(verification.get("verificationId")), req.decision(), decidedBy, notes);
+            sync.put("done", true);
+            sync.put("identityStatus", after == null ? null : after.get("identityStatus"));
+            return sync;
+        } catch (RuntimeException ex) {
+            log.warn("El dictamen de la colocación {} no llegó a compliance: {}", placementId, ex.toString());
+            sync.put("done", false);
+            sync.put("reason", "Compliance no respondió: el dictamen quedó en la colocación");
+            return sync;
+        }
     }
 
     /** `decision` = VERIFIED | REJECTED. `verificationSource` nulo = MANUAL. */

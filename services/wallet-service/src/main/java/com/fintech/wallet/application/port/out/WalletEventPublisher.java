@@ -12,6 +12,7 @@ public interface WalletEventPublisher {
     UUID publishDispositionRequested(UUID creditAccountId, UUID obligorPartyId,
                                       BigDecimal amount, String dispositionType,
                                       UUID beneficiaryPartyId, String payeeAccount,
+                                      String payeeName, String payeeTaxId,
                                       Integer termPeriods);
     void publishWalletSnapshotUpdated(WalletView walletView);
     void publishWithdrawalCompleted(WalletWithdrawal withdrawal);

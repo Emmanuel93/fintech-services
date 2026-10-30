@@ -19,7 +19,9 @@ import com.fintech.creditportfolio.domain.DispositionType;
 import com.fintech.creditportfolio.domain.config.Capabilities;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import com.fintech.creditportfolio.domain.event.CreditAccountActivatedEvent;
+import com.fintech.creditportfolio.domain.event.DispositionAuthorizedEvent;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -28,6 +30,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -314,7 +317,7 @@ class CreditAccountServiceTest {
     private ProcessDispositionCommand selfUseCmd(
             UUID accountId, BigDecimal amount) {
         return new ProcessDispositionCommand(
-                "evt-" + UUID.randomUUID(), accountId, UUID.randomUUID(), amount, null, null, null);
+                "evt-" + UUID.randomUUID(), accountId, UUID.randomUUID(), amount, null, null, null, null, null);
     }
 
     @Test
@@ -355,7 +358,8 @@ class CreditAccountServiceTest {
 
         var cmd = new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), UUID.randomUUID(),
-                new BigDecimal("3000"), UUID.randomUUID(), "032180000118399999", 12);
+                new BigDecimal("3000"), UUID.randomUUID(), "032180000118399999",
+                "ROSA ELENA IBARRA SALGADO", "IASR900612B0B", 12);
 
         service.process(cmd);
 
@@ -364,6 +368,143 @@ class CreditAccountServiceTest {
         // Pero el dinero NO ha salido: no se completa nada todavía.
         then(eventPublisher).should().publishDispositionAuthorized(any());
         then(eventPublisher).should(never()).publishDispositionCompleted(any());
+    }
+
+    // ── A nombre de quién sale el SPEI ────────────────────────────────────────
+    //
+    // El destino es la terna (nombre, CLABE, RFC). Se decidía la CLABE por tipo pero el nombre y el
+    // RFC salían siempre de la cuenta: la colocación de $45,000 a Rosa Elena salió a su CLABE con
+    // «LAURA MÉNDEZ SOTO / MESL930326XXX» — la distribuidora — en la orden STP y en el CEP.
+
+    /** La línea de la distribuidora con SU nombre y RFC en la cuenta, como en producción. */
+    private CreditAccount distributorLineOfLaura() {
+        CreditAccount account = CreditAccount.fromSnapshot(
+                UUID.randomUUID(), "CTR-DL-LMS", UUID.randomUUID(),
+                "DL-001", 1, "DISTRIBUTOR_LINE", "REVOLVING",
+                null, new BigDecimal("60000"), null,
+                new BigDecimal("0.36"), new BigDecimal("0.54"),
+                null, new BigDecimal("0.02"), "032180000118359719", "MEDIO",
+                "LAURA MÉNDEZ SOTO", "MESL930326XXX");
+        account.activate(BigDecimal.ZERO);
+        return account;
+    }
+
+    private void stubDisposable(CreditAccount account) {
+        given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
+        given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
+        given(accountRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+        given(dispositionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+    }
+
+    @Test
+    @DisplayName("una colocación sale a nombre y RFC de la BENEFICIARIA, no de la distribuidora")
+    void laColocacionSaleANombreDeLaBeneficiaria() {
+        CreditAccount account = distributorLineOfLaura();
+        stubDisposable(account);
+
+        service.process(new ProcessDispositionCommand(
+                "evt-" + UUID.randomUUID(), account.getCreditAccountId(), account.getObligorPartyId(),
+                new BigDecimal("45000"), UUID.randomUUID(), "646180157000000004",
+                "ROSA ELENA IBARRA SALGADO", "IASR900612B0B", 24));
+
+        ArgumentCaptor<DispositionAuthorizedEvent> captor =
+                ArgumentCaptor.forClass(DispositionAuthorizedEvent.class);
+        then(eventPublisher).should().publishDispositionAuthorized(captor.capture());
+        DispositionAuthorizedEvent evento = captor.getValue();
+        assertThat(evento.beneficiaryAccount()).isEqualTo("646180157000000004");
+        assertThat(evento.beneficiaryName()).isEqualTo("ROSA ELENA IBARRA SALGADO");
+        assertThat(evento.beneficiaryTaxId()).isEqualTo("IASR900612B0B");
+        assertThat(evento.beneficiaryName()).isNotEqualTo("LAURA MÉNDEZ SOTO");
+    }
+
+    @Test
+    @DisplayName("una colocación con CLABE y sin nombre de quien la recibe se rechaza: no se rellena con la distribuidora")
+    void colocacionSinNombreDeBeneficiaria_seRechaza() {
+        CreditAccount account = distributorLineOfLaura();
+        given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
+        given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
+
+        service.process(new ProcessDispositionCommand(
+                "evt-" + UUID.randomUUID(), account.getCreditAccountId(), account.getObligorPartyId(),
+                new BigDecimal("45000"), UUID.randomUUID(), "646180157000000004", "  ", null, 24));
+
+        ArgumentCaptor<com.fintech.creditportfolio.domain.event.DispositionRejectedEvent> captor =
+                ArgumentCaptor.forClass(com.fintech.creditportfolio.domain.event.DispositionRejectedEvent.class);
+        then(eventPublisher).should().publishDispositionRejected(captor.capture());
+        assertThat(captor.getValue().getReason()).isEqualTo("BENEFICIARY_NAME_REQUIRED");
+        then(eventPublisher).should(never()).publishDispositionAuthorized(any());
+        then(dispositionRepository).should(never()).save(any());
+        assertThat(account.getPrincipalBalance()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("uso propio conserva al titular: nombre, CLABE y RFC de la cuenta")
+    void elUsoPropioSaleANombreDelTitular() {
+        CreditAccount account = CreditAccount.fromSnapshot(
+                UUID.randomUUID(), "CTR-REV-LMS", UUID.randomUUID(),
+                "RL-001", 1, "REVOLVING_CREDIT", "REVOLVING",
+                null, new BigDecimal("20000"), null,
+                new BigDecimal("0.36"), new BigDecimal("0.54"),
+                null, new BigDecimal("0.02"), "032180000118359719", "MEDIO",
+                "LAURA MÉNDEZ SOTO", "MESL930326XXX");
+        account.activate(BigDecimal.ZERO);
+        stubDisposable(account);
+
+        // Aunque llegue un nombre ajeno, en uso propio no hay a quién más pagarle.
+        service.process(new ProcessDispositionCommand(
+                "evt-" + UUID.randomUUID(), account.getCreditAccountId(), account.getObligorPartyId(),
+                new BigDecimal("5000"), null, null, "ALGUIEN MAS", "XAXX010101000", null));
+
+        ArgumentCaptor<DispositionAuthorizedEvent> captor =
+                ArgumentCaptor.forClass(DispositionAuthorizedEvent.class);
+        then(eventPublisher).should().publishDispositionAuthorized(captor.capture());
+        assertThat(captor.getValue().beneficiaryName()).isEqualTo("LAURA MÉNDEZ SOTO");
+        assertThat(captor.getValue().beneficiaryTaxId()).isEqualTo("MESL930326XXX");
+        assertThat(captor.getValue().beneficiaryAccount()).isEqualTo("032180000118359719");
+    }
+
+    @Test
+    @DisplayName("varias colocaciones a la vez: cada SPEI lleva el nombre de SU beneficiaria")
+    void colocacionesConcurrentes_cadaUnaConSuBeneficiaria() throws Exception {
+        int colocaciones = 8;
+        Map<String, CreditAccount> cuentas = new java.util.concurrent.ConcurrentHashMap<>();
+        for (int i = 0; i < colocaciones; i++) {
+            CreditAccount a = distributorLineOfLaura();
+            cuentas.put(a.getCreditAccountId().toString(), a);
+        }
+        given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
+        given(accountRepository.findById(any())).willAnswer(inv ->
+                Optional.ofNullable(cuentas.get(inv.getArgument(0).toString())));
+        given(accountRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+        given(dispositionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(colocaciones);
+        java.util.concurrent.CountDownLatch salida = new java.util.concurrent.CountDownLatch(1);
+        List<java.util.concurrent.Future<?>> tareas = new java.util.ArrayList<>();
+        int i = 0;
+        for (CreditAccount a : cuentas.values()) {
+            String nombre = "BENEFICIARIA " + (i++);
+            tareas.add(pool.submit(() -> {
+                salida.await();
+                service.process(new ProcessDispositionCommand(
+                        "evt-" + UUID.randomUUID(), a.getCreditAccountId(), a.getObligorPartyId(),
+                        new BigDecimal("1000"), UUID.randomUUID(), "646180157000000004",
+                        nombre, null, 6));
+                return null;
+            }));
+        }
+        salida.countDown();
+        for (var t : tareas) t.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        pool.shutdown();
+
+        ArgumentCaptor<DispositionAuthorizedEvent> captor =
+                ArgumentCaptor.forClass(DispositionAuthorizedEvent.class);
+        then(eventPublisher).should(times(colocaciones)).publishDispositionAuthorized(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(DispositionAuthorizedEvent::beneficiaryName)
+                .doesNotContain("LAURA MÉNDEZ SOTO")
+                .doesNotHaveDuplicates()
+                .hasSize(colocaciones);
     }
 
     // ── El calendario de la colocación ────────────────────────────────────────
@@ -384,7 +525,7 @@ class CreditAccountServiceTest {
         service.process(new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), UUID.randomUUID(),
                 new BigDecimal("6000"), UUID.randomUUID(),
-                "032180000118399999", 6));
+                "032180000118399999", "ROSA ELENA IBARRA SALGADO", "IASR900612B0B", 6));
 
         ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
         then(installmentRepository).should().saveAll(captor.capture());
@@ -401,7 +542,7 @@ class CreditAccountServiceTest {
 
         service.process(new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), UUID.randomUUID(),
-                new BigDecimal("6000"), null, null, null));
+                new BigDecimal("6000"), null, null, null, null, null));
 
         // Sin piso, una disposición sin plazo generaría cero cuotas: deuda sin nada que vencer.
         ArgumentCaptor<List> captor = ArgumentCaptor.forClass(List.class);
@@ -421,7 +562,7 @@ class CreditAccountServiceTest {
         service.process(new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), account.getObligorPartyId(),
                 new BigDecimal("3000"), account.getObligorPartyId(),
-                "032180000118399999", 12));
+                "032180000118399999", "ROSA ELENA IBARRA SALGADO", "IASR900612B0B", 12));
 
         ArgumentCaptor<com.fintech.creditportfolio.domain.event.DispositionRejectedEvent> captor =
                 ArgumentCaptor.forClass(com.fintech.creditportfolio.domain.event.DispositionRejectedEvent.class);
@@ -438,7 +579,7 @@ class CreditAccountServiceTest {
 
         service.process(new ProcessDispositionCommand(
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), UUID.randomUUID(),
-                new BigDecimal("3000"), null, "032180000118399999", 12));
+                new BigDecimal("3000"), null, "032180000118399999", "ROSA ELENA IBARRA SALGADO", "IASR900612B0B", 12));
 
         then(eventPublisher).should().publishDispositionRejected(any());
         then(dispositionRepository).should(never()).save(any());
@@ -502,7 +643,7 @@ class CreditAccountServiceTest {
         given(balanceEventRepository.existsBySourceEventId("evt-dup")).willReturn(true);
 
         var cmd = new ProcessDispositionCommand(
-                "evt-dup", UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("1000"), null, null, null);
+                "evt-dup", UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("1000"), null, null, null, null, null);
         service.process(cmd);
 
         then(accountRepository).shouldHaveNoInteractions();

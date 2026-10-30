@@ -72,7 +72,7 @@ class OnboardingAcceptanceTest {
     void ac1_fullOnboardingFlow_happyPath_conPreAuthToken() {
         given(originationClient.registerProspect(any()))
                 .willReturn(new ProspectResponse(
-                        "PROSPECT-ACCEPT-001", "RAHE930326HSMLRM09", "+52" + PHONE,
+                        "PROSPECT-ACCEPT-001", "MESL930326MSLNTR04", "+52" + PHONE,
                         Instant.now().toString(), Instant.now().plusSeconds(86400).toString(),
                         "Prospecto creado exitosamente"));
 
@@ -170,11 +170,11 @@ class OnboardingAcceptanceTest {
     private Map<String, Object> kycPayload(String phone) {
         return Map.ofEntries(
                 Map.entry("phone", phone),
-                Map.entry("nombres", "EMMANUEL"),
-                Map.entry("apellidoPaterno", "RAMÍREZ"),
-                Map.entry("apellidoMaterno", "HERNÁNDEZ"),
-                Map.entry("curp", "RAHE930326HSMLRM09"),
-                Map.entry("rfc", "RAHE930326XXX"),
+                Map.entry("nombres", "LAURA"),
+                Map.entry("apellidoPaterno", "MÉNDEZ"),
+                Map.entry("apellidoMaterno", "SOTO"),
+                Map.entry("curp", "MESL930326MSLNTR04"),
+                Map.entry("rfc", "MESL930326XXX"),
                 Map.entry("fechaNacimiento", "1993-03-26"),
                 Map.entry("genero", "H"),
                 Map.entry("estadoNacimiento", "Sinaloa"),

@@ -30,9 +30,19 @@ spring:
       group-id: ${KAFKA_GROUP_ID:compliance-service}
       auto-offset-reset: earliest
     producer:
+      # Los veredictos se publican como JSON. Sin estas dos líneas el productor usaba el
+      # StringSerializer por defecto y TODA publicación fallaba con SerializationException — que
+      # el publicador registra y no relanza, así que el dictamen se guardaba aquí y nunca llegaba
+      # a party ni a credit-portfolio: firmado y sin efecto. Las pruebas no lo veían porque no hay
+      # Kafka en ellas; lo destapó la primera corrida en Docker.
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       acks: all
       retries: 3
       properties:
+        # Mismo contrato que los demás productores del monorepo: el consumidor declara su propio
+        # payload y no debe depender de una clase de este servicio.
+        spring.json.add.type.headers: false
         enable.idempotence: true
         max.in.flight.requests.per.connection: 1
         delivery.timeout.ms: 30000
@@ -60,6 +70,13 @@ fintech:
   compliance:
     # Cada lista con su cadencia. Se declara aquí y no se descubre: una lista que deja de
     # sincronizarse sin que nadie lo note es un control apagado que parece encendido.
+    # Sincronización de listas: al arrancar y cada madrugada, ANTES del re-cruce de las 03:00 para
+    # que el re-cruce mire la lista del día. La carga es idempotente por hash: correrla de más no
+    # carga nada dos veces.
+    watchlist-sync:
+      enabled: ${COMPLIANCE_WATCHLIST_SYNC_ENABLED:true}
+      on-startup: ${COMPLIANCE_WATCHLIST_SYNC_ON_STARTUP:true}
+      cron: ${COMPLIANCE_WATCHLIST_SYNC_CRON:0 30 2 * * *}
     watchlists:
       - source-code: OFAC-SDN
         kind: SANCTIONS

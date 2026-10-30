@@ -55,11 +55,12 @@ public class KafkaWalletEventPublisher implements WalletEventPublisher {
     public UUID publishDispositionRequested(UUID creditAccountId, UUID obligorPartyId,
                                              BigDecimal amount, String dispositionType,
                                              UUID beneficiaryPartyId, String payeeAccount,
+                                             String payeeName, String payeeTaxId,
                                              Integer termPeriods) {
         UUID dispositionRequestId = UUID.randomUUID();
         var payload = new DispositionRequestedPayload(
                 dispositionRequestId, creditAccountId, obligorPartyId, amount, dispositionType,
-                beneficiaryPartyId, payeeAccount, termPeriods, Instant.now());
+                beneficiaryPartyId, payeeAccount, payeeName, payeeTaxId, termPeriods, Instant.now());
         kafkaTemplate.send(TOPIC_DISPOSITION_REQUESTED, creditAccountId.toString(), payload)
                 .whenComplete((r, ex) -> {
                     if (ex != null) log.error("disposition-requested publish failed creditAccountId={}: {}",

@@ -1,6 +1,7 @@
 package com.fintech.banking.infrastructure.config;
 
 import com.fintech.banking.infrastructure.adapter.in.messaging.CreditReceivedListener;
+import com.fintech.banking.infrastructure.adapter.in.messaging.PayoutTraceListener;
 import com.fintech.banking.infrastructure.adapter.in.messaging.StpOrderSettledListener;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -35,6 +36,26 @@ public class KafkaConfig {
                 StpOrderSettledListener.StpOrderSettledPayload>();
         factory.setConsumerFactory(jsonConsumerFactory(properties,
                 StpOrderSettledListener.StpOrderSettledPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, PayoutTraceListener.PaymentRequestedPayload>
+    paymentRequestedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String,
+                PayoutTraceListener.PaymentRequestedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties,
+                PayoutTraceListener.PaymentRequestedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, PayoutTraceListener.DisbursementAcceptedPayload>
+    disbursementAcceptedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String,
+                PayoutTraceListener.DisbursementAcceptedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties,
+                PayoutTraceListener.DisbursementAcceptedPayload.class));
         return factory;
     }
 

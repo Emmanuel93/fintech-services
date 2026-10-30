@@ -101,7 +101,7 @@ class ClosingSchemaIT {
 
     @Test
     @DisplayName("hay una sola política ACTIVE por alcance y el índice parcial lo impone")
-    void unaSolaPoliticaActivaPorAlcance() {
+    void onlyOneActivePolicyPerScope() {
         // La segunda ACTIVE del mismo producto tiene que rebotar: si conviven dos, cuál gana
         // depende del orden de las filas, y el cierre deja de ser reproducible.
         assertThat(jdbc.queryForObject("""
@@ -120,7 +120,7 @@ class ClosingSchemaIT {
 
     @Test
     @DisplayName("las políticas sembradas cubren revolventes y no revolventes")
-    void politicasSembradas() {
+    void seededPolicies() {
         assertThat(jdbc.queryForObject("""
                 SELECT cutoff_rule FROM closing.close_cycle_policies
                  WHERE scope_type='PRODUCT_TYPE' AND scope_value='PERSONAL_LOAN' AND status='ACTIVE'

@@ -4,7 +4,7 @@
 Un video suelto en una carpeta no es evidencia de nada: no se sabe qué caso es, ni en qué punto
 falló, ni si el verde de al lado corresponde a esa toma. Esto los ata a las aserciones.
 
-    python3 reporte.py .evidencia/<corrida>
+    python3 reporte.py ~/Documents/material-kredius/pruebas/<commit>/<corrida>
 """
 import html
 import json
@@ -31,10 +31,21 @@ def pasos_por_caso(raiz: Path):
 
 
 def videos_de(carpeta: Path, raiz: Path):
+    """Los videos del caso, en el orden de los actos.
+
+    Cada acto se nombra con su número (`01-app-…`, `02-bo-…`), así que el orden de la ruta es el
+    orden del journey. Se saltan las copias que Playwright mete en su propio reporte HTML: el mismo
+    video dos veces hacía parecer que había un acto de más. Y el título es el del acto, no
+    `video.webm`, que es como se llaman todos los de Playwright.
+    """
     if not carpeta.is_dir():
         return []
-    vids = [v for v in sorted(carpeta.rglob("*")) if v.suffix.lower() in VIDEO_EXT]
-    return [(v.name, v.relative_to(raiz).as_posix()) for v in vids]
+    vids = [v for v in sorted(carpeta.rglob("*"))
+            if v.suffix.lower() in VIDEO_EXT and "report" not in v.relative_to(carpeta).parts]
+    def titulo(v: Path) -> str:
+        partes = v.relative_to(carpeta).parts
+        return partes[0] if len(partes) > 1 else v.name
+    return [(titulo(v), v.relative_to(raiz).as_posix()) for v in vids]
 
 
 def main() -> int:

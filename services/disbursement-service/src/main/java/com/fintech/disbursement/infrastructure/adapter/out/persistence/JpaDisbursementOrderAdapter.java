@@ -51,4 +51,21 @@ public class JpaDisbursementOrderAdapter implements DisbursementOrderRepository 
     public List<DisbursementOrder> findByCompany(UUID companyId, int page, int size) {
         return repository.findByCompanyIdOrderByCreatedAtDesc(companyId, PageRequest.of(page, size));
     }
+
+    @Override
+    public OrderPage search(UUID creditAccountId, String q, int page, int size) {
+        var result = repository.search(
+                creditAccountId == null ? null : creditAccountId.toString(),
+                likeFragment(q), PageRequest.of(page, size));
+        return new OrderPage(result.getContent(), page, size, result.getTotalElements());
+    }
+
+    /**
+     * El texto que escribe el operador se busca tal cual: un {@code %} o un {@code _} en la clave
+     * no pueden volverse comodines y traer órdenes que nadie pidió.
+     */
+    static String likeFragment(String q) {
+        if (q == null || q.isBlank()) return null;
+        return q.trim().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+    }
 }

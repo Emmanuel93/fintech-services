@@ -4,6 +4,7 @@ import com.fintech.compliance.application.port.out.RescreenRunRepository;
 import com.fintech.compliance.application.service.PersonVerificationService;
 import com.fintech.compliance.application.service.RescreenService;
 import com.fintech.compliance.application.service.ScreeningJournal;
+import com.fintech.compliance.application.service.VerificationQueueService;
 import com.fintech.compliance.domain.ScreeningCheck;
 import com.fintech.compliance.domain.PersonVerification;
 import com.fintech.compliance.domain.RescreenRun;
@@ -34,17 +35,73 @@ public class ComplianceController {
     private final RescreenRunRepository runs;
     private final com.fintech.compliance.application.port.out.VersionChangeRepository changes;
     private final ScreeningJournal journal;
+    private final VerificationQueueService queue;
+    private final com.fintech.compliance.infrastructure.job.WatchlistSyncJob watchlistSync;
 
     public ComplianceController(PersonVerificationService verifications,
                                 RescreenService rescreen,
                                 RescreenRunRepository runs,
                                 com.fintech.compliance.application.port.out.VersionChangeRepository changes,
-                                ScreeningJournal journal) {
+                                ScreeningJournal journal,
+                                VerificationQueueService queue,
+                                com.fintech.compliance.infrastructure.job.WatchlistSyncJob watchlistSync) {
         this.verifications = verifications;
         this.rescreen      = rescreen;
         this.runs          = runs;
         this.changes       = changes;
         this.journal       = journal;
+        this.queue         = queue;
+        this.watchlistSync = watchlistSync;
+    }
+
+    /**
+     * Sincroniza ahora las listas declaradas, sin esperar a la madrugada.
+     *
+     * <p>Para el día que se publica una lista de urgencia, o para levantar un ambiente nuevo. Es
+     * idempotente: si el contenido no cambió, no carga nada.
+     */
+    @PostMapping("/watchlists/sync")
+    public List<Map<String, Object>> syncWatchlists() {
+        return watchlistSync.syncAll().stream().map(r -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("sourceCode",   r.sourceCode());
+            m.put("status",       r.status() == null ? null : r.status().name());
+            m.put("activated",    r.activated());
+            m.put("skipped",      r.skipped());
+            m.put("acceptedRows", r.acceptedRows());
+            m.put("rejectedRows", r.rejectedRows());
+            m.put("detail",       r.detail());
+            return m;
+        }).toList();
+    }
+
+    /**
+     * La cola de la mesa: personas por estado de identidad y de listas.
+     *
+     * <p>Sin proveedor de KYC, toda alta llega aquí en {@code IN_REVIEW}; esta consulta es lo que
+     * convierte ese estado en trabajo que alguien puede encontrar y terminar. Los dos filtros se
+     * repiten ({@code identityStatus=IN_REVIEW&identityStatus=PENDING}) y vacíos significan todos.
+     */
+    @GetMapping("/verifications")
+    public Map<String, Object> search(@RequestParam(required = false) java.util.Set<IdentityStatus> identityStatus,
+                                      @RequestParam(required = false) java.util.Set<ScreeningStatus> screeningStatus,
+                                      @RequestParam(required = false) String q,
+                                      @RequestParam(defaultValue = "0") int page,
+                                      @RequestParam(defaultValue = "50") int size) {
+        var result = queue.search(identityStatus, screeningStatus, q, page, size);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("content", result.getContent().stream().map(ComplianceController::toView).toList());
+        body.put("page", result.getNumber());
+        body.put("size", result.getSize());
+        body.put("totalElements", result.getTotalElements());
+        body.put("totalPages", result.getTotalPages());
+        return body;
+    }
+
+    /** La ficha de una verificación por su id: la llave con la que trabaja la mesa. */
+    @GetMapping("/verifications/{verificationId}")
+    public Map<String, Object> byId(@PathVariable UUID verificationId) {
+        return toView(queue.byId(verificationId));
     }
 
     /**
@@ -207,7 +264,16 @@ public class ComplianceController {
         m.put("blockReason",     v.blockReason());
         m.put("listVersions",    v.getScreenedListVersions());
         m.put("decidedBy",       v.getDecidedBy());
+        m.put("decidedAt",       v.getDecidedAt());
         m.put("decisionNotes",   v.getDecisionNotes());
+        // A quién se está mirando. Sin esto la mesa sería una lista de UUIDs.
+        m.put("fullName",        v.getSubjectFullName());
+        m.put("curp",            v.getSubjectCurp());
+        m.put("rfc",             v.getSubjectRfc());
+        m.put("dateOfBirth",     v.getSubjectDateOfBirth());
+        m.put("screenedAt",      v.getScreenedAt());
+        m.put("createdAt",       v.getCreatedAt());
+        m.put("updatedAt",       v.getUpdatedAt());
         return m;
     }
 

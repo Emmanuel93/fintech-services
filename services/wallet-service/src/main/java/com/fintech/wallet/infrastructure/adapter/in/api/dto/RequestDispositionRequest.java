@@ -19,6 +19,14 @@ public record RequestDispositionRequest(
         String dispositionTypeIgnorado,
         UUID beneficiaryPartyId,   // required for DISTRIBUTOR_LINE
         String payeeAccount,
+        /**
+         * A nombre de quién está {@code payeeAccount}. Una colocación lo manda; uso propio no lo
+         * necesita —el receptor es el titular—. Sin él, el SPEI a la beneficiaria salía con el
+         * nombre y el RFC de la distribuidora.
+         */
+        String payeeName,
+        /** RFC o CURP del titular de {@code payeeAccount}. Opcional. */
+        String payeeTaxId,
         /** A cuántos períodos se amortiza esta colocación. Nulo cae al plazo por defecto. */
         Integer termPeriods
 ) {}

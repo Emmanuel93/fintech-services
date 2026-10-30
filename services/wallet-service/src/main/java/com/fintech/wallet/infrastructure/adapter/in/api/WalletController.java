@@ -142,7 +142,8 @@ class WalletController {
         var cmd = new RequestDispositionCommand(
                 creditAccountId, obligorPartyId,
                 req.amount(), null,   // el tipo lo decide el producto (BK-13)
-                req.beneficiaryPartyId(), req.payeeAccount(), req.termPeriods());
+                req.beneficiaryPartyId(), req.payeeAccount(), req.payeeName(), req.payeeTaxId(),
+                req.termPeriods());
         requestDispositionUseCase.request(cmd);
         return ResponseEntity.accepted().build();
     }

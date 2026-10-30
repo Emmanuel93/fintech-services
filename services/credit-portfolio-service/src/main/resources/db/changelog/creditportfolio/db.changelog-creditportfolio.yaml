@@ -168,3 +168,11 @@ databaseChangeLog:
             path: db/changelog/creditportfolio/023-aml-en-la-disposicion.sql
             relativeToChangelogFile: false
             splitStatements: false
+  - changeSet:
+      id: 024-veredicto-por-prospecto
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/024-veredicto-por-prospecto.sql
+            relativeToChangelogFile: false
+            splitStatements: false

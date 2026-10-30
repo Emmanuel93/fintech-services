@@ -28,6 +28,10 @@ fintech:
     notifications-service-url:    ${NOTIFICATIONS_SERVICE_URL:http://notifications-service:8080}
     sales-org-service-url:        ${SALES_ORG_SERVICE_URL:http://sales-org-service:8080}
     beneficiary-service-url:      ${BENEFICIARY_SERVICE_URL:http://beneficiary-service:8080}
+    compliance-service-url:       ${COMPLIANCE_SERVICE_URL:http://compliance-service:8080}
+    banking-service-url:          ${BANKING_SERVICE_URL:http://banking-service:8080}
+    disbursement-service-url:     ${DISBURSEMENT_SERVICE_URL:http://disbursement-service:8080}
+    stp-service-url:              ${STP_SERVICE_URL:http://stp-service:8080}
 
 logging:
   level:

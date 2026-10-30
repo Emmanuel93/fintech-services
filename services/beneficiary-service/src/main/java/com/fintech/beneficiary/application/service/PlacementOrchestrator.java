@@ -5,6 +5,7 @@ import com.fintech.beneficiary.application.port.in.PlacementLifecycleUseCase;
 import com.fintech.beneficiary.application.port.out.PlacementRepository;
 import com.fintech.beneficiary.domain.*;
 import com.fintech.beneficiary.infrastructure.adapter.out.client.CreditPortfolioClient;
+import com.fintech.beneficiary.infrastructure.adapter.out.client.PartyClient;
 import com.fintech.beneficiary.infrastructure.adapter.out.client.WalletClient;
 import com.fintech.beneficiary.infrastructure.config.BeneficiaryProperties;
 import com.fintech.beneficiary.infrastructure.adapter.in.api.dto.PlacementMetrics;
@@ -40,17 +41,23 @@ public class PlacementOrchestrator {
     private final CreditPortfolioClient creditPortfolio;
     private final WalletClient wallet;
     private final BeneficiaryProperties props;
+    private final PlacementInviteService inviteService;
+    private final PartyClient party;
 
     public PlacementOrchestrator(PlacementLifecycleUseCase lifecycle,
                                  PlacementRepository placements,
                                  CreditPortfolioClient creditPortfolio,
                                  WalletClient wallet,
-                                 BeneficiaryProperties props) {
+                                 BeneficiaryProperties props,
+                                 PlacementInviteService inviteService,
+                                 PartyClient party) {
         this.lifecycle       = lifecycle;
         this.placements      = placements;
         this.creditPortfolio = creditPortfolio;
         this.wallet          = wallet;
         this.props           = props;
+        this.inviteService   = inviteService;
+        this.party           = party;
     }
 
     // ── Alta ─────────────────────────────────────────────────────────────────────────────────
@@ -69,7 +76,7 @@ public class PlacementOrchestrator {
         BigDecimal available = line.availableCredit() == null ? BigDecimal.ZERO : line.availableCredit();
         BigDecimal payment = fortnightlyPayment(amount, termFortnights, line.nominalRate());
 
-        return lifecycle.create(new CreatePlacementCommand(
+        Placement placement = lifecycle.create(new CreatePlacementCommand(
                 distributorPartyId,
                 line.creditAccountId(),
                 line.productCode(),
@@ -84,6 +91,14 @@ public class PlacementOrchestrator {
                 limitsFor(line),
                 available,
                 UUID.randomUUID().toString()));
+
+        // Crear es inseparable de acuñar la liga: toda colocación nace con una viva. El token en
+        // claro NO va en `placement-invited` —un token en un tópico es un token en los logs de
+        // todos los consumidores—. Entregarlo por WhatsApp queda pendiente en notifications (que
+        // armará la URL sin que el secreto pase por Kafka); mientras tanto, la liga se obtiene
+        // rotándola desde el soporte de pruebas.
+        inviteService.mint(placement);
+        return placement;
     }
 
     // ── Decisión ─────────────────────────────────────────────────────────────────────────────
@@ -100,12 +115,15 @@ public class PlacementOrchestrator {
                 placementId, distributorPartyId, riskAcknowledged, UUID.randomUUID());
 
         try {
+            Payee payee = payeeOf(placement);
             wallet.requestThirdPartyDisposition(
                     placement.getDistributorCreditAccountId(),
                     distributorPartyId,
                     placement.getAmount(),
                     placement.getBeneficiaryPartyId(),
                     placement.getBeneficiaryClabe(),
+                    payee.name(),
+                    payee.taxId(),
                     placement.getTermFortnights());
         } catch (RuntimeException e) {
             // La línea pudo haberse agotado entre la aprobación y este momento: dos colocaciones
@@ -122,6 +140,33 @@ public class PlacementOrchestrator {
         // base prohíbe en este estado.
         return lifecycle.markDisbursing(placementId, placement.getPlacementId());
     }
+
+    /**
+     * A nombre de quién sale el SPEI: la beneficiaria, con su nombre verificado y su RFC/CURP.
+     *
+     * <p>La disposición mandaba sólo la CLABE, y cartera completaba nombre y RFC con los de la
+     * cuenta — la distribuidora. El dinero llegaba a Rosa Elena con la orden y el CEP a nombre de
+     * Laura Méndez.
+     *
+     * <p>El nombre sale del Party —el que quedó tras el KYC— y, si party no contesta, del que se
+     * capturó al colocar: ambos son de la beneficiaria, que es lo que importa. El RFC no tiene
+     * respaldo: sin party viaja vacío, que SPEI admite, en vez de inventarse o heredarse.
+     */
+    Payee payeeOf(Placement placement) {
+        PartyClient.PartyResponse ficha = placement.getBeneficiaryProspectId() == null
+                ? null
+                : party.findByProspect(placement.getBeneficiaryProspectId()).orElse(null);
+        String verificado = ficha == null ? "" : ficha.fullName();
+        String nombre = !verificado.isBlank() ? verificado : placement.getBeneficiaryFullName();
+        if (ficha == null) {
+            log.warn("Sin ficha de party para la beneficiaria de la colocación {}: el SPEI sale con "
+                    + "el nombre capturado y sin RFC", placement.getPlacementId());
+        }
+        return new Payee(nombre, ficha == null ? null : ficha.taxId());
+    }
+
+    /** El titular de la CLABE de destino. */
+    record Payee(String name, String taxId) {}
 
     /**
      * Vuelve a mandarle la liga.

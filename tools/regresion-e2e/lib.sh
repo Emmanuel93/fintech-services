@@ -32,6 +32,11 @@ BO_URL="${BO_URL:-http://$BO_HOST:$GATEWAY_PORT}"
 STAFF_PASSWORD="${STAFF_PASSWORD:-Backoffice#2026}"
 UNDERWRITER_EMAIL="${UNDERWRITER_EMAIL:-underwriter@kredius.mx}"
 ANALISTA_EMAIL="${ANALISTA_EMAIL:-analista@kredius.mx}"
+# La mesa de cumplimiento y la de KYC de beneficiarias: la revisión manual que sustituye a Incode.
+OPS_EMAIL="${OPS_EMAIL:-ops@kredius.mx}"
+KYC_WEB_URL="${KYC_WEB_URL:-http://localhost:4300}"
+# Donde se sirven los documentos de muestra de la distribuidora mientras corre el acto 1.
+DOCS_PORT="${DOCS_PORT:-8765}"
 
 ORIGINATION="http://origination-service:8080"
 SCORING="http://scoring-service:8080"
@@ -39,9 +44,11 @@ CHARGES="http://charges-service:8080"
 PORTFOLIO="http://credit-portfolio-service:8080"
 PAYMENTS="http://payments-service:8080"
 BENEFICIARY="http://beneficiary-service:8080"
+COMPLIANCE="http://compliance-service:8080"
+PARTY="http://party-service:8080"
 
 # EVIDENCIA lo fija run.sh antes de llamar a nada de aquí.
-EVIDENCIA="${EVIDENCIA:-$SERVICES_DIR/tools/regresion-e2e/evidencia/suelta/corrida}"
+EVIDENCIA="${EVIDENCIA:-${MATERIAL_DIR:-$HOME/Documents/material-kredius}/pruebas/suelta/corrida}"
 
 # ── Salida ───────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then C_OK=$'\033[32m'; C_ERR=$'\033[31m'; C_INF=$'\033[36m'; C_WRN=$'\033[33m'; C_OFF=$'\033[0m'
@@ -176,12 +183,21 @@ provocar_mora() {
 }
 
 # ── Grabación ────────────────────────────────────────────────────────────────
+# Segundos con centésimas: los marcadores de la historia caen a mitad de segundo, y redondear a
+# segundos enteros desfasa el panel del video respecto de la pantalla.
+ahora() { perl -MTime::HiRes=time -e 'printf "%.2f", time'; }
+desde_t0() { perl -e 'printf "%.2f", $ARGV[0] - $ARGV[1]' "$(ahora)" "$1"; }
+
 _REC_PID=""
+_REC_DESTINO=""
+_REC_T0=""
 grabar_inicio() { # grabar_inicio nombre.mp4
   local destino="$EVIDENCIA/${CASO_ACTUAL:-general}/$1"
   mkdir -p "$(dirname "$destino")"
   xcrun simctl io "$SIM_ID" recordVideo --codec h264 --force "$destino" >/dev/null 2>&1 &
   _REC_PID=$!
+  _REC_DESTINO="$destino"
+  _REC_T0=$(ahora)
   sleep 2   # simctl tarda en abrir el archivo; sin esto se pierden los primeros segundos
   log "Grabando → $(basename "$destino")"
 }
@@ -196,11 +212,34 @@ grabar_fin() {
 # ── Flutter ──────────────────────────────────────────────────────────────────
 # correr_app archivo.dart salida.log [--dart-define=…]…
 # Deja el stdout completo en la evidencia y devuelve 0/1 según el resultado del test.
+#
+# Mientras corre anota, respecto al inicio de la grabación:
+#   <video>.inicio    cuándo arrancó la prueba de verdad (antes: el home del iPhone mientras se
+#                     compila e instala la app)
+#   <video>.historia  «segundos|clave» de cada momento que la prueba marca con `historia()`
+#   <video>.fin       cuándo terminó (después: la app cerrándose)
+# `une-video.sh` recorta con los dos extremos y sincroniza el panel narrativo con la historia.
 correr_app() {
   local archivo="$1" logfile="$2"; shift 2
   mkdir -p "$(dirname "$logfile")"
+  local destino="$_REC_DESTINO" t0="$_REC_T0"
+  [ -n "$destino" ] && rm -f "$destino.inicio" "$destino.historia" "$destino.fin"
   ( cd "$APP_DIR/packages/fa_shell" \
-      && flutter test "integration_test/$archivo" -d "$SIM_ID" "$@" 2>&1 ) | tee "$logfile"
+      && flutter test "integration_test/$archivo" -d "$SIM_ID" "$@" 2>&1 ) \
+    | while IFS= read -r linea; do
+        printf '%s\n' "$linea"
+        [ -z "$destino" ] && continue
+        case "$linea" in
+          *"##HISTORIA## "*)
+            echo "$(desde_t0 "$t0")|${linea##*##HISTORIA## }" >> "$destino.historia" ;;
+        esac
+        if [ ! -f "$destino.inicio" ] && printf '%s' "$linea" | grep -qE '^[0-9]{2}:[0-9]{2} \+0: CASO'; then
+          desde_t0 "$t0" > "$destino.inicio"
+        fi
+        if [ ! -f "$destino.fin" ] && printf '%s' "$linea" | grep -qE '^[0-9]{2}:[0-9]{2} \+[0-9]+.*(All tests passed|Some tests failed)'; then
+          desde_t0 "$t0" > "$destino.fin"
+        fi
+      done | tee "$logfile"
   return "${PIPESTATUS[0]}"
 }
 
@@ -221,7 +260,11 @@ correr_bo() {
       PLAYWRIGHT_HTML_REPORT="$salida/report" \
       npx playwright test "tools/e2e/browser/$spec" \
         --output "$salida/artefactos" 2>&1 ) | tee "$salida/salida.log"
-  return "${PIPESTATUS[0]}"
+  local r="${PIPESTATUS[0]}"
+  # Los momentos de la historia que marcó el spec, ya con su segundo dentro del video
+  # («##HISTORIA## 12.40 documentos» → «12.40|documentos»): el panel del video se sincroniza con ellos.
+  grep -oE '##HISTORIA## [0-9.]+ [a-z_]+' "$salida/salida.log" | awk '{print $2"|"$3}' > "$salida/historia.txt"
+  return "$r"
 }
 
 # ── Canal móvil (el mismo que usa la app) ────────────────────────────────────
@@ -232,4 +275,7 @@ bff_login() { # phone password → token
 }
 bff_post() { curl -sS -X POST "$BFF_URL$2" -H "Authorization: Bearer $1" \
                -H 'Content-Type: application/json' -d "${3:-{}}" 2>>"$EVIDENCIA/api.log"; }
+# Sólo el código HTTP: para afirmar que una compuerta rechaza, que es tan importante como que deje pasar.
+bff_post_code() { curl -sS -o /dev/null -w '%{http_code}' -X POST "$BFF_URL$2" -H "Authorization: Bearer $1" \
+                    -H 'Content-Type: application/json' -d "${3:-{}}" 2>>"$EVIDENCIA/api.log"; }
 bff_get()  { curl -sS "$BFF_URL$2" -H "Authorization: Bearer $1" 2>>"$EVIDENCIA/api.log"; }

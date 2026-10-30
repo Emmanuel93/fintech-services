@@ -62,6 +62,16 @@ public class ClosePolicy {
     @Column(name = "cutoff_day")
     private Short cutoffDay;
 
+    /**
+     * Fracción del saldo al corte exigida como pago mínimo en un revolvente.
+     *
+     * <p>Era una constante del 5 % en {@code CutoffPhaseProcessor}: el mismo porcentaje para todos
+     * los productos, y sólo cambiable con un despliegue. Aquí vive versionado y con vigencia, como
+     * el resto de la política.
+     */
+    @Column(name = "minimum_payment_rate", precision = 6, scale = 4)
+    private BigDecimal minimumPaymentRate;
+
     @Column(name = "payment_due_offset_days", nullable = false)
     private short paymentDueOffsetDays;
 
@@ -131,6 +141,17 @@ public class ClosePolicy {
     public String getCalendarCode()      { return calendarCode; }
     public Short getCutoffDay()          { return cutoffDay; }
     public short getPaymentDueOffsetDays() { return paymentDueOffsetDays; }
+
+    /**
+     * El porcentaje de pago mínimo, o vacío si el producto no exige ninguno.
+     *
+     * <p>{@code Optional} y no un {@code BigDecimal} nulable: «no exige mínimo» es una decisión del
+     * producto —lo correcto para un producto a plazo, cuyo exigible sale del plan— y el llamador
+     * tiene que tratarla, no tropezar con un nulo.
+     */
+    public java.util.Optional<BigDecimal> minimumPaymentRate() {
+        return java.util.Optional.ofNullable(minimumPaymentRate);
+    }
     public BigDecimal getReconcileTolerance() { return reconcileTolerance; }
     public int getBatchSize()            { return batchSize; }
     public int getLeaseSeconds()         { return leaseSeconds; }

@@ -17,6 +17,13 @@ spring:
         default_schema: beneficiary
     open-in-view: false
 
+  # La web de KYC sube el frente y el reverso de la INE en una sola petición. 8 MB por archivo
+  # alcanza para una foto de teléfono sin comprimir; el tope de la petición es la suma de dos.
+  servlet:
+    multipart:
+      max-file-size: 8MB
+      max-request-size: 17MB
+
   data:
     redis:
       host: ${REDIS_HOST:localhost}
@@ -102,6 +109,21 @@ fintech:
         facialMatch: ${BENEFICIARY_THRESHOLD_FACIAL:0.90}
         liveness: ${BENEFICIARY_THRESHOLD_LIVENESS:0.90}
         documentAuthenticity: ${BENEFICIARY_THRESHOLD_DOC:0.85}
+
+    # ── KYC web público (fase 3) ──────────────────────────────────────────────
+    # El OTP, su rate limit y la sesión de invitado viven en Postgres, no en Redis como decía el
+    # plan: el servicio no tiene código de Redis y lo que se cuenta es evidencia auditable.
+    public-kyc:
+      # A dónde apunta la liga (?t=<token>). En local, el Vite de la página de KYC.
+      link-base-url: ${BENEFICIARY_KYC_LINK_BASE_URL:http://localhost:4300/}
+      # Código OTP fijo SÓLO PARA LOCAL. Vacío = códigos aleatorios. WhatsApp/SMS son noop aquí.
+      dev-otp-code: ${BENEFICIARY_DEV_OTP_CODE:}
+      otp-ttl-minutes: ${BENEFICIARY_OTP_TTL_MINUTES:5}
+      # 3 envíos por cada 15 minutos por liga; 5 códigos equivocados congelan la liga 1 hora.
+      max-otp-sends: ${BENEFICIARY_MAX_OTP_SENDS:3}
+      otp-send-window-minutes: ${BENEFICIARY_OTP_SEND_WINDOW_MINUTES:15}
+      max-otp-failures: ${BENEFICIARY_MAX_OTP_FAILURES:5}
+      freeze-minutes: ${BENEFICIARY_OTP_FREEZE_MINUTES:60}
 
     # Sustituye la web pública de KYC mientras no exista. Apagado fuera de local.
     kyc-simulation-enabled: ${BENEFICIARY_KYC_SIMULATION_ENABLED:false}

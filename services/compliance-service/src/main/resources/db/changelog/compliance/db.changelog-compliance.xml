@@ -13,5 +13,6 @@
     <include file="db/changelog/compliance/006-cobertura-de-identificadores.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/compliance/007-raiz-de-curp.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/compliance/008-bitacora-de-consultas.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/compliance/009-cola-de-identidad.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

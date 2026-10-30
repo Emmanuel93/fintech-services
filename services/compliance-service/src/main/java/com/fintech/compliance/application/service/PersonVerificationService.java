@@ -1,5 +1,6 @@
 package com.fintech.compliance.application.service;
 
+import com.fintech.compliance.application.port.out.PartyDirectoryPort;
 import com.fintech.compliance.application.port.out.PersonVerificationRepository;
 import com.fintech.compliance.application.port.out.VerificationEventPublisher;
 import com.fintech.compliance.domain.*;
@@ -38,15 +39,18 @@ public class PersonVerificationService {
     private final ScreeningService screening;
     private final VerificationEventPublisher publisher;
     private final ScreeningJournal journal;
+    private final PartyDirectoryPort partyDirectory;
 
     public PersonVerificationService(PersonVerificationRepository repository,
                                      ScreeningService screening,
                                      VerificationEventPublisher publisher,
-                                     ScreeningJournal journal) {
-        this.repository = repository;
-        this.screening  = screening;
-        this.publisher  = publisher;
-        this.journal    = journal;
+                                     ScreeningJournal journal,
+                                     PartyDirectoryPort partyDirectory) {
+        this.repository     = repository;
+        this.screening      = screening;
+        this.publisher      = publisher;
+        this.journal        = journal;
+        this.partyDirectory = partyDirectory;
     }
 
     /**
@@ -80,7 +84,10 @@ public class PersonVerificationService {
         if (ya.isPresent()) {
             log.info("El prospecto {} ya tenía verificación ({}) — no se reevalúa",
                     prospectId, ya.get().getVerificationId());
-            return ya.get();
+            // No se reevalúa, pero sí se completa: si la primera publicación salió sin Party y
+            // ahora se sabe cuál es, se republica con él. Es la única forma de que una persona
+            // evaluada antes de existir su Party llegue a la proyección de disposición.
+            return attachPartyIfNowKnown(ya.get(), subject.partyId());
         }
 
         PersonVerification verification = PersonVerification.start(prospectId, subject.partyId(), subject);
@@ -95,6 +102,7 @@ public class PersonVerificationService {
 
         // Sin proveedor, la identidad va a la cola. No es un fallo: es el modo vigente.
         verification.recordIdentity(IdentityStatus.IN_REVIEW);
+        resolveParty(verification);
 
         PersonVerification saved = repository.save(verification);
         publisher.publishVerificationCompleted(saved);
@@ -117,6 +125,7 @@ public class PersonVerificationService {
                 .orElseThrow(() -> new VerificationNotFoundException(verificationId));
 
         v.adjudicate(decision, by, notes);
+        resolveParty(v);
         PersonVerification saved = repository.save(v);
 
         publisher.publishVerificationCompleted(saved);
@@ -152,11 +161,37 @@ public class PersonVerificationService {
         PersonVerification v = repository.findById(verificationId)
                 .orElseThrow(() -> new VerificationNotFoundException(verificationId));
         v.adjudicateIdentity(decision, by, notes);
+        resolveParty(v);
         PersonVerification saved = repository.save(v);
         publisher.publishVerificationCompleted(saved);
 
         log.info("Identidad dictaminada partyId={} prospectId={} → {} por {} — {}",
                 saved.getPartyId(), saved.getProspectId(), decision, by, notes);
+        return saved;
+    }
+
+    /**
+     * Completa el Party de una verificación que salió sin él, preguntando a party.
+     *
+     * <p>Se llama justo antes de cada publicación porque es la publicación la que lo necesita:
+     * credit-portfolio descarta un veredicto sin partyId. En el alta casi nunca resuelve —el Party
+     * nace del mismo evento—; en el dictamen de un analista, minutos u horas después, sí.
+     */
+    private void resolveParty(PersonVerification v) {
+        if (v.getPartyId() != null) return;
+        partyDirectory.partyIdOf(v.getProspectId()).ifPresent(v::attachParty);
+    }
+
+    private PersonVerification attachPartyIfNowKnown(PersonVerification v, UUID declaredPartyId) {
+        if (v.getPartyId() != null) return v;
+        if (declaredPartyId != null) v.attachParty(declaredPartyId);
+        else resolveParty(v);
+        if (v.getPartyId() == null) return v;
+
+        PersonVerification saved = repository.save(v);
+        publisher.publishVerificationCompleted(saved);
+        log.info("Verificación {} completada con partyId={} y republicada",
+                saved.getVerificationId(), saved.getPartyId());
         return saved;
     }
 

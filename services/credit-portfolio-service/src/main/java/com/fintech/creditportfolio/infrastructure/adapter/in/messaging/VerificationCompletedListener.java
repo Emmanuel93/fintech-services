@@ -37,20 +37,32 @@ public class VerificationCompletedListener {
             containerFactory = "verificationCompletedListenerContainerFactory")
     @Transactional
     public void onVerificationCompleted(VerificationCompletedPayload event) {
-        // Sin partyId no hay a quién aplicárselo: compliance publica el primer veredicto cuando el
-        // Party puede no existir todavía, y republica en cuanto lo conoce. Ignorarlo aquí no pierde
-        // nada y deja a la persona sin veredicto — que bloquea, o sea el lado seguro.
-        if (event == null || event.partyId() == null) return;
+        if (event == null || (event.partyId() == null && event.prospectId() == null)) return;
 
-        verifications.findByPartyId(event.partyId())
-                .ifPresentOrElse(
-                        v -> v.apply(event.identityStatus(), event.screeningStatus(),
-                                Boolean.TRUE.equals(event.allowsToProceed()), event.blockReason()),
-                        () -> verifications.save(PartyVerification.of(
-                                event.partyId(), event.identityStatus(), event.screeningStatus(),
-                                Boolean.TRUE.equals(event.allowsToProceed()), event.blockReason())));
+        // Por prospecto primero: es la llave que trae todo veredicto y la que guarda la cuenta como
+        // responsable. Antes se descartaba todo lo que llegara sin partyId —que en el alta es casi
+        // todo, porque el Party nace del mismo evento— y la proyección quedaba vacía: ninguna
+        // disposición pasaba la compuerta, ni siquiera la de alguien comprobado y limpio.
+        java.util.Optional<PartyVerification> existing = event.prospectId() != null
+                ? verifications.findByProspectId(event.prospectId())
+                : java.util.Optional.empty();
+        if (existing.isEmpty() && event.partyId() != null) {
+            existing = verifications.findByPartyId(event.partyId());
+        }
 
-        log.info("Veredicto de {} → identidad={} listas={}",
-                event.partyId(), event.identityStatus(), event.screeningStatus());
+        existing.ifPresentOrElse(
+                v -> {
+                    v.attachParty(event.partyId());
+                    v.apply(event.identityStatus(), event.screeningStatus(),
+                            Boolean.TRUE.equals(event.allowsToProceed()), event.blockReason());
+                    verifications.save(v);
+                },
+                () -> verifications.save(PartyVerification.forPerson(
+                        event.partyId(), event.prospectId(), event.identityStatus(),
+                        event.screeningStatus(), Boolean.TRUE.equals(event.allowsToProceed()),
+                        event.blockReason(), null, null)));
+
+        log.info("Veredicto de prospecto={} party={} → identidad={} listas={}",
+                event.prospectId(), event.partyId(), event.identityStatus(), event.screeningStatus());
     }
 }

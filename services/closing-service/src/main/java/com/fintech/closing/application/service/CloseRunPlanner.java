@@ -76,9 +76,9 @@ public class CloseRunPlanner {
         return lock.withLock(key, PLAN_LEASE, () -> {
             // Segunda comprobación con el candado tomado: entre la primera y ésta, otro pod pudo
             // haberla creado. Sin esto, el candado sólo estrecharía la ventana en vez de cerrarla.
-            Optional<CloseRun> yaCreada = runs.find(businessDate, phase, alcance);
-            if (yaCreada.isPresent()) {
-                return new Plan(yaCreada.get(), false);
+            Optional<CloseRun> alreadyCreated = runs.find(businessDate, phase, alcance);
+            if (alreadyCreated.isPresent()) {
+                return new Plan(alreadyCreated.get(), false);
             }
             return new Plan(materialize(businessDate, phase, alcance, materializador), true);
         });

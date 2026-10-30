@@ -22,6 +22,14 @@ public record DispositionRequestedPayload(
         String dispositionTypeIgnorado,
         UUID beneficiaryPartyId,
         String payeeAccount,
+        /**
+         * A nombre de quién está {@code payeeAccount}. Viaja junto a la CLABE porque son un mismo
+         * dato: el SPEI de una colocación salía con la CLABE de la beneficiaria y el nombre y RFC
+         * de la distribuidora, porque cartera sólo conocía los de la cuenta.
+         */
+        String payeeName,
+        /** RFC o CURP del titular de {@code payeeAccount}. Opcional: SPEI lo admite vacío. */
+        String payeeTaxId,
         /** Plazo de la colocación: cada disposición amortiza por su cuenta. */
         Integer termPeriods,
         Instant occurredOn

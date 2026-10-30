@@ -4,6 +4,7 @@ import com.fintech.closing.application.port.out.AccountCloseProfileRepository;
 import com.fintech.closing.application.port.out.CutoffScheduleRepository;
 import com.fintech.closing.application.service.AccountProjectionService;
 import com.fintech.closing.domain.CutoffSchedule;
+import com.fintech.closing.domain.PaymentCadence;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,17 +53,17 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
                     + "org.redisson.spring.starter.RedissonAutoConfigurationV2");
     }
 
-    @Autowired AccountProjectionService proyeccion;
+    @Autowired AccountProjectionService projection;
     @Autowired CutoffScheduleRepository cutoffs;
-    @Autowired AccountCloseProfileRepository perfiles;
+    @Autowired AccountCloseProfileRepository profiles;
     @Autowired JdbcTemplate jdbc;
 
-    static final LocalDate ALTA = LocalDate.of(2026, 3, 10);   // martes
+    static final LocalDate ACTIVATED_ON = LocalDate.of(2026, 3, 10);   // martes
 
-    private UUID activate(String productType, String behavior, String cadencia, Integer plazo) {
+    private UUID activate(String productType, String behavior, String cadence, Integer term) {
         UUID id = UUID.randomUUID();
-        proyeccion.onAccountActivated(id, UUID.randomUUID(), productType, behavior, "SUC-001",
-                ALTA, cadencia, plazo, new BigDecimal("0.32"), new BigDecimal("20000.00"));
+        projection.onAccountActivated(id, UUID.randomUUID(), productType, behavior, "SUC-001",
+                ACTIVATED_ON, cadence, term, new BigDecimal("0.32"), new BigDecimal("20000.00"));
         return id;
     }
 
@@ -70,7 +71,7 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
 
     @Test
     @DisplayName("PERSONAL_LOAN mensual: 12 cortes, el primero un mes después del alta")
-    void mensualDoceCortes() {
+    void monthlyMeansTwelveCutoffs() {
         UUID id = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12);
         List<CutoffSchedule> plan = cutoffs.findByAccount(id);
 
@@ -81,7 +82,7 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
 
     @Test
     @DisplayName("PAYROLL_LOAN quincenal: el corte NO es mensual, es cada 14 días")
-    void quincenalCada14Dias() {
+    void fortnightlyMeansEvery14Days() {
         UUID id = activate("PAYROLL_LOAN", "INSTALLMENT", "BIWEEKLY", 6);
         List<CutoffSchedule> plan = cutoffs.findByAccount(id);
 
@@ -92,7 +93,7 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
 
     @Test
     @DisplayName("MICRO_LOAN semanal: 52 cortes al año")
-    void semanal() {
+    void weeklyMeansFiftyTwoCutoffsAyear() {
         UUID id = activate("MICRO_LOAN", "INSTALLMENT", "WEEKLY", 8);
         List<CutoffSchedule> plan = cutoffs.findByAccount(id);
 
@@ -103,7 +104,7 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
 
     @Test
     @DisplayName("un préstamo a plazo no corta después de su última cuota")
-    void noCortaMasAllaDelPlazo() {
+    void itdoesNotCutBeyondTheTerm() {
         UUID id = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 3);
         assertThat(cutoffs.findByAccount(id)).hasSize(3);
     }
@@ -112,7 +113,7 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
 
     @Test
     @DisplayName("CREDIT_CARD: ciclo anclado al día de activación, con fecha límite a 20 días")
-    void tarjetaCicloDesdeElAlta() {
+    void acardCyclesFromActivation() {
         // Es el corte que hoy no existe: `hasCutoffDate` está sembrado en true y nadie lo lee.
         UUID id = activate("CREDIT_CARD", "REVOLVING", null, null);
         List<CutoffSchedule> plan = cutoffs.findByAccount(id);
@@ -132,7 +133,7 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
         UUID a = activate("CREDIT_CARD", "REVOLVING", null, null);
 
         UUID b = UUID.randomUUID();
-        proyeccion.onAccountActivated(b, UUID.randomUUID(), "CREDIT_CARD", "REVOLVING", "SUC-002",
+        projection.onAccountActivated(b, UUID.randomUUID(), "CREDIT_CARD", "REVOLVING", "SUC-002",
                 LocalDate.of(2026, 3, 22), null, null, new BigDecimal("0.45"), new BigDecimal("15000"));
 
         assertThat(cutoffs.findByAccount(a).get(0).getCutoffDate()).isEqualTo(LocalDate.of(2026, 4, 10));
@@ -143,12 +144,12 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
 
     @Test
     @DisplayName("un corte que cae en sábado se corre al lunes")
-    void corteEnInhabilSeCorre() {
+    void acutoffOnANonBusinessDayShifts() {
         // Alta el 10 de enero de 2026 (sábado): el corte mensual caería el 10 de febrero (martes),
         // pero el de abril cae el 10 (viernes) y el de julio el 10 (viernes)... se usa una alta que
         // produzca un corte en fin de semana.
         UUID id = UUID.randomUUID();
-        proyeccion.onAccountActivated(id, UUID.randomUUID(), "PERSONAL_LOAN", "INSTALLMENT", "SUC-001",
+        projection.onAccountActivated(id, UUID.randomUUID(), "PERSONAL_LOAN", "INSTALLMENT", "SUC-001",
                 LocalDate.of(2026, 4, 11), "MONTHLY", 3, new BigDecimal("0.32"), new BigDecimal("10000"));
 
         // 11 de mayo de 2026 es lunes; 11 de julio es SÁBADO → se corre al lunes 13.
@@ -175,15 +176,15 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
     void altaIdempotente() {
         UUID id = UUID.randomUUID();
         for (int i = 0; i < 3; i++) {
-            proyeccion.onAccountActivated(id, UUID.randomUUID(), "PERSONAL_LOAN", "INSTALLMENT",
-                    "SUC-001", ALTA, "MONTHLY", 12, new BigDecimal("0.32"), new BigDecimal("20000"));
+            projection.onAccountActivated(id, UUID.randomUUID(), "PERSONAL_LOAN", "INSTALLMENT",
+                    "SUC-001", ACTIVATED_ON, "MONTHLY", 12, new BigDecimal("0.32"), new BigDecimal("20000"));
         }
         assertThat(cutoffs.findByAccount(id)).hasSize(12);
     }
 
     @Test
     @DisplayName("un corte sellado no se reabre")
-    void elCorteSelladoEsInmutable() {
+    void asealedCutoffIsImmutable() {
         // Reabrirlo es lo que hace que el estado de cuenta del cliente cambie después de
         // habérselo mandado.
         UUID id = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12);
@@ -219,25 +220,108 @@ class CutoffCalendarIT extends AbstractIntegrationTest {
 
     @Test
     @DisplayName("un balance-updated fuera de orden no retrocede el saldo recordado")
-    void elSaldoNoRetrocede() {
+    void thebalanceDoesNotGoBackwards() {
         UUID id = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12);
 
-        proyeccion.onBalanceUpdated(id, new BigDecimal("18000"), new BigDecimal("18500"), "ACTIVE", 5, "SUC-001");
-        proyeccion.onBalanceUpdated(id, new BigDecimal("19000"), new BigDecimal("19500"), "ACTIVE", 3, "SUC-001");
+        projection.onBalanceUpdated(id, new BigDecimal("18000"), new BigDecimal("18500"), "ACTIVE", 5, "SUC-001");
+        projection.onBalanceUpdated(id, new BigDecimal("19000"), new BigDecimal("19500"), "ACTIVE", 3, "SUC-001");
 
-        var perfil = perfiles.findById(id).orElseThrow();
-        assertThat(perfil.getPrincipalBalance()).isEqualByComparingTo("18000");
-        assertThat(perfil.getLastBalanceVersion()).isEqualTo(5);
+        var profile = profiles.findById(id).orElseThrow();
+        assertThat(profile.getPrincipalBalance()).isEqualByComparingTo("18000");
+        assertThat(profile.getLastBalanceVersion()).isEqualTo(5);
     }
 
     @Test
     @DisplayName("una cuenta liquidada queda terminal y sale de las corridas")
     void terminalAccount() {
         UUID id = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12);
-        proyeccion.onBalanceUpdated(id, BigDecimal.ZERO, BigDecimal.ZERO, "SETTLED", 9, "SUC-001");
+        projection.onBalanceUpdated(id, BigDecimal.ZERO, BigDecimal.ZERO, "SETTLED", 9, "SUC-001");
 
-        assertThat(perfiles.findById(id).orElseThrow().isTerminal()).isTrue();
-        assertThat(perfiles.findActiveForClosing(LocalDate.now(), 100))
+        assertThat(profiles.findById(id).orElseThrow().isTerminal()).isTrue();
+        assertThat(profiles.findActiveForClosing(LocalDate.now(), 100))
                 .noneMatch(p -> p.getCreditAccountId().equals(id));
     }
+    // ── Revolventes: el ciclo lo fija la PERIODICIDAD DEL PRODUCTO ───────────────────────────
+
+    @Test
+    @DisplayName("una línea revolvente SEMANAL corta cada semana, no cada mes")
+    void arevolvingWeeklyProductCutsWeekly() {
+        // Es el defecto que esto arregla. Era `activatedOn.plusMonths(cycle)`: mensual a fuerza, con
+        // lo que una línea configurada WEEKLY en el catálogo cortaba mensual y **nada fallaba** — el
+        // calendario se derivaba, se persistía y se sellaba con la periodicidad equivocada.
+        UUID id = activate("CREDIT_CARD", "REVOLVING", "WEEKLY", null);
+        List<CutoffSchedule> plan = cutoffs.findByAccount(id);
+
+        assertThat(plan.get(0).getCutoffDate()).isEqualTo(ACTIVATED_ON.plusWeeks(1));
+        assertThat(plan.get(1).getCutoffDate()).isEqualTo(ACTIVATED_ON.plusWeeks(2));
+        assertThat(plan.get(2).getCutoffDate()).isEqualTo(ACTIVATED_ON.plusWeeks(3));
+    }
+
+    @Test
+    @DisplayName("y una QUINCENAL cada catorce días")
+    void arevolvingBiweeklyProductCutsEveryFortnight() {
+        UUID id = activate("CREDIT_CARD", "REVOLVING", "BIWEEKLY", null);
+        List<CutoffSchedule> plan = cutoffs.findByAccount(id);
+
+        assertThat(plan.get(0).getCutoffDate()).isEqualTo(ACTIVATED_ON.plusWeeks(2));
+        assertThat(plan.get(1).getCutoffDate()).isEqualTo(ACTIVATED_ON.plusWeeks(4));
+    }
+
+    @Test
+    @DisplayName("la MENSUAL sigue cortando mensual: el cambio no movió lo que ya funcionaba")
+    void arevolvingMonthlyProductStillCutsMonthly() {
+        UUID id = activate("CREDIT_CARD", "REVOLVING", "MONTHLY", null);
+        List<CutoffSchedule> plan = cutoffs.findByAccount(id);
+
+        assertThat(plan.get(0).getCutoffDate()).isEqualTo(LocalDate.of(2026, 4, 10));   // viernes
+
+        // El segundo caería el 10 de mayo, que es DOMINGO, y la política corre al siguiente hábil.
+        // Se afirma el 11 a propósito: la cadencia decide el día crudo y el calendario decide el
+        // hábil, y son dos reglas distintas que conviene no confundir al leer esta prueba.
+        assertThat(plan.get(1).getCutoffDate()).isEqualTo(LocalDate.of(2026, 5, 11));   // lunes
+    }
+
+    // ── El horizonte se mide en TIEMPO, no en número de cortes ───────────────────────────────
+
+    @Test
+    @DisplayName("el calendario cubre dos años con cualquier cadencia, no «24 cortes»")
+    void thehorizonIsTwoYearsRegardlessOfCadence() {
+        // Eran 24 cortes fijos, pensados como 24 meses. Sobre un producto semanal esos 24 cortes se
+        // agotan en cinco meses, y la cuenta se queda sin calendario a mitad del primer año.
+        assertThat(cutoffs.findByAccount(activate("CREDIT_CARD", "REVOLVING", "MONTHLY", null)))
+                .as("mensual: 12 × 2").hasSize(24);
+        assertThat(cutoffs.findByAccount(activate("CREDIT_CARD", "REVOLVING", "BIWEEKLY", null)))
+                .as("quincenal: 26 × 2").hasSize(52);
+        assertThat(cutoffs.findByAccount(activate("CREDIT_CARD", "REVOLVING", "WEEKLY", null)))
+                .as("semanal: 52 × 2").hasSize(104);
+    }
+
+    // ── Y «sin configurar» no es «mensual», aunque se comporte así ───────────────────────────
+
+    @Test
+    @DisplayName("un producto sin periodicidad declarada cae a mensual, y el perfil lo DICE")
+    void anundeclaredCadenceFallsBackToMonthlyAndSaysSo() {
+        // Caer a mensual es correcto —es lo que hace cartera al amortizar— pero «no configurado» y
+        // «configurado mensual» son hechos distintos, y antes producían el mismo resultado sin dejar
+        // rastro. Si una tarjeta semanal llegara sin el dato, su calendario saldría mensual y la
+        // única forma de enterarse sería comparar el catálogo con los cortes sellados a mano.
+        UUID id = activate("CREDIT_CARD", "REVOLVING", null, null);
+
+        var profile = profiles.findById(id).orElseThrow();
+        assertThat(profile.hasDeclaredCadence()).isFalse();
+        assertThat(profile.cadence()).isEqualTo(PaymentCadence.MONTHLY);
+        assertThat(cutoffs.findByAccount(id).get(0).getCutoffDate())
+                .isEqualTo(ACTIVATED_ON.plusMonths(1));
+    }
+
+    @Test
+    @DisplayName("una periodicidad que no existe tampoco pasa por mensual en silencio")
+    void agarbageCadenceIsNotSilentlyMonthly() {
+        UUID id = activate("CREDIT_CARD", "REVOLVING", "TRIMESTRAL", null);
+
+        assertThat(profiles.findById(id).orElseThrow().hasDeclaredCadence())
+                .as("el perfil sabe que lo que le llegó no es una cadencia reconocible")
+                .isFalse();
+    }
+
 }

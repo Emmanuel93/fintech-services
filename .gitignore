@@ -39,6 +39,7 @@ docker-compose.override.yml
 # 1.4 GB acumulados. Es salida reproducible (`tools/regresion-e2e/run.sh`), no fuente.
 tools/regresion-e2e/evidencia/
 tools/regresion-e2e/.evidencia/
+tools/regresion-e2e/.venv/
 
 # ── Respaldos de base y material desechado ───────────────────────────────────
 # Volcados .sql.gz de 23 MB y zips de descarte: no son historia del proyecto.
@@ -48,3 +49,30 @@ _to_delete/
 # ── Configuración local de Claude Code ───────────────────────────────────────
 # Permisos y ajustes de la máquina de cada quien; no es del proyecto.
 .claude/
+
+# ── Material: no es código ───────────────────────────────────────────────────────────────────
+# Videos, imágenes, audio, documentos exportados y respaldos van en ~/Documents/material-kredius
+# (ver README §14). Si uno aparece aquí, es que una herramienta escribió donde no debía.
+*.mp4
+*.webm
+*.mov
+*.mkv
+*.avi
+*.gif
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.heic
+*.bmp
+*.tiff
+*.wav
+*.mp3
+*.m4a
+*.pdf
+*.pptx
+*.key
+*.docx
+*.xlsx
+*.sql.gz
+*.zip

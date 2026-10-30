@@ -161,6 +161,29 @@ class CreditApplicationAcceptanceTest {
         assertThat(event.getApplicationId()).isNotNull();
     }
 
+    // ── Compuerta de KYC/AML ────────────────────────────────────────────────────
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("identidad en revisión: 422 con el motivo, no un 500 que parece caída")
+    void kycGate_identityInReview_returns422WithReason() throws Exception {
+        UUID prospectId = onboardProspect("RATC850320HDFMRL09", "+5215510000099");
+        given(partyReader.verificationOf(prospectId))
+                .willReturn(new PartyReader.Verification("IN_REVIEW", "CLEARED", false, "identidad IN_REVIEW"));
+
+        mockMvc.perform(post("/api/v1/origination/applications")
+                        .header("X-User-Id", testUserId()).header("X-Roles", "CUSTOMER")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(applicationBody(prospectId, "PERSONAL_LOAN")))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.type").value("https://fintech.com/errors/ORIGINATION_PERSON_NOT_VERIFIED"))
+                .andExpect(jsonPath("$.reason").value("identidad IN_REVIEW"))
+                .andExpect(jsonPath("$.prospectId").value(prospectId.toString()));
+
+        // Bloqueada antes de crear nada: ni solicitud ni scoring pedido.
+        verify(kafkaTemplate, org.mockito.Mockito.never())
+                .send(eq("origination.score-requested"), any(String.class), any());
+    }
+
     // ── AC-2 / AC-3 ─────────────────────────────────────────────────────────────
 
     @Test

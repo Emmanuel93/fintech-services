@@ -57,7 +57,15 @@ public class PermissionsService {
             // Dictaminar identidad **no** es ver la bandeja: es el analista de crédito y nadie más.
             // El auditor lee todo y no decide nada; soporte atiende clientes pero no firma la
             // comprobación de una persona; y riesgo evalúa cartera, no identidades.
-            Map.entry("beneficiaries.review-identity", roles("ADMIN", "CREDIT_ANALYST")),
+            // OPS_SUPERVISOR va también porque así lo siembra identity (`017`): el respaldo tiene que
+            // coincidir con la base, o el día que identity no conteste la mesa de KYC se queda sin
+            // quién firme.
+            Map.entry("beneficiaries.review-identity", roles("ADMIN", "CREDIT_ANALYST", "OPS_SUPERVISOR")),
+            // Mesa de cumplimiento. Mismo reparto que el seed `018`: la cola la ve quien la trabaja
+            // y el auditor; dictaminar y adjudicar, sólo quien trabaja la mesa.
+            Map.entry("compliance.view",            roles("ADMIN", "OPS_SUPERVISOR", "AUDITOR")),
+            Map.entry("compliance.review-identity", roles("ADMIN", "OPS_SUPERVISOR")),
+            Map.entry("compliance.adjudicate",      roles("ADMIN", "OPS_SUPERVISOR")),
             // Dictaminar documentos del expediente. Misma lógica y los mismos perfiles que arriba,
             // más el underwriter: es el que ya decide sobre la solicitud completa.
             Map.entry("applications.review-documents", roles("ADMIN", "CREDIT_ANALYST",
@@ -77,6 +85,10 @@ public class PermissionsService {
             // un módulo que sí está bien configurado en la base.
             Map.entry("accounting.view",      roles("ADMIN", "FINANCE", "AUDITOR")),
             Map.entry("accounting.close",     roles("ADMIN", "FINANCE")),
+            // Bancos / Tesorería, sólo lectura. Mismo reparto que el seed `019`: tesorería, quien
+            // opera los pagos y el auditor. Dar de alta cuentas o rutas no pasa por aquí: es ADMIN
+            // en banking, porque decide por dónde sale el dinero.
+            Map.entry("treasury.view",        roles("ADMIN", "OPS_SUPERVISOR", "FINANCE", "AUDITOR")),
             // La pantalla de roles. Faltaba aquí aunque identity sí la publica, así que el día que
             // identity no conteste al arrancar, el respaldo dejaba a ADMIN sin poder abrir la
             // matriz — es decir, sin forma de arreglar los permisos desde la consola, que es

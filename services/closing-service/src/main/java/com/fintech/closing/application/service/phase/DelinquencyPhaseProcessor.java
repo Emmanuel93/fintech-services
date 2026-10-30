@@ -33,14 +33,14 @@ public class DelinquencyPhaseProcessor implements CloseUnitProcessor {
 
     @Override
     public void process(CloseUnit unit, LocalDate businessDate) {
-        var perfil = profiles.findById(unit.getCreditAccountId())
+        var profile = profiles.findById(unit.getCreditAccountId())
                 .orElseThrow(() -> new CloseRunWorker.UnitSkipped("cuenta sin proyección"));
 
-        if (perfil.isTerminal()) {
-            throw new CloseRunWorker.UnitSkipped("cuenta en estado terminal: " + perfil.getStatus());
+        if (profile.isTerminal()) {
+            throw new CloseRunWorker.UnitSkipped("cuenta en estado terminal: " + profile.getStatus());
         }
 
         publisher.publishUnitWindowOpened(unit.getRunId(), unit.getCreditAccountId(),
-                ClosePhase.DELINQUENCY, businessDate, perfil.getProductType());
+                ClosePhase.DELINQUENCY, businessDate, profile.getProductType());
     }
 }

@@ -105,7 +105,28 @@ public class PartyClient {
     public record PartyResponse(UUID partyId, UUID prospectId, String firstName,
                                 String lastName1, String lastName2, String status,
                                 String identityStatus, String screeningStatus,
-                                String verificationBlockReason) {
+                                String verificationBlockReason,
+                                /**
+                                 * RFC y CURP de la persona. Los necesita la disposición: el SPEI a la
+                                 * beneficiaria lleva su RFC/CURP, no el de la distribuidora.
+                                 */
+                                String rfc, String curp) {
+
+        /** La ficha sin identificadores fiscales, para quien no los necesita. */
+        public PartyResponse(UUID partyId, UUID prospectId, String firstName,
+                             String lastName1, String lastName2, String status,
+                             String identityStatus, String screeningStatus,
+                             String verificationBlockReason) {
+            this(partyId, prospectId, firstName, lastName1, lastName2, status,
+                    identityStatus, screeningStatus, verificationBlockReason, null, null);
+        }
+
+        /** RFC si lo hay; si no, CURP. SPEI acepta cualquiera de los dos —o ninguno—. */
+        public String taxId() {
+            if (rfc != null && !rfc.isBlank()) return rfc.trim();
+            return curp != null && !curp.isBlank() ? curp.trim() : null;
+        }
+
         public String fullName() {
             return (nullToEmpty(firstName) + " " + nullToEmpty(lastName1) + " " + nullToEmpty(lastName2)).trim();
         }

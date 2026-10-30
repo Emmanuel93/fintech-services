@@ -46,8 +46,10 @@ public class SecurityConfig {
                         // Disparo manual del poller: operación, no consulta
                         .requestMatchers(HttpMethod.POST, "/api/v1/stp/poll")
                                 .hasAnyRole("ADMIN", "OPS_SUPERVISOR")
+                        // Tesorería (FINANCE) consulta la orden y su CEP desde el backoffice. La vista
+                        // va enmascarada y no hay escritura detrás de un GET.
                         .requestMatchers(HttpMethod.GET, "/api/v1/stp/**")
-                                .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "AUDITOR")
+                                .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "AUDITOR", "FINANCE")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))

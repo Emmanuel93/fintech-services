@@ -9,6 +9,7 @@ import com.fintech.disbursement.domain.DisbursementSource;
 import com.fintech.disbursement.domain.Rail;
 import com.fintech.disbursement.infrastructure.adapter.in.api.dto.CancelDisbursementRequest;
 import com.fintech.disbursement.infrastructure.adapter.in.api.dto.DisbursementEventResponse;
+import com.fintech.disbursement.infrastructure.adapter.in.api.dto.DisbursementPageResponse;
 import com.fintech.disbursement.infrastructure.adapter.in.api.dto.DisbursementResponse;
 import com.fintech.disbursement.infrastructure.adapter.in.api.dto.RequestDisbursementRequest;
 import io.swagger.v3.oas.annotations.Operation;
@@ -139,6 +140,22 @@ public class DisbursementController {
         return findDisbursement.findByCompany(companyId, page, size).stream()
                 .map(DisbursementResponse::from)
                 .toList();
+    }
+
+    /**
+     * La consulta de tesorería, con su total. Va aparte de {@code GET /} —que es por empresa y
+     * devuelve una lista desnuda— para no cambiarle la forma a quien ya la consume.
+     */
+    @GetMapping("/search")
+    @Operation(summary = "Busca órdenes por crédito y/o por beneficiario o clave de rastreo",
+            description = "Del más nuevo al más viejo. `q` busca en el nombre del beneficiario y en la "
+                    + "clave de rastreo. Sin filtros, todas.")
+    public DisbursementPageResponse search(
+            @RequestParam(required = false) UUID creditAccountId,
+            @RequestParam(required = false) @Size(max = 120) String q,
+            @RequestParam(defaultValue = "0") @Min(0) int page,
+            @RequestParam(defaultValue = "20") @Min(1) @Max(200) int size) {
+        return DisbursementPageResponse.from(findDisbursement.search(creditAccountId, q, page, size));
     }
 
     @PostMapping("/{disbursementId}/cancel")

@@ -39,9 +39,6 @@ public class CutoffPhaseProcessor implements CloseUnitProcessor {
 
     private static final Logger log = LoggerFactory.getLogger(CutoffPhaseProcessor.class);
 
-    /** Porcentaje del saldo exigible como pago mínimo de un revolvente. */
-    private static final BigDecimal PAGO_MINIMO_PCT = new BigDecimal("0.05");
-
     private final AccountCloseProfileRepository profiles;
     private final CutoffScheduleRepository cutoffs;
     private final ClosePolicyResolver policyResolver;
@@ -65,10 +62,10 @@ public class CutoffPhaseProcessor implements CloseUnitProcessor {
 
     @Override
     public void process(CloseUnit unit, LocalDate businessDate) {
-        AccountCloseProfile perfil = profiles.findById(unit.getCreditAccountId())
+        AccountCloseProfile profile = profiles.findById(unit.getCreditAccountId())
                 .orElseThrow(() -> new CloseRunWorker.UnitSkipped("cuenta sin proyección"));
 
-        Optional<CutoffSchedule> hoy = cutoffs.findByAccount(perfil.getCreditAccountId()).stream()
+        Optional<CutoffSchedule> hoy = cutoffs.findByAccount(profile.getCreditAccountId()).stream()
                 .filter(c -> c.getCutoffDate().equals(businessDate) && "SCHEDULED".equals(c.getStatus()))
                 .findFirst();
         if (hoy.isEmpty()) {
@@ -77,33 +74,61 @@ public class CutoffPhaseProcessor implements CloseUnitProcessor {
         }
 
         CutoffSchedule cutoff = hoy.get();
-        ClosePolicy policy = policyResolver.require(null, perfil.getProductType(), businessDate);
+        ClosePolicy policy = policyResolver.require(null, profile.getProductType(), businessDate);
 
-        BigDecimal principal = perfil.getPrincipalBalance();
-        BigDecimal balance     = perfil.getTotalDebt();
-        BigDecimal devengado = balance.subtract(principal).max(BigDecimal.ZERO);
+        BigDecimal principal = profile.getPrincipalBalance();
+        BigDecimal balance     = profile.getTotalDebt();
+        BigDecimal accrued = balance.subtract(principal).max(BigDecimal.ZERO);
 
-        BigDecimal amountDue = perfil.isRevolving() ? balance : null;
-        BigDecimal minimo   = perfil.isRevolving()
-                ? balance.multiply(PAGO_MINIMO_PCT).setScale(2, RoundingMode.HALF_UP)
+        BigDecimal amountDue = profile.isRevolving() ? balance : null;
+        BigDecimal minimum   = profile.isRevolving()
+                ? minimumPaymentFor(balance, policy, profile)
                 : null;
 
-        cutoff.seal(principal, devengado, BigDecimal.ZERO, amountDue, minimo, 0);
+        cutoff.seal(principal, accrued, BigDecimal.ZERO, amountDue, minimum, 0);
         cutoffs.save(cutoff);
 
         // Se agenda el ciclo siguiente si el calendario no lo tenía materializado — es lo que
         // mantiene vivo el ciclo de un revolvente, que no tiene plazo.
         int next = cutoff.getCycleNumber() + 1;
-        if (cutoffs.find(perfil.getCreditAccountId(), next).isEmpty()) {
-            deriver.derive(perfil, policy, next).ifPresent(cutoffs::save);
+        if (cutoffs.find(profile.getCreditAccountId(), next).isEmpty()) {
+            deriver.derive(profile, policy, next).ifPresent(cutoffs::save);
         }
-        cutoffs.find(perfil.getCreditAccountId(), next)
-                .ifPresent(c -> perfil.scheduleNextCutoff(next, c.getCutoffDate()));
-        profiles.save(perfil);
+        cutoffs.find(profile.getCreditAccountId(), next)
+                .ifPresent(c -> profile.scheduleNextCutoff(next, c.getCutoffDate()));
+        profiles.save(profile);
 
-        publisher.publishCutoffClosed(cutoff, perfil.getObligorPartyId(), perfil.getProductType());
+        publisher.publishCutoffClosed(cutoff, profile.getObligorPartyId(), profile.getProductType());
 
         log.info("Corte sellado cuenta={} ciclo={} fecha={} saldo={} minimo={}",
-                perfil.getCreditAccountId(), cutoff.getCycleNumber(), businessDate, balance, minimo);
+                profile.getCreditAccountId(), cutoff.getCycleNumber(), businessDate, balance, minimum);
     }
+    /**
+     * El pago mínimo del ciclo, <b>con el porcentaje que configuró el producto</b>.
+     *
+     * <h2>Lo que esto arregla</h2>
+     *
+     * Era una constante de clase del 5 %: el mismo mínimo para una tarjeta de nómina y una de
+     * consumo, y cambiarlo para un producto exigía un despliegue. Ahora sale de la política, que ya
+     * era por producto, versionada y con vigencia — sólo le faltaba la columna.
+     *
+     * <h2>Y qué pasa si el producto no lo declara</h2>
+     *
+     * Un revolvente <b>sin</b> porcentaje configurado no exige mínimo, y eso es un hecho del
+     * producto, no un fallo: se devuelve nulo y el corte se sella sin mínimo. Pero se registra en
+     * WARN, porque un revolvente sin pago mínimo es raro y lo más probable es que falte la
+     * configuración — y un estado de cuenta que no exige nada es difícil de notar mirando importes.
+     */
+    private BigDecimal minimumPaymentFor(BigDecimal balanceAtCutoff, ClosePolicy policy,
+                                         AccountCloseProfile profile) {
+        return policy.minimumPaymentRate()
+                .map(rate -> balanceAtCutoff.multiply(rate).setScale(2, RoundingMode.HALF_UP))
+                .orElseGet(() -> {
+                    log.warn("El producto {} es revolvente y su política ({}) no declara porcentaje "
+                             + "de pago mínimo: el corte de la cuenta {} se sella SIN mínimo exigible.",
+                            profile.getProductType(), policy.getPolicyId(), profile.getCreditAccountId());
+                    return null;
+                });
+    }
+
 }

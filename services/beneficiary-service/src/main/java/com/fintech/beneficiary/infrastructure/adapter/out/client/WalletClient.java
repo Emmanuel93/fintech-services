@@ -35,7 +35,8 @@ public class WalletClient {
 
     public void requestThirdPartyDisposition(UUID creditAccountId, UUID distributorPartyId,
                                              BigDecimal amount, UUID beneficiaryPartyId,
-                                             String beneficiaryClabe, int termPeriods) {
+                                             String beneficiaryClabe, String beneficiaryName,
+                                             String beneficiaryTaxId, int termPeriods) {
         log.info("-> POST wallet /api/v1/wallet/{}/dispositions THIRD_PARTY_CREDIT beneficiario={}",
                 creditAccountId, beneficiaryPartyId);
         webClient.post()
@@ -43,8 +44,11 @@ public class WalletClient {
                 // wallet toma el obligado del X-User-Id, igual que si viniera del gateway: el
                 // deudor es el distribuidor aunque el dinero salga a otra cuenta.
                 .header("X-User-Id", distributorPartyId.toString())
+                // La CLABE viaja con el nombre y el RFC de su titular: sin ellos, cartera armaba el
+                // SPEI con los datos de la cuenta, que son los de la distribuidora.
                 .bodyValue(new DispositionPayload(amount, "THIRD_PARTY_CREDIT",
-                        beneficiaryPartyId, beneficiaryClabe, termPeriods))
+                        beneficiaryPartyId, beneficiaryClabe, beneficiaryName, beneficiaryTaxId,
+                        termPeriods))
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, resp ->
                         Mono.error(new ResponseStatusException(resp.statusCode(),
@@ -58,5 +62,7 @@ public class WalletClient {
             String dispositionType,
             UUID beneficiaryPartyId,
             String payeeAccount,
+            String payeeName,
+            String payeeTaxId,
             Integer termPeriods) {}
 }

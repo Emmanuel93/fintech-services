@@ -134,7 +134,7 @@ class AmlChecksBothRolesTest {
     private ProcessDispositionCommand dispositionFor(CreditAccount account, UUID beneficiario) {
         return new ProcessDispositionCommand("evt-" + UUID.randomUUID(), account.getCreditAccountId(),
                 account.getObligorPartyId(), new BigDecimal("5000"), beneficiario,
-                "012180012345678905", 6);
+                "012180012345678905", "ROSA ELENA IBARRA SALGADO", "IASR900612B0B", 6);
     }
 
     // ── Uso propio: una sola persona, y es la misma ──────────────────────────────────────────

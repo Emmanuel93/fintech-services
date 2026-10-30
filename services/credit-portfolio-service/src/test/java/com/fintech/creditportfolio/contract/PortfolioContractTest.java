@@ -152,6 +152,36 @@ class PortfolioContractTest {
                 .verify();
     }
 
+    /**
+     * Lo que {@code wallet} publica en {@code wallet.disposition-requested}, con sus nombres.
+     *
+     * <p>Aquí el sentido es el inverso: cartera es el consumidor. Si su payload renombra
+     * {@code payeeName}, la colocación vuelve a rechazarse con {@code BENEFICIARY_NAME_REQUIRED} —o,
+     * peor, a salir a nombre de la distribuidora si alguien relaja la regla— sin que nada falle.
+     */
+    record PedidaComoLaPublicaWallet(
+            UUID dispositionRequestId, UUID creditAccountId, UUID obligorPartyId, BigDecimal amount,
+            String dispositionType, UUID beneficiaryPartyId, String payeeAccount,
+            String payeeName, String payeeTaxId, Integer termPeriods, Instant occurredOn) {}
+
+    @Test
+    @DisplayName("cartera recibe de wallet A NOMBRE DE QUIÉN está la CLABE de la beneficiaria")
+    void contratoDeLaPeticionConWallet() {
+        var pedida = new PedidaComoLaPublicaWallet(
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), new BigDecimal("45000.00"),
+                null, UUID.randomUUID(), "646180157000000004",
+                "ROSA ELENA IBARRA SALGADO", "IASR900612B0B", 24, Instant.parse("2026-10-30T07:22:29Z"));
+
+        var p = EventContract.between(pedida,
+                        com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DispositionRequestedPayload.class)
+                .requires("payeeAccount", x -> x.payeeAccount())
+                .requires("payeeName",    x -> x.payeeName())
+                .requires("payeeTaxId",   x -> x.payeeTaxId())
+                .verify();
+
+        assertThat(p.payeeName()).isEqualTo("ROSA ELENA IBARRA SALGADO");
+    }
+
     private CreditAccountActivatedEvent activation() {
         return new CreditAccountActivatedEvent(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),

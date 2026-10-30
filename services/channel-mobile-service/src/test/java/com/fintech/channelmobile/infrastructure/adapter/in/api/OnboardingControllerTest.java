@@ -197,7 +197,7 @@ class OnboardingControllerTest {
 
     @Test
     void submitKyc_invalidCurp_returns400() throws Exception {
-        String badKyc = validKycPayload().replace("RAHE930326HSMLRM09", "INVALID");
+        String badKyc = validKycPayload().replace("MESL930326MSLNTR04", "INVALID");
 
         mockMvc.perform(post("/kyc/submit")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -212,7 +212,7 @@ class OnboardingControllerTest {
         KycSessionData session = kycSession(PHONE);
         given(kycSessionService.retrieve("KYC-202605-FOLIOTEST")).willReturn(Optional.of(session));
         given(originationClient.registerProspect(any()))
-                .willReturn(new ProspectResponse("PROSPECT-123", "RAHE930326HSMLRM09", "+52" + PHONE,
+                .willReturn(new ProspectResponse("PROSPECT-123", "MESL930326MSLNTR04", "+52" + PHONE,
                         Instant.now().toString(), Instant.now().plusSeconds(86400).toString(), "Prospecto creado"));
 
         mockMvc.perform(post("/auth/register")
@@ -241,8 +241,8 @@ class OnboardingControllerTest {
 
     private KycSessionData kycSession(String phone) {
         return new KycSessionData(
-                phone, "EMMANUEL", "RAMÍREZ", "HERNÁNDEZ",
-                "RAHE930326HSMLRM09", "RAHE930326XXX",
+                phone, "LAURA", "MÉNDEZ", "SOTO",
+                "MESL930326MSLNTR04", "MESL930326XXX",
                 "1993-03-26", "H", "Sinaloa",
                 "test@test.com", "Av. Principal", "100", null,
                 "Centro", "Culiacán", "Culiacán", "Sinaloa", "80060",
@@ -254,11 +254,11 @@ class OnboardingControllerTest {
         return """
                 {
                   "phone": "%s",
-                  "nombres": "EMMANUEL",
-                  "apellidoPaterno": "RAMÍREZ",
-                  "apellidoMaterno": "HERNÁNDEZ",
-                  "curp": "RAHE930326HSMLRM09",
-                  "rfc": "RAHE930326XXX",
+                  "nombres": "LAURA",
+                  "apellidoPaterno": "MÉNDEZ",
+                  "apellidoMaterno": "SOTO",
+                  "curp": "MESL930326MSLNTR04",
+                  "rfc": "MESL930326XXX",
                   "fechaNacimiento": "1993-03-26",
                   "genero": "H",
                   "estadoNacimiento": "Sinaloa",

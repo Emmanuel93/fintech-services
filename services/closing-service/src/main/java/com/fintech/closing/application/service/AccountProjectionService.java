@@ -26,8 +26,15 @@ public class AccountProjectionService {
 
     private static final Logger log = LoggerFactory.getLogger(AccountProjectionService.class);
 
-    /** Cuántos cortes se materializan por adelantado para un revolvente, que no tiene plazo. */
-    private static final int CICLOS_REVOLVENTE = 24;
+    /**
+     * Cuánto calendario se materializa por adelantado para un revolvente, que no tiene plazo.
+     *
+     * <p>Se mide en <b>años</b> y no en número de cortes, y la diferencia importa desde que el ciclo
+     * respeta la periodicidad del producto: eran 24 cortes fijos —pensados como 24 meses— y sobre un
+     * producto semanal esos 24 cortes se agotan en cinco meses. Expresado en años, el horizonte es
+     * el mismo para las tres cadencias y lo traduce {@code periodsPerYear()}.
+     */
+    private static final int REVOLVING_HORIZON_YEARS = 2;
 
     private final AccountCloseProfileRepository profiles;
     private final CutoffScheduleRepository cutoffs;
@@ -60,45 +67,47 @@ public class AccountProjectionService {
             return;
         }
 
-        AccountCloseProfile perfil = profiles.save(AccountCloseProfile.fromActivation(
+        AccountCloseProfile profile = profiles.save(AccountCloseProfile.fromActivation(
                 creditAccountId, obligorPartyId, productType, productBehavior, orgUnitCode,
                 activatedOn, paymentFrequency, termPeriods, nominalRate, principalBalance));
 
         ClosePolicy policy = policyResolver.require(null, productType, activatedOn);
-        int ciclos = perfil.isRevolving() || termPeriods == null ? CICLOS_REVOLVENTE : termPeriods;
+        int cycles = profile.isRevolving() || termPeriods == null
+                ? profile.cadence().periodsPerYear() * REVOLVING_HORIZON_YEARS
+                : termPeriods;
 
-        List<CutoffSchedule> calendario = deriver.deriveAll(perfil, policy, ciclos);
-        if (!calendario.isEmpty()) {
-            cutoffs.saveAll(calendario);
-            CutoffSchedule first = calendario.get(0);
-            perfil.scheduleNextCutoff(first.getCycleNumber(), first.getCutoffDate());
-            profiles.save(perfil);
+        List<CutoffSchedule> calendar = deriver.deriveAll(profile, policy, cycles);
+        if (!calendar.isEmpty()) {
+            cutoffs.saveAll(calendar);
+            CutoffSchedule first = calendar.get(0);
+            profile.scheduleNextCutoff(first.getCycleNumber(), first.getCutoffDate());
+            profiles.save(profile);
         }
 
         log.info("Cuenta proyectada {} producto={} regla={} cortes={} primerCorte={}",
-                creditAccountId, productType, policy.cutoffRule(), calendario.size(),
-                calendario.isEmpty() ? "—" : calendario.get(0).getCutoffDate());
+                creditAccountId, productType, policy.cutoffRule(), calendar.size(),
+                calendar.isEmpty() ? "—" : calendar.get(0).getCutoffDate());
     }
 
     /** Saldo nuevo. Un evento fuera de orden no retrocede lo recordado. */
     @Transactional
     public void onBalanceUpdated(UUID creditAccountId, BigDecimal principal, BigDecimal totalDebt,
                                   String accountStatus, long balanceVersion, String orgUnitCode) {
-        profiles.findById(creditAccountId).ifPresentOrElse(perfil -> {
-            perfil.learnOrgUnit(orgUnitCode);
-            if (!perfil.applyBalance(principal, totalDebt, accountStatus, balanceVersion)) {
+        profiles.findById(creditAccountId).ifPresentOrElse(profile -> {
+            profile.learnOrgUnit(orgUnitCode);
+            if (!profile.applyBalance(principal, totalDebt, accountStatus, balanceVersion)) {
                 log.debug("balance-updated viejo cuenta={} v={} — se ignora", creditAccountId, balanceVersion);
             }
-            profiles.save(perfil);
+            profiles.save(profile);
         }, () -> log.warn("balance-updated de una cuenta no proyectada: {} — se ignora hasta que llegue su alta",
                 creditAccountId));
     }
 
     @Transactional
     public void onDelinquencyUpdated(UUID creditAccountId, int daysDelinquent) {
-        profiles.findById(creditAccountId).ifPresent(perfil -> {
-            perfil.applyDelinquency(daysDelinquent);
-            profiles.save(perfil);
+        profiles.findById(creditAccountId).ifPresent(profile -> {
+            profile.applyDelinquency(daysDelinquent);
+            profiles.save(profile);
         });
     }
 }

@@ -52,6 +52,12 @@ public class DisbursementQueryService implements FindDisbursementUseCase, Cancel
         return orders.findByCompany(companyId, page, size);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public DisbursementOrderRepository.OrderPage search(UUID creditAccountId, String q, int page, int size) {
+        return orders.search(creditAccountId, q, page, size);
+    }
+
     /**
      * Sólo antes de despachar. Una vez que el proveedor tiene la orden, "cancelar" no la detiene:
      * sólo haría que nuestra base diga algo distinto de lo que pasa en el banco.

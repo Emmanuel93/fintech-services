@@ -12,5 +12,6 @@
     <include file="db/changelog/disbursement/006-create-event-publication.sql"   relativeToChangelogFile="false"/>
     <include file="db/changelog/disbursement/007-drop-routing-rules.sql"         relativeToChangelogFile="false"/>
     <include file="db/changelog/disbursement/008-seed-company-mapping.sql"       relativeToChangelogFile="false"/>
+    <include file="db/changelog/disbursement/009-index-orders-by-credit-account.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

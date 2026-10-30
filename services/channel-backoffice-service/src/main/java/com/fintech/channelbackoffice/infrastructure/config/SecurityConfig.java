@@ -163,6 +163,17 @@ public class SecurityConfig {
                                 .access(requires("beneficiaries.review-identity"))
                         .requestMatchers(HttpMethod.GET, "/beneficiaries/**").access(requires("beneficiaries.view"))
 
+                        // ── Cumplimiento · identidad y listas ─────────────────────────────
+                        // Dictaminar identidad y adjudicar listas son dos facultades distintas:
+                        // confirmar una coincidencia abre un reporte a la UIF, y no lo firma quien
+                        // sólo coteja una INE contra una selfie.
+                        .requestMatchers(HttpMethod.POST, "/compliance/verifications/*/identity")
+                                .access(requires("compliance.review-identity"))
+                        .requestMatchers(HttpMethod.POST, "/compliance/verifications/*/adjudicate")
+                                .access(requires("compliance.adjudicate"))
+                        .requestMatchers(HttpMethod.GET, "/compliance/**").access(requires("compliance.view"))
+                        .requestMatchers("/compliance/**").denyAll()
+
                         // ── Módulos de fases 3/4 — declarados antes de existir ────────────
                         .requestMatchers("/collections/**").access(requires("portfolio.view"))
                         .requestMatchers("/commissions/**").access(requires("dashboard.commercial"))
@@ -191,6 +202,13 @@ public class SecurityConfig {
                         // Las facturas cuelgan de su propia raíz porque el servicio es otro; la
                         // capacidad es la misma: quien puede ver el mayor puede ver lo facturado.
                         .requestMatchers("/invoices/**").access(requires("accounting.view"))
+
+                        // ── Bancos / Tesorería ────────────────────────────────────────────
+                        // Sólo lectura: cuentas propias, rutas y cada pago con su orden y su traza.
+                        // Lo que no sea GET se niega aquí mismo — dar de alta una CLABE ordenante o
+                        // apuntarle una ruta es ADMIN en banking y no tiene puerta en la consola.
+                        .requestMatchers(HttpMethod.GET, "/treasury/**").access(requires("treasury.view"))
+                        .requestMatchers("/treasury/**").denyAll()
 
                         // ── Deny by default ───────────────────────────────────────────────
                         .anyRequest().authenticated())

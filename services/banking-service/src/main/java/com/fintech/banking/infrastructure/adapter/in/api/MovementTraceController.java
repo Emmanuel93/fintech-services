@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
@@ -23,6 +24,7 @@ import java.util.UUID;
  *
  * <pre>
  * GET /traces/by-credit-account/{id}   este crédito, ¿por dónde salió su dinero?
+ * GET /traces/by-payout/{id}           este pago, ¿en qué eslabón va?
  * GET /traces/by-tracking-key/{clave}  esta clave, ¿de qué crédito era?
  * GET /traces/by-line/{lineId}         este movimiento del banco, ¿a qué corresponde?
  * GET /traces/by-voucher/{ref}         esta póliza, ¿qué dinero real la respalda?
@@ -44,6 +46,14 @@ class MovementTraceController {
     @Operation(summary = "Este crédito, ¿por dónde salió su dinero?")
     List<TraceResponse> byCreditAccount(@PathVariable UUID creditAccountId) {
         return traces.byCreditAccount(creditAccountId).stream().map(TraceResponse::from).toList();
+    }
+
+    @GetMapping("/by-payout/{payoutId}")
+    @Operation(summary = "Este pago, ¿en qué eslabón va?")
+    ResponseEntity<TraceResponse> byPayout(@PathVariable UUID payoutId) {
+        return traces.byPayout(payoutId)
+                .map(t -> ResponseEntity.ok(TraceResponse.from(t)))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/by-tracking-key/{trackingKey}")
@@ -85,13 +95,19 @@ class MovementTraceController {
                          UUID creditAccountId, UUID payoutId, UUID bankAccountId,
                          String trackingKey, UUID lineId, String voucherRef,
                          BigDecimal amount, LocalDate businessDate, String status,
-                         boolean complete, String missingLink) {
+                         boolean complete, String missingLink,
+                         // Cuándo llegó cada tramo. Nulo = ese tramo aún no llega.
+                         OffsetDateTime createdAt, OffsetDateTime routedAt,
+                         OffsetDateTime dispatchedAt, OffsetDateTime settledAt,
+                         OffsetDateTime reconciledAt, OffsetDateTime postedAt) {
 
         static TraceResponse from(MovementTrace t) {
             return new TraceResponse(t.getId(), t.getSourceSystem(), t.getSourceReference(),
                     t.getCreditAccountId(), t.getPayoutId(), t.getBankAccountId(),
                     t.getTrackingKey(), t.getLineId(), t.getVoucherRef(), t.getAmount(),
-                    t.getBusinessDate(), t.getStatus(), t.isComplete(), t.missingLink());
+                    t.getBusinessDate(), t.getStatus(), t.isComplete(), t.missingLink(),
+                    t.getCreatedAt(), t.getRoutedAt(), t.getDispatchedAt(), t.getSettledAt(),
+                    t.getReconciledAt(), t.getPostedAt());
         }
     }
 }

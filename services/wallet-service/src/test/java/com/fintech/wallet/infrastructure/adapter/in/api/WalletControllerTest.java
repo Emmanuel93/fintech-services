@@ -165,6 +165,35 @@ class WalletControllerTest {
     }
 
     @Test
+    void requestDisposition_carriesThePayeeNameAndTaxIdWithItsClabe() throws Exception {
+        willDoNothing().given(requestDispositionUseCase).request(any());
+        UUID beneficiary = UUID.randomUUID();
+
+        mockMvc.perform(post("/api/v1/wallet/{id}/dispositions", creditAccountId)
+                        .header("X-User-Id", obligorPartyId.toString())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(Map.of(
+                                "amount", 45000,
+                                "beneficiaryPartyId", beneficiary.toString(),
+                                "payeeAccount", "646180157000000004",
+                                "payeeName", "ROSA ELENA IBARRA SALGADO",
+                                "payeeTaxId", "IASR900612B0B",
+                                "termPeriods", 24))))
+                .andExpect(status().isAccepted());
+
+        // El nombre viaja con la CLABE: sin él, cartera completaba con el de la distribuidora.
+        var captor = org.mockito.ArgumentCaptor.forClass(
+                com.fintech.wallet.application.RequestDispositionCommand.class);
+        then(requestDispositionUseCase).should().request(captor.capture());
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().payeeName())
+                .isEqualTo("ROSA ELENA IBARRA SALGADO");
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().payeeTaxId())
+                .isEqualTo("IASR900612B0B");
+        org.assertj.core.api.Assertions.assertThat(captor.getValue().obligorPartyId())
+                .isEqualTo(obligorPartyId);
+    }
+
+    @Test
     void requestDisposition_noToken_returns401() throws Exception {
         mockMvc.perform(post("/api/v1/wallet/{id}/dispositions", creditAccountId)
                         .contentType(MediaType.APPLICATION_JSON)

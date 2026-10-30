@@ -18,5 +18,6 @@
     <include file="db/changelog/closing/011-drop-bank.sql"                   relativeToChangelogFile="false"/>
 
     <include file="db/changelog/closing/012-gracia-unificada.sql"            relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/013-pago-minimo-por-producto.sql"    relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

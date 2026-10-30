@@ -197,6 +197,8 @@ services:
       - identity-service
       - channel-mobile-service
       - channel-backoffice-service
+      # Upstream del bloque público `kyc.*`: la web de alta de la beneficiaria.
+      - beneficiary-service
     restart: unless-stopped
     networks:
       - fintech-network
@@ -723,6 +725,12 @@ services:
       # el cliente cae a su default de bootRun (localhost:8102), que dentro del contenedor es
       # el propio backoffice: la bandeja respondería 404 sin decir por qué.
       BENEFICIARY_SERVICE_URL: http://beneficiary-service:8080
+      # Bancos / Tesorería: cuentas propias y traza (banking), pagos (disbursement) y orden SPEI
+      # (stp). Sin estas líneas los clientes caen a su default de bootRun —localhost— y dentro del
+      # contenedor esa dirección es el propio backoffice.
+      BANKING_SERVICE_URL: http://banking-service:8080
+      DISBURSEMENT_SERVICE_URL: http://disbursement-service:8080
+      STP_SERVICE_URL: http://stp-service:8080
       # Credencial propia del canal contra identity, para que la bitácora resuelva quién actuó sin
       # depender de los permisos del que actúa. Sembrada en identity:013 — rotar antes de exponer.
       IDENTITY_SERVICE_CLIENT_ID: channel-backoffice-service
@@ -1045,6 +1053,10 @@ services:
       # Sustituye la web pública de KYC de la beneficiaria mientras no exista. Es un bypass de
       # identidad: encendido sólo en este compose local, nunca en un ambiente con datos reales.
       BENEFICIARY_KYC_SIMULATION_ENABLED: "true"
+      # KYC web público. Código OTP fijo SÓLO LOCAL: WhatsApp/SMS son noop en este repo y sin él
+      # no habría forma de pasar el OTP a mano. La liga apunta al Vite de la página de KYC.
+      BENEFICIARY_DEV_OTP_CODE: "123456"
+      BENEFICIARY_KYC_LINK_BASE_URL: "http://localhost:4300/"
     <<: *app-mem
     depends_on:
       postgres:

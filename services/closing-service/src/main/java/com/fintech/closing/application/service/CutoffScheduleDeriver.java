@@ -38,10 +38,10 @@ public class CutoffScheduleDeriver {
 
     private static final Logger log = LoggerFactory.getLogger(CutoffScheduleDeriver.class);
 
-    private final BusinessCalendarService calendario;
+    private final BusinessCalendarService calendar;
 
-    public CutoffScheduleDeriver(BusinessCalendarService calendario) {
-        this.calendario = calendario;
+    public CutoffScheduleDeriver(BusinessCalendarService calendar) {
+        this.calendar = calendar;
     }
 
     /**
@@ -49,60 +49,84 @@ public class CutoffScheduleDeriver {
      *
      * @return vacío si el producto no tiene corte, o si el ciclo excede el plazo del crédito.
      */
-    public Optional<CutoffSchedule> derive(AccountCloseProfile perfil, ClosePolicy policy, int ciclo) {
-        if (policy.cutoffRule() == CutoffRule.NONE || perfil.getActivatedOn() == null || ciclo < 1) {
+    public Optional<CutoffSchedule> derive(AccountCloseProfile profile, ClosePolicy policy, int cycle) {
+        if (policy.cutoffRule() == CutoffRule.NONE || profile.getActivatedOn() == null || cycle < 1) {
             return Optional.empty();
         }
         // Un préstamo a plazo no corta después de su última cuota: ahí ya no hay nada que cortar.
-        if (perfil.getTermPeriods() != null && !perfil.isRevolving() && ciclo > perfil.getTermPeriods()) {
+        if (profile.getTermPeriods() != null && !profile.isRevolving() && cycle > profile.getTermPeriods()) {
             return Optional.empty();
         }
 
-        LocalDate crudo = rawDate(perfil, policy, ciclo);
+        LocalDate crudo = rawDate(profile, policy, cycle);
         if (crudo == null) return Optional.empty();
 
         String calendarCode = policy.getCalendarCode();
-        LocalDate cutoff = calendario.shift(calendarCode, crudo, policy.shift());
-        LocalDate limite = calendario.shift(calendarCode,
+        LocalDate cutoff = calendar.shift(calendarCode, crudo, policy.shift());
+        LocalDate paymentDueDate = calendar.shift(calendarCode,
                 cutoff.plusDays(policy.getPaymentDueOffsetDays()), policy.shift());
 
         // El corrimiento del corte puede empujarlo más allá de la fecha límite calculada sobre el
         // crudo. La invariante `limite >= corte` la impone la base; se respeta aquí.
-        if (limite.isBefore(cutoff)) limite = cutoff;
+        if (paymentDueDate.isBefore(cutoff)) paymentDueDate = cutoff;
 
-        return Optional.of(CutoffSchedule.scheduled(perfil.getCreditAccountId(), ciclo, cutoff, limite));
+        return Optional.of(CutoffSchedule.scheduled(profile.getCreditAccountId(), cycle, cutoff, paymentDueDate));
     }
 
     /** La fecha antes de aplicar el calendario. Aquí vive la diferencia entre reglas. */
-    private LocalDate rawDate(AccountCloseProfile perfil, ClosePolicy policy, int ciclo) {
-        LocalDate alta = perfil.getActivatedOn();
+    private LocalDate rawDate(AccountCloseProfile profile, ClosePolicy policy, int cycle) {
+        LocalDate alta = profile.getActivatedOn();
 
         return switch (policy.cutoffRule()) {
             // No revolvente: la cadencia del plan, anclada al alta. El primer corte cae un período
             // después de activar — igual que la primera cuota que genera cartera.
-            case INSTALLMENT_DUE_DATE -> PaymentCadence.from(perfil.getPaymentFrequency()).advance(alta, ciclo);
+            case INSTALLMENT_DUE_DATE -> cadenceOf(profile).advance(alta, cycle);
 
-            // Revolvente: ciclo mensual anclado al DÍA de la activación. Es lo que hace que dos
-            // tarjetas activadas el 3 y el 20 corten en días distintos, que es como debe ser.
-            case CYCLE_FROM_ACTIVATION -> alta.plusMonths(ciclo);
+            // Revolvente: el ciclo avanza con la PERIODICIDAD DEL PRODUCTO —semanal, quincenal o
+            // mensual— anclada al DÍA de la activación. Es lo que hace que dos tarjetas activadas el
+            // 3 y el 20 corten en días distintos, que es como debe ser.
+            //
+            // Antes era `alta.plusMonths(cycle)`: mensual a fuerza. Una línea configurada WEEKLY en
+            // `credit_product.payment_frequencies` cortaba mensual, y nada fallaba — el calendario se
+            // derivaba, se persistía y se sellaba con la periodicidad equivocada. El dato siempre
+            // estuvo ahí: el producto lo declara, el evento de activación lo publica y el perfil
+            // tiene la columna. Sólo esta línea lo ignoraba.
+            case CYCLE_FROM_ACTIVATION -> cadenceOf(profile).advance(alta, cycle);
 
             // Día fijo del mes, igual para todo el producto. El primer corte es el siguiente que
             // llegue después del alta, no el del mes del alta si ya pasó.
-            case DAY_OF_MONTH -> fixedDayOfMonth(alta, policy.getCutoffDay(), ciclo);
+            case DAY_OF_MONTH -> fixedDayOfMonth(alta, policy.getCutoffDay(), cycle);
 
             case NONE -> null;
         };
     }
 
-    private LocalDate fixedDayOfMonth(LocalDate alta, Short dia, int ciclo) {
-        if (dia == null) return null;
-        LocalDate first = alta.withDayOfMonth(Math.min(dia, alta.lengthOfMonth()));
+    /**
+     * La cadencia de la cuenta, gritando cuando se cae al default.
+     *
+     * <p>Un producto sin periodicidad declarada corta mensual, que es lo que hace cartera al
+     * amortizar. Pero se registra en WARN: si una tarjeta configurada semanal llegara sin el dato,
+     * el calendario saldría mensual y la única forma de enterarse sería que alguien comparara el
+     * catálogo con los cortes sellados a mano.
+     */
+    private PaymentCadence cadenceOf(AccountCloseProfile profile) {
+        if (!profile.hasDeclaredCadence()) {
+            log.warn("La cuenta {} (producto {}) no declara periodicidad de pago — su calendario de "
+                     + "cortes se deriva MENSUAL por defecto. Revisa la configuración del producto.",
+                    profile.getCreditAccountId(), profile.getProductType());
+        }
+        return profile.cadence();
+    }
+
+    private LocalDate fixedDayOfMonth(LocalDate alta, Short day, int cycle) {
+        if (day == null) return null;
+        LocalDate first = alta.withDayOfMonth(Math.min(day, alta.lengthOfMonth()));
         if (!first.isAfter(alta)) {
             first = first.plusMonths(1);
-            first = first.withDayOfMonth(Math.min(dia, first.lengthOfMonth()));
+            first = first.withDayOfMonth(Math.min(day, first.lengthOfMonth()));
         }
-        LocalDate objetivo = first.plusMonths(ciclo - 1L);
-        return objetivo.withDayOfMonth(Math.min(dia, objetivo.lengthOfMonth()));
+        LocalDate objetivo = first.plusMonths(cycle - 1L);
+        return objetivo.withDayOfMonth(Math.min(day, objetivo.lengthOfMonth()));
     }
 
     /**
@@ -112,15 +136,15 @@ public class CutoffScheduleDeriver {
      * cortes desde el primer día, y porque la corrida diaria pasa a ser una consulta por fecha en vez
      * de un cálculo por cuenta.
      */
-    public List<CutoffSchedule> deriveAll(AccountCloseProfile perfil, ClosePolicy policy, int maxCiclos) {
+    public List<CutoffSchedule> deriveAll(AccountCloseProfile profile, ClosePolicy policy, int maxCycles) {
         List<CutoffSchedule> cutoffs = new ArrayList<>();
-        for (int ciclo = 1; ciclo <= maxCiclos; ciclo++) {
-            Optional<CutoffSchedule> c = derive(perfil, policy, ciclo);
+        for (int cycle = 1; cycle <= maxCycles; cycle++) {
+            Optional<CutoffSchedule> c = derive(profile, policy, cycle);
             if (c.isEmpty()) break;
             cutoffs.add(c.get());
         }
         log.debug("Calendario de corte derivado cuenta={} regla={} cortes={}",
-                perfil.getCreditAccountId(), policy.cutoffRule(), cutoffs.size());
+                profile.getCreditAccountId(), policy.cutoffRule(), cutoffs.size());
         return cutoffs;
     }
 }

@@ -48,7 +48,7 @@ paths:
               $ref: '#/components/schemas/LoginRequest'
             example:
               phone: "6673038098"
-              password: "Emmanuel12*"
+              password: "Laura12*"
       responses:
         "200":
           description: Autenticación exitosa
@@ -314,7 +314,7 @@ components:
         password:
           type: string
           minLength: 6
-          example: "Emmanuel12*"
+          example: "Laura12*"
         deviceId:
           type: string
           description: Identificador opcional del dispositivo
@@ -359,7 +359,7 @@ components:
           minLength: 8
           description: |
             Mínimo 8 caracteres. Debe incluir mayúscula, número y símbolo especial.
-          example: "Emmanuel12*"
+          example: "Laura12*"
         folioKyc:
           type: string
           description: Folio emitido por POST /kyc/submit
@@ -445,16 +445,16 @@ components:
           example: true
         nombres:
           type: string
-          example: "EMMANUEL FRANCISCO"
+          example: "LAURA"
         apellidoPaterno:
           type: string
-          example: "RAMÍREZ"
+          example: "MÉNDEZ"
         apellidoMaterno:
           type: string
-          example: "HERNÁNDEZ"
+          example: "SOTO"
         curp:
           type: string
-          example: "RAHE930326HSMLRM09"
+          example: "MESL930326MSLNTR04"
         fechaNacimiento:
           type: string
           description: Fecha en formato DD/MM/YYYY
@@ -498,23 +498,23 @@ components:
         nombres:
           type: string
           maxLength: 100
-          example: "EMMANUEL FRANCISCO"
+          example: "LAURA"
         apellidoPaterno:
           type: string
           maxLength: 100
-          example: "RAMÍREZ"
+          example: "MÉNDEZ"
         apellidoMaterno:
           type: string
           maxLength: 100
-          example: "HERNÁNDEZ"
+          example: "SOTO"
         curp:
           type: string
           pattern: '^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$'
-          example: "RAHE930326HSMLRM09"
+          example: "MESL930326MSLNTR04"
         rfc:
           type: string
           pattern: '^[A-Z&Ñ]{3,4}\d{6}[A-Z0-9]{3}$'
-          example: "RAHE930326JH8"
+          example: "MESL930326JH8"
         fechaNacimiento:
           type: string
           format: date

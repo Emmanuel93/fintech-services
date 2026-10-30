@@ -148,7 +148,7 @@ class ClosingRunEngineIT {
 
     @Test
     @DisplayName("una fase no arranca si la anterior no ha sellado")
-    void barreraDeFase() {
+    void phaseBarrier() {
         // Sustituye a los offsets de reloj del as-is: si el devengo se alarga, la mora espera
         // en vez de correr sobre datos viejos.
         assertThatThrownBy(() -> planner.plan(date, ClosePhase.ACCRUAL, "ALL", run -> List.of()))
@@ -205,7 +205,7 @@ class ClosingRunEngineIT {
 
     @Test
     @DisplayName("una unidad que falla no aborta la corrida y queda con su causa")
-    void elFalloNoAbortaLaCorrida() {
+    void afailureDoesNotAbortTheRun() {
         CloseRun run = plan(5);
 
         var procesador = processorThat(u -> {
@@ -247,12 +247,12 @@ class ClosingRunEngineIT {
     @DisplayName("el pod muere con la unidad tomada: el reaper la devuelve y otro la termina")
     void thereaperRecoversTheDeadPodsBatch() {
         CloseRun run = plan(1);
-        CloseUnit unidad = units.findPending(run.getRunId(), 0, 1).get(0);
+        CloseUnit unit = units.findPending(run.getRunId(), 0, 1).get(0);
 
         // Se simula el pod que muere: toma la unidad y no la libera nunca.
-        LockKey key = LockKey.of("closing", "unit", run.getRunId(), unidad.getUnitKey());
+        LockKey key = LockKey.of("closing", "unit", run.getRunId(), unit.getUnitKey());
         var handle = lock.tryAcquire(key, Duration.ofMillis(600)).orElseThrow();
-        units.claim(unidad.getUnitId(), "pod-que-muere", handle.fencingToken(),
+        units.claim(unit.getUnitId(), "pod-que-muere", handle.fencingToken(),
                 Instant.now().minusSeconds(1));       // arrendamiento ya vencido
 
         assertThat(units.countByStatus(run.getRunId(), UnitStatus.CLAIMED.name())).isEqualTo(1);
@@ -278,10 +278,10 @@ class ClosingRunEngineIT {
         // El escenario que un TTL no cubre: el candado expira con el trabajo todavía vivo —una
         // pausa de GC basta— y dos procesos se creen dueños. El número monótono los distingue.
         CloseRun run = plan(1);
-        CloseUnit unidad = units.findPending(run.getRunId(), 0, 1).get(0);
+        CloseUnit unit = units.findPending(run.getRunId(), 0, 1).get(0);
 
-        units.claim(unidad.getUnitId(), "pod-nuevo", 50L, Instant.now().plusSeconds(300));
-        CloseUnit recargada = units.findById(unidad.getUnitId()).orElseThrow();
+        units.claim(unit.getUnitId(), "pod-nuevo", 50L, Instant.now().plusSeconds(300));
+        CloseUnit recargada = units.findById(unit.getUnitId()).orElseThrow();
 
         assertThatThrownBy(() -> recargada.markDone(7L))
                 .isInstanceOf(IllegalStateException.class)
@@ -296,7 +296,7 @@ class ClosingRunEngineIT {
 
     @Test
     @DisplayName("no se sella una corrida con unidades fallidas")
-    void noSeSellaAMedias() {
+    void nothingIsSealedHalfway() {
         // Un cierre que sella sobre datos incompletos produce un número que parece bueno y no lo
         // es. Es el modo de falla que este sistema existe para evitar.
         CloseRun run = plan(2);

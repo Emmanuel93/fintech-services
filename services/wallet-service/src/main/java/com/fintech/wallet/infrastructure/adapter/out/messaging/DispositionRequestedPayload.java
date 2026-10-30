@@ -12,6 +12,9 @@ record DispositionRequestedPayload(
         String dispositionType,
         UUID beneficiaryPartyId,
         String payeeAccount,
+        /** Titular de la CLABE de destino. Cartera lo exige en una colocación (credit-portfolio). */
+        String payeeName,
+        String payeeTaxId,
         Integer termPeriods,
         Instant occurredOn
 ) {}

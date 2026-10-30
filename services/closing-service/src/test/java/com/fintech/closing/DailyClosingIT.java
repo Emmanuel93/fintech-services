@@ -41,7 +41,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest
 @Testcontainers
-@Import({InMemoryLockConfig.class, DailyClosingIT.EventosCapturadosConfig.class})
+@Import({InMemoryLockConfig.class, DailyClosingIT.CapturedEventsConfig.class})
 class DailyClosingIT {
 
     @Container
@@ -62,34 +62,34 @@ class DailyClosingIT {
 
     /** Captura lo publicado sin necesitar un broker: lo que importa aquí es QUÉ se publica. */
     @TestConfiguration
-    static class EventosCapturadosConfig {
-        static final List<String> VENTANAS = new ArrayList<>();
-        static final List<CutoffSchedule> CORTES = new ArrayList<>();
-        static final List<CloseSeal> SELLOS = new ArrayList<>();
+    static class CapturedEventsConfig {
+        static final List<String> WINDOWS = new ArrayList<>();
+        static final List<CutoffSchedule> CUTOFFS = new ArrayList<>();
+        static final List<CloseSeal> SEALS = new ArrayList<>();
 
         @Bean @Primary
         ClosingEventPublisher capturador() {
             return new ClosingEventPublisher() {
-                @Override public void publishUnitWindowOpened(UUID runId, UUID account, ClosePhase fase,
-                                                               LocalDate date, String producto) {
-                    VENTANAS.add(fase + "|" + account + "|" + date);
+                @Override public void publishUnitWindowOpened(UUID runId, UUID account, ClosePhase phase,
+                                                               LocalDate date, String productType) {
+                    WINDOWS.add(phase + "|" + account + "|" + date);
                 }
-                @Override public void publishCutoffClosed(CutoffSchedule c, UUID party, String producto) {
-                    CORTES.add(c);
+                @Override public void publishCutoffClosed(CutoffSchedule c, UUID party, String productType) {
+                    CUTOFFS.add(c);
                 }
-                @Override public void publishDaySealed(CloseSeal s) { SELLOS.add(s); }
+                @Override public void publishDaySealed(CloseSeal s) { SEALS.add(s); }
             };
         }
     }
 
     @Autowired BusinessDayRunner runner;
-    @Autowired AccountProjectionService proyeccion;
-    @Autowired AccountCloseProfileRepository perfiles;
+    @Autowired AccountProjectionService projection;
+    @Autowired AccountCloseProfileRepository profiles;
     @Autowired CutoffScheduleRepository cutoffs;
     @Autowired CloseSealRepository seals;
     @Autowired JdbcTemplate jdbc;
 
-    static final LocalDate ALTA = LocalDate.of(2026, 3, 10);
+    static final LocalDate ACTIVATED_ON = LocalDate.of(2026, 3, 10);
 
     @BeforeEach
     void cleanUp() {
@@ -98,27 +98,33 @@ class DailyClosingIT {
         jdbc.update("DELETE FROM closing.close_seals");
         jdbc.update("DELETE FROM closing.cutoff_schedules");
         jdbc.update("DELETE FROM closing.account_close_profiles");
-        EventosCapturadosConfig.VENTANAS.clear();
-        EventosCapturadosConfig.CORTES.clear();
-        EventosCapturadosConfig.SELLOS.clear();
+
+        // Las políticas NO se borran —vienen sembradas por changeset— pero sí se reinicia el
+        // porcentaje de pago mínimo, porque hay pruebas que lo cambian para ejercitar la
+        // configuración. Sin esto, el UPDATE de una se filtra a la siguiente y el fallo aparece
+        // en la prueba equivocada, que es la forma más caras de depurar.
+        jdbc.update("UPDATE closing.close_cycle_policies SET minimum_payment_rate = 0.0500");
+        CapturedEventsConfig.WINDOWS.clear();
+        CapturedEventsConfig.CUTOFFS.clear();
+        CapturedEventsConfig.SEALS.clear();
     }
 
-    private UUID activate(String producto, String comportamiento, String cadencia, Integer plazo,
+    private UUID activate(String productType, String behavior, String cadence, Integer term,
                           BigDecimal balance) {
         UUID id = UUID.randomUUID();
-        proyeccion.onAccountActivated(id, UUID.randomUUID(), producto, comportamiento, "SUC-001",
-                ALTA, cadencia, plazo, new BigDecimal("0.32"), balance);
+        projection.onAccountActivated(id, UUID.randomUUID(), productType, behavior, "SUC-001",
+                ACTIVATED_ON, cadence, term, new BigDecimal("0.32"), balance);
         return id;
     }
 
     @Test
     @DisplayName("un día de negocio corre sus fases en orden y las sella")
-    void elDiaCorreYSella() {
+    void thedayRunsAndSeals() {
         activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12, new BigDecimal("20000"));
 
         var r = runner.runBusinessDay(LocalDate.of(2026, 3, 11), "ALL");
 
-        assertThat(r.fases()).containsKeys(ClosePhase.RECONCILE, ClosePhase.ACCRUAL,
+        assertThat(r.phases()).containsKeys(ClosePhase.RECONCILE, ClosePhase.ACCRUAL,
                 ClosePhase.DELINQUENCY, ClosePhase.CUTOFF);
         assertThat(r.allSealed()).as("todas las fases sellaron").isTrue();
     }
@@ -132,16 +138,16 @@ class DailyClosingIT {
         runner.runPhase(LocalDate.of(2026, 3, 11), ClosePhase.RECONCILE, "ALL");
         runner.runPhase(LocalDate.of(2026, 3, 11), ClosePhase.ACCRUAL, "ALL");
 
-        assertThat(EventosCapturadosConfig.VENTANAS)
+        assertThat(CapturedEventsConfig.WINDOWS)
                 .contains("ACCRUAL|" + a + "|2026-03-11", "ACCRUAL|" + b + "|2026-03-11");
     }
 
     @Test
     @DisplayName("una cuenta sin saldo se omite y NO bloquea el sello")
-    void sinSaldoSeOmite() {
+    void withoutAbalanceItIsSkipped() {
         activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12, BigDecimal.ZERO);
 
-        var fase = runner.runPhase(LocalDate.of(2026, 3, 11), ClosePhase.RECONCILE, "ALL");
+        var phase = runner.runPhase(LocalDate.of(2026, 3, 11), ClosePhase.RECONCILE, "ALL");
         var accrual = runner.runPhase(LocalDate.of(2026, 3, 11), ClosePhase.ACCRUAL, "ALL");
 
         assertThat(accrual.omitidas()).isEqualTo(1);
@@ -153,19 +159,19 @@ class DailyClosingIT {
     @DisplayName("una cuenta liquidada sale del cierre")
     void liquidadaSaleDelCierre() {
         UUID id = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12, new BigDecimal("20000"));
-        proyeccion.onBalanceUpdated(id, BigDecimal.ZERO, BigDecimal.ZERO, "SETTLED", 10, "SUC-001");
+        projection.onBalanceUpdated(id, BigDecimal.ZERO, BigDecimal.ZERO, "SETTLED", 10, "SUC-001");
 
         runner.runPhase(LocalDate.of(2026, 3, 11), ClosePhase.RECONCILE, "ALL");
         var accrual = runner.runPhase(LocalDate.of(2026, 3, 11), ClosePhase.ACCRUAL, "ALL");
 
-        assertThat(accrual.unidades()).as("terminal no se materializa siquiera").isZero();
+        assertThat(accrual.units()).as("terminal no se materializa siquiera").isZero();
     }
 
     @Test
     @DisplayName("el corte se sella el día que toca, y sólo ese día")
-    void elCorteSeSellaElDiaQueToca() {
+    void thecutoffIsSealedOnItsDay() {
         UUID id = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12, new BigDecimal("20000"));
-        proyeccion.onBalanceUpdated(id, new BigDecimal("20000"), new BigDecimal("20533.33"), "ACTIVE", 1, "SUC-001");
+        projection.onBalanceUpdated(id, new BigDecimal("20000"), new BigDecimal("20533.33"), "ACTIVE", 1, "SUC-001");
 
         // El día anterior al corte: no pasa nada.
         runner.runBusinessDay(LocalDate.of(2026, 4, 9), "ALL");
@@ -177,45 +183,45 @@ class DailyClosingIT {
 
         assertThat(cutoff.isSealed()).isTrue();
         assertThat(cutoff.getBalanceAtCutoff()).isEqualByComparingTo("20533.33");
-        assertThat(EventosCapturadosConfig.CORTES).hasSize(1);
+        assertThat(CapturedEventsConfig.CUTOFFS).hasSize(1);
     }
 
     @Test
     @DisplayName("una tarjeta recibe pago mínimo; un préstamo a plazo NO lo inventa el cierre")
-    void elPagoMinimoEsSoloDeRevolventes() {
+    void theminimumPaymentIsOnlyForRevolving() {
         // El importe de la cuota sale del plan de amortización, que es de cartera. Duplicar aquí
         // esa aritmética crearía una segunda fuente de verdad sobre el mismo número.
         UUID card = activate("CREDIT_CARD", "REVOLVING", null, null, new BigDecimal("10000"));
-        UUID prestamo = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12, new BigDecimal("20000"));
-        proyeccion.onBalanceUpdated(card, new BigDecimal("10000"), new BigDecimal("10000"), "ACTIVE", 1, "SUC-001");
-        proyeccion.onBalanceUpdated(prestamo, new BigDecimal("20000"), new BigDecimal("20000"), "ACTIVE", 1, "SUC-001");
+        UUID loan = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12, new BigDecimal("20000"));
+        projection.onBalanceUpdated(card, new BigDecimal("10000"), new BigDecimal("10000"), "ACTIVE", 1, "SUC-001");
+        projection.onBalanceUpdated(loan, new BigDecimal("20000"), new BigDecimal("20000"), "ACTIVE", 1, "SUC-001");
 
         runner.runBusinessDay(LocalDate.of(2026, 4, 10), "ALL");
 
         assertThat(cutoffs.find(card, 1).orElseThrow().getMinimumPayment())
-                .as("5% del saldo").isEqualByComparingTo("500.00");
-        assertThat(cutoffs.find(prestamo, 1).orElseThrow().getMinimumPayment())
+                .as("el 5% que configura la política del producto").isEqualByComparingTo("500.00");
+        assertThat(cutoffs.find(loan, 1).orElseThrow().getMinimumPayment())
                 .as("el cierre no inventa el importe de la cuota").isNull();
     }
 
     @Test
     @DisplayName("tras sellar un corte, el ciclo siguiente queda agendado")
-    void elCicloSigue() {
+    void thecycleGoesOn() {
         UUID id = activate("CREDIT_CARD", "REVOLVING", null, null, new BigDecimal("10000"));
-        proyeccion.onBalanceUpdated(id, new BigDecimal("10000"), new BigDecimal("10000"), "ACTIVE", 1, "SUC-001");
+        projection.onBalanceUpdated(id, new BigDecimal("10000"), new BigDecimal("10000"), "ACTIVE", 1, "SUC-001");
 
         runner.runBusinessDay(LocalDate.of(2026, 4, 10), "ALL");
 
         assertThat(cutoffs.find(id, 2)).isPresent();
         // El 10 de mayo de 2026 es DOMINGO: la política corre el corte al lunes siguiente.
         // La expectativa ingenua era el 10; el motor hizo lo correcto.
-        assertThat(perfiles.findById(id).orElseThrow().getNextCutoffDate())
+        assertThat(profiles.findById(id).orElseThrow().getNextCutoffDate())
                 .isEqualTo(LocalDate.of(2026, 5, 11));
     }
 
     @Test
     @DisplayName("el sello lleva cifras de control y una huella que detecta alteración")
-    void elSelloLlevaCifras() {
+    void thesealCarriesItsFigures() {
         activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12, new BigDecimal("20000"));
         activate("MICRO_LOAN", "INSTALLMENT", "WEEKLY", 8, new BigDecimal("5000"));
 
@@ -229,25 +235,25 @@ class DailyClosingIT {
 
     @Test
     @DisplayName("correr el mismo día dos veces no reprocesa ni re-sella")
-    void elDiaEsIdempotente() {
+    void thedayIsIdempotent() {
         activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12, new BigDecimal("20000"));
 
         runner.runBusinessDay(LocalDate.of(2026, 3, 11), "ALL");
-        int ventanasPrimera = EventosCapturadosConfig.VENTANAS.size();
-        int sellosPrimera   = EventosCapturadosConfig.SELLOS.size();
+        int firstWindows = CapturedEventsConfig.WINDOWS.size();
+        int firstSeals   = CapturedEventsConfig.SEALS.size();
 
         runner.runBusinessDay(LocalDate.of(2026, 3, 11), "ALL");
 
-        assertThat(EventosCapturadosConfig.VENTANAS).hasSize(ventanasPrimera);
-        assertThat(EventosCapturadosConfig.SELLOS).hasSize(sellosPrimera);
+        assertThat(CapturedEventsConfig.WINDOWS).hasSize(firstWindows);
+        assertThat(CapturedEventsConfig.SEALS).hasSize(firstSeals);
     }
 
     @Test
     @DisplayName("correr treinta días seguidos abre treinta ventanas de devengo, una por día")
-    void treintaDiasTreintaVentanas() {
+    void thirtyDaysThirtyWindows() {
         // Es el requisito literal: cada devengamiento tiene que haber sido aplicado por un cierre.
         UUID id = activate("PERSONAL_LOAN", "INSTALLMENT", "MONTHLY", 12, new BigDecimal("20000"));
-        proyeccion.onBalanceUpdated(id, new BigDecimal("20000"), new BigDecimal("20000"), "ACTIVE", 1, "SUC-001");
+        projection.onBalanceUpdated(id, new BigDecimal("20000"), new BigDecimal("20000"), "ACTIVE", 1, "SUC-001");
 
         LocalDate d = LocalDate.of(2026, 3, 11);
         for (int i = 0; i < 30; i++) {
@@ -255,8 +261,55 @@ class DailyClosingIT {
             d = d.plusDays(1);
         }
 
-        long ventanasDeDevengo = EventosCapturadosConfig.VENTANAS.stream()
+        long ventanasDeDevengo = CapturedEventsConfig.WINDOWS.stream()
                 .filter(v -> v.startsWith("ACCRUAL|" + id)).count();
         assertThat(ventanasDeDevengo).isEqualTo(30);
     }
+    // ── El pago mínimo sale de la POLÍTICA, no de una constante ──────────────────────────────
+
+    @Test
+    @DisplayName("cambiar el porcentaje de la política cambia el mínimo, sin desplegar nada")
+    void theminimumPaymentRateComesFromThePolicy() {
+        // Era `private static final BigDecimal MINIMUM_PAYMENT_RATE = new BigDecimal("0.05")`: el
+        // mismo 5 % para una tarjeta de nómina y una de consumo, y cambiarlo exigía un despliegue.
+        // Esta prueba es la que demuestra que ya no.
+        jdbc.update("""
+                UPDATE closing.close_cycle_policies SET minimum_payment_rate = 0.1000
+                 WHERE scope_value = 'CREDIT_CARD'
+                """);
+
+        UUID card = activate("CREDIT_CARD", "REVOLVING", "MONTHLY", null, new BigDecimal("10000"));
+        projection.onBalanceUpdated(card, new BigDecimal("10000"), new BigDecimal("10000"),
+                "ACTIVE", 1, "SUC-001");
+
+        runner.runBusinessDay(LocalDate.of(2026, 4, 10), "ALL");
+
+        assertThat(cutoffs.find(card, 1).orElseThrow().getMinimumPayment())
+                .as("el 10% que ahora exige la política, no el 5% que decía el código")
+                .isEqualByComparingTo("1000.00");
+    }
+
+    @Test
+    @DisplayName("una política sin porcentaje sella el corte SIN mínimo, en vez de inventar uno")
+    void apolicyWithoutArateSealsWithoutAminimum() {
+        // Nulo significa «este producto no exige mínimo», que es un hecho del producto. Caer a un
+        // 5 % por defecto sería exigirle al cliente un importe que nadie configuró.
+        jdbc.update("""
+                UPDATE closing.close_cycle_policies SET minimum_payment_rate = NULL
+                 WHERE scope_value = 'CREDIT_CARD'
+                """);
+
+        UUID card = activate("CREDIT_CARD", "REVOLVING", "MONTHLY", null, new BigDecimal("10000"));
+        projection.onBalanceUpdated(card, new BigDecimal("10000"), new BigDecimal("10000"),
+                "ACTIVE", 1, "SUC-001");
+
+        runner.runBusinessDay(LocalDate.of(2026, 4, 10), "ALL");
+
+        var sealed = cutoffs.find(card, 1).orElseThrow();
+        assertThat(sealed.getMinimumPayment()).isNull();
+        assertThat(sealed.getAmountDue())
+                .as("el exigible del ciclo sigue siendo el saldo: lo que falta es el mínimo, no el total")
+                .isEqualByComparingTo("10000.00");
+    }
+
 }

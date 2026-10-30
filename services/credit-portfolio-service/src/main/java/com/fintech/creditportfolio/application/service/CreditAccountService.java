@@ -327,20 +327,42 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
      * <p><b>Siempre sale a una cuenta bancaria</b>, también en uso propio: el saldo a favor en
      * monedero está fuera de alcance. En uso propio el destino es el titular —cuya CLABE ya
      * guarda la cuenta— y en una línea de distribuidor, la beneficiaria.
+     *
+     * <p><b>El destino es la terna (nombre, CLABE, RFC) y sale entera de un mismo lado.</b> Se
+     * decidía la CLABE según el tipo pero el nombre y el RFC salían siempre de la cuenta, así que
+     * una colocación mandaba el dinero a la CLABE de la beneficiaria <i>a nombre de la
+     * distribuidora</i>: la orden STP y el CEP decían «LAURA MÉNDEZ SOTO / MESL930326XXX» sobre
+     * una cuenta que es de otra persona. El banco receptor puede devolverlo por no coincidir, y si
+     * no lo devuelve es peor: el comprobante regulatorio afirma un pago a quien no lo recibió.
+     *
+     * <p>Por eso, cuando la CLABE es la del receptor, el nombre y el RFC también lo son. Uso propio
+     * conserva los del titular, que es quien recibe. Que una colocación sin nombre de receptor no
+     * llegue hasta aquí lo garantiza {@link #validateBeneficiary}.
      */
     private Destino destinationOf(CreditAccount account,
                               ProcessDispositionCommand cmd,
                               DispositionType type) {
         boolean aTercero = type != DispositionType.SELF_USE;
-        String payeeClabe = aTercero && cmd.payeeAccount() != null
+        boolean clabeDelReceptor = aTercero && cmd.payeeAccount() != null;
+        String payeeClabe = clabeDelReceptor
                 ? cmd.payeeAccount()
                 : account.getClabeAccount();
         if (payeeClabe == null || payeeClabe.isBlank()) {
             throw new IllegalStateException("La disposición " + account.getCreditAccountId()
                     + " no tiene cuenta de destino: no hay adónde mandar el dinero");
         }
+        // Nómina puede traer CLABE sin nombre —el receptor es el propio titular—; una colocación
+        // no, y eso ya lo rechazó la validación.
+        String nombreDelReceptor = clabeDelReceptor ? blankToNull(cmd.payeeName()) : null;
+        if (nombreDelReceptor != null) {
+            return new Destino(nombreDelReceptor, payeeClabe, "40", blankToNull(cmd.payeeTaxId()));
+        }
         return new Destino(account.getBeneficiaryName(), payeeClabe, "40",
                 account.getBeneficiaryTaxId());
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     /** Adónde va el dinero. Interno: el evento viaja plano porque así lo declara quien lo consume. */
@@ -592,6 +614,11 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         }
         if (cmd.beneficiaryPartyId().equals(account.getObligorPartyId())) {
             return "BENEFICIARY_CANNOT_BE_OBLIGOR";
+        }
+        // La CLABE de la beneficiaria sin su nombre no se completa con el de la distribuidora: eso
+        // es exactamente el SPEI a nombre equivocado. Se rechaza antes de tocar la línea.
+        if (cmd.payeeAccount() != null && blankToNull(cmd.payeeName()) == null) {
+            return "BENEFICIARY_NAME_REQUIRED";
         }
         return null;
     }

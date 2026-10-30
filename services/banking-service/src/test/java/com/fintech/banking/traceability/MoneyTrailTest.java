@@ -151,6 +151,91 @@ class MoneyTrailTest {
     }
 
     @Test
+    @DisplayName("la traza que abrió el despacho se completa con el origen cuando llega quien lo sabe")
+    void elOrigenSeCompletaSinPisarse() {
+        // El despacho al conector no sabe de qué crédito viene: abre la traza sin origen.
+        servicio.onRequest(payment, null, null, null, new BigDecimal("45000.00"), "evt-route");
+        servicio.onRoute(payment, account, "evt-route");
+
+        // disbursement.accepted sí lo sabe. Antes era un no-op «idempotente» y el pago nunca
+        // aparecía al preguntar por el crédito.
+        servicio.onRequest(payment, "credit-portfolio", "disp-1", credit,
+                new BigDecimal("99.00"), "evt-accepted");
+
+        MovementTrace t = traces.get(0);
+        assertThat(traces).hasSize(1);
+        assertThat(t.getCreditAccountId()).isEqualTo(credit);
+        assertThat(t.getSourceSystem()).isEqualTo("credit-portfolio");
+        // Lo que ya estaba no se pisa: el primero que lo dijo manda.
+        assertThat(t.getAmount()).isEqualByComparingTo("45000.00");
+        assertThat(servicio.byCreditAccount(credit)).hasSize(1);
+        assertThat(servicio.byPayout(payment)).isPresent();
+    }
+
+    @Test
+    @DisplayName("un despacho que llega antes que el ruteo no retrocede: la cuenta se completa y sigue DISPATCHED")
+    void despachoAntesQueRuteo() {
+        servicio.onRequest(payment, "credit-portfolio", "disp-1", credit, new BigDecimal("1.00"), "evt-1");
+        servicio.onDispatch(payment, CLAVE, null, "evt-3");
+        servicio.onRoute(payment, account, "evt-2");
+
+        MovementTrace t = traces.get(0);
+        assertThat(t.getStatus()).isEqualTo("DISPATCHED");
+        assertThat(t.getBankAccountId()).isEqualTo(account);
+        assertThat(t.missingLink()).isEqualTo("SIN_CONCILIAR");
+    }
+
+    @Test
+    @DisplayName("un ruteo reentregado tarde no cambia la cuenta por la que el dinero ya salió")
+    void ruteoTardioNoCambiaLaCuenta() {
+        fullPathUntilDispatch();
+        servicio.onRoute(payment, UUID.randomUUID(), "evt-2-bis");
+
+        assertThat(traces.get(0).getBankAccountId()).isEqualTo(account);
+        assertThat(traces.get(0).getStatus()).isEqualTo("DISPATCHED");
+    }
+
+    @Test
+    @DisplayName("la liquidación completa la fecha de operación y marca SETTLED, sin cerrar la cadena")
+    void laLiquidacionCompletaLaFecha() {
+        servicio.onRequest(payment, "credit-portfolio", "disp-1", credit, new BigDecimal("1.00"), "evt-1");
+        servicio.onRoute(payment, account, "evt-2");
+        servicio.onDispatch(payment, CLAVE, null, "evt-3");
+
+        servicio.onDispatch(payment, "OTRA-CLAVE", DIA, "evt-settled");
+        servicio.onSettle(payment, java.time.OffsetDateTime.parse("2026-06-15T13:00:00Z"), "evt-settled");
+        servicio.onSettle(payment, java.time.OffsetDateTime.parse("2026-06-16T13:00:00Z"), "evt-settled");
+
+        MovementTrace t = traces.get(0);
+        // La clave de una orden no cambia: la primera es la buena; la fecha sí se completa.
+        assertThat(t.getTrackingKey()).isEqualTo(CLAVE);
+        assertThat(t.getBusinessDate()).isEqualTo(DIA);
+        assertThat(t.getStatus()).isEqualTo("SETTLED");
+        assertThat(t.getSettledAt()).isEqualTo(java.time.OffsetDateTime.parse("2026-06-15T13:00:00Z"));
+        assertThat(t.getDispatchedAt()).isNotNull();
+        // Liquidado no es conciliado: sigue faltando que el banco lo reporte.
+        assertThat(t.isComplete()).isFalse();
+        assertThat(t.missingLink()).isEqualTo("SIN_CONCILIAR");
+    }
+
+    @Test
+    @DisplayName("una liquidación que llega después de la conciliación no regresa el estado")
+    void liquidacionTardiaNoRegresa() {
+        fullPath();
+        servicio.onSettle(payment, null, "evt-settled");
+
+        assertThat(traces.get(0).getStatus()).isEqualTo("RECONCILED");
+        assertThat(traces.get(0).getSettledAt()).isNotNull();
+    }
+
+    private void fullPathUntilDispatch() {
+        servicio.onRequest(payment, "credit-portfolio", credit.toString(), credit,
+                new BigDecimal("20000.00"), "evt-1");
+        servicio.onRoute(payment, account, "evt-2");
+        servicio.onDispatch(payment, CLAVE, DIA, "evt-3");
+    }
+
+    @Test
     @DisplayName("una devolución queda registrada en la traza")
     void laDevolucionSeVe() {
         servicio.onRequest(payment, "credit-portfolio", credit.toString(), credit,

@@ -70,6 +70,7 @@ public class DispositionOrchestrationService implements RequestDispositionUseCas
         eventPublisher.publishDispositionRequested(
                 cmd.creditAccountId(), cmd.obligorPartyId(),
                 cmd.amount(), null,
-                cmd.beneficiaryPartyId(), cmd.payeeAccount(), cmd.termPeriods());
+                cmd.beneficiaryPartyId(), cmd.payeeAccount(), cmd.payeeName(), cmd.payeeTaxId(),
+                cmd.termPeriods());
     }
 }

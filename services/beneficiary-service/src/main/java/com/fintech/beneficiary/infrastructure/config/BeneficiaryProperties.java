@@ -67,6 +67,69 @@ public class BeneficiaryProperties {
      */
     private boolean kycSimulationEnabled = false;
 
+    /** La web pública de KYC: liga, OTP y sus topes. Ver {@link PublicKyc}. */
+    private PublicKyc publicKyc = new PublicKyc();
+
+    /**
+     * Las reglas de la superficie pública.
+     *
+     * <p>Los números salen del plan (§6.2) y no son técnicos sino de negocio: cuántas veces se le
+     * puede mandar un código a una persona antes de que parezca acoso, y cuántos intentos se le
+     * dan antes de sospechar que quien teclea no es ella.
+     */
+    public static class PublicKyc {
+
+        /**
+         * A dónde apunta la liga. La web lee el token de {@code ?t=}. En local es el Vite de la
+         * página de KYC; en un ambiente real, el dominio público {@code kyc.*}.
+         */
+        private String linkBaseUrl = "http://localhost:4300/";
+
+        /**
+         * Código OTP fijo, <b>sólo para local</b>. Vacío = códigos aleatorios de verdad. Sin canal de
+         * entrega real (WhatsApp/SMS son noop), es la única forma de recorrer el flujo a mano.
+         */
+        private String devOtpCode;
+
+        /** Vigencia de un código. */
+        private int otpTtlMinutes = 5;
+        /** Envíos permitidos por ventana. */
+        private int maxOtpSends = 3;
+        /** La ventana de los envíos. */
+        private int otpSendWindowMinutes = 15;
+        /** Códigos equivocados antes de congelar la liga. */
+        private int maxOtpFailures = 5;
+        /** Cuánto dura el congelamiento. */
+        private int freezeMinutes = 60;
+        /** Lo que la web espera antes de ofrecer «reenviar código». Informativo: el tope real es maxOtpSends. */
+        private int resendInSeconds = 45;
+
+        public String getLinkBaseUrl() { return linkBaseUrl; }
+        public void setLinkBaseUrl(String v) { this.linkBaseUrl = v; }
+        public String getDevOtpCode() { return devOtpCode; }
+        public void setDevOtpCode(String v) { this.devOtpCode = v; }
+        public int getOtpTtlMinutes() { return otpTtlMinutes; }
+        public void setOtpTtlMinutes(int v) { this.otpTtlMinutes = v; }
+        public int getMaxOtpSends() { return maxOtpSends; }
+        public void setMaxOtpSends(int v) { this.maxOtpSends = v; }
+        public int getOtpSendWindowMinutes() { return otpSendWindowMinutes; }
+        public void setOtpSendWindowMinutes(int v) { this.otpSendWindowMinutes = v; }
+        public int getMaxOtpFailures() { return maxOtpFailures; }
+        public void setMaxOtpFailures(int v) { this.maxOtpFailures = v; }
+        public int getFreezeMinutes() { return freezeMinutes; }
+        public void setFreezeMinutes(int v) { this.freezeMinutes = v; }
+        public int getResendInSeconds() { return resendInSeconds; }
+        public void setResendInSeconds(int v) { this.resendInSeconds = v; }
+
+        /** Si hay código fijo configurado. Un valor en blanco cuenta como «no hay». */
+        public boolean hasDevOtpCode() {
+            return devOtpCode != null && !devOtpCode.isBlank();
+        }
+    }
+
+    public PublicKyc getPublicKyc() { return publicKyc; }
+    public void setPublicKyc(PublicKyc v) { this.publicKyc = v; }
+
     /** Cómo se verifica la identidad. Ver {@link IdentityVerification}. */
     private IdentityVerification identityVerification = new IdentityVerification();
 

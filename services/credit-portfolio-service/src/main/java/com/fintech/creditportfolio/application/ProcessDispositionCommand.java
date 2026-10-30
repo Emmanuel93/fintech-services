@@ -20,6 +20,17 @@ public record ProcessDispositionCommand(
         UUID beneficiaryPartyId,
         String payeeAccount,
         /**
+         * El titular de {@code payeeAccount}: la beneficiaria en una colocación.
+         *
+         * <p>Va con la CLABE porque el destino es la terna (nombre, CLABE, RFC) y no la CLABE sola.
+         * Sin él, el SPEI de una línea de distribuidor llevaba la CLABE de la beneficiaria con el
+         * nombre y el RFC de la distribuidora: el banco receptor puede devolverlo por no coincidir
+         * y el CEP dice que el dinero fue para quien no lo recibió.
+         */
+        String payeeName,
+        /** RFC o CURP del titular de {@code payeeAccount}. Nulo = SPEI sin RFC, que es válido. */
+        String payeeTaxId,
+        /**
          * A cuántos períodos se amortiza esta disposición.
          *
          * <p>Una línea revolvente no tiene un plazo: lo tiene <b>cada disposición</b>. Es la misma

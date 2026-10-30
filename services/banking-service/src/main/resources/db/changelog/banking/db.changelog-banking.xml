@@ -12,5 +12,6 @@
     <include file="db/changelog/banking/005-seed-demo.sql"              relativeToChangelogFile="false"/>
     <include file="db/changelog/banking/006-internal-movements.sql"     relativeToChangelogFile="false"/>
     <include file="db/changelog/banking/007-movement-trace.sql"         relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/008-movement-trace-steps.sql"   relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

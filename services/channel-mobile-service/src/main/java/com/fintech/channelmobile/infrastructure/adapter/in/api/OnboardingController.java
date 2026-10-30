@@ -121,15 +121,15 @@ class OnboardingController {
         // un error del alta y no como lo que era: dos personas distintas con la misma credencial.
         return ResponseEntity.ok(new OcrExtractResponse(
                 true,
-                "EMMANUEL FRANCISCO",
-                "RAMÍREZ",
-                "HERNÁNDEZ",
+                "LAURA",
+                "MÉNDEZ",
+                "SOTO",
                 syntheticCurp(request.frente()),
                 "26/03/1993",
                 "COL. VILLA UNIVERSIDAD, CULIACÁN, SINALOA 80060",
                 "9300326SL0001234",
                 "2031",
-                "H",
+                "M",
                 "Sinaloa",
                 "INE" + Instant.now().toEpochMilli()
         ));
@@ -152,7 +152,7 @@ class OnboardingController {
     private static String syntheticCurp(String ineFrontImage) {
         int hash = Math.abs(java.util.Objects.hashCode(ineFrontImage));
         char[] alphabet = "ABCDEFGHIJKLMNPQRSTUVWXYZ0123456789".toCharArray();
-        return "RAHE930326HSMLRM" + alphabet[hash % alphabet.length] + (hash / 7 % 10);
+        return "MESL930326MSLNTR" + alphabet[hash % alphabet.length] + (hash / 7 % 10);
     }
 
     // ── KYC ───────────────────────────────────────────────────────────────

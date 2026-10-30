@@ -35,23 +35,23 @@ public class AccrualPhaseProcessor implements CloseUnitProcessor {
 
     @Override
     public void process(CloseUnit unit, LocalDate businessDate) {
-        var perfil = profiles.findById(unit.getCreditAccountId())
+        var profile = profiles.findById(unit.getCreditAccountId())
                 .orElseThrow(() -> new CloseRunWorker.UnitSkipped("cuenta sin proyección"));
 
         // Una cuenta liquidada o castigada no devenga. No es un fallo: es que no aplica.
-        if (perfil.isTerminal()) {
-            throw new CloseRunWorker.UnitSkipped("cuenta en estado terminal: " + perfil.getStatus());
+        if (profile.isTerminal()) {
+            throw new CloseRunWorker.UnitSkipped("cuenta en estado terminal: " + profile.getStatus());
         }
-        BigDecimal balance = perfil.getPrincipalBalance();
+        BigDecimal balance = profile.getPrincipalBalance();
         if (balance == null || balance.signum() <= 0) {
             throw new CloseRunWorker.UnitSkipped("sin saldo que devengar");
         }
 
         // Con qué versión de saldo se cerró esta unidad. Es lo que permite después decir si un
         // evento llegó tarde en vez de tener que adivinarlo.
-        unit.setBalanceVersion(perfil.getLastBalanceVersion());
+        unit.setBalanceVersion(profile.getLastBalanceVersion());
 
         publisher.publishUnitWindowOpened(unit.getRunId(), unit.getCreditAccountId(),
-                ClosePhase.ACCRUAL, businessDate, perfil.getProductType());
+                ClosePhase.ACCRUAL, businessDate, profile.getProductType());
     }
 }

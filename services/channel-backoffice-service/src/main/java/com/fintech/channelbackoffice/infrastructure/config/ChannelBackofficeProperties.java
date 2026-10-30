@@ -34,6 +34,14 @@ public class ChannelBackofficeProperties {
     @NotBlank private String auditServiceUrl;
     @NotBlank private String salesOrgServiceUrl;
     @NotBlank private String beneficiaryServiceUrl;
+    /** La mesa de cumplimiento (D16): cola de identidad y listas. */
+    @NotBlank private String complianceServiceUrl;
+    /** Bancos / Tesorería: cuentas propias, rutas de pago y la traza del dinero. */
+    @NotBlank private String bankingServiceUrl;
+    /** Bancos / Tesorería: los pagos salientes y su bitácora. */
+    @NotBlank private String disbursementServiceUrl;
+    /** Bancos / Tesorería: la orden SPEI y su CEP. */
+    @NotBlank private String stpServiceUrl;
 
     /** Segundos de vigencia de los agregados cacheados (resumen del dashboard). */
     @Min(1)
@@ -128,6 +136,17 @@ public class ChannelBackofficeProperties {
 
     public String getBeneficiaryServiceUrl() { return beneficiaryServiceUrl; }
     public void setBeneficiaryServiceUrl(String v) { this.beneficiaryServiceUrl = v; }
+    public String getComplianceServiceUrl() { return complianceServiceUrl; }
+    public void setComplianceServiceUrl(String v) { this.complianceServiceUrl = v; }
+
+    public String getBankingServiceUrl() { return bankingServiceUrl; }
+    public void setBankingServiceUrl(String v) { this.bankingServiceUrl = v; }
+
+    public String getDisbursementServiceUrl() { return disbursementServiceUrl; }
+    public void setDisbursementServiceUrl(String v) { this.disbursementServiceUrl = v; }
+
+    public String getStpServiceUrl() { return stpServiceUrl; }
+    public void setStpServiceUrl(String v) { this.stpServiceUrl = v; }
 
     public String getSalesOrgServiceUrl() { return salesOrgServiceUrl; }
     public void setSalesOrgServiceUrl(String v) { this.salesOrgServiceUrl = v; }

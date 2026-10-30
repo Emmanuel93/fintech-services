@@ -6,6 +6,8 @@ import com.fintech.beneficiary.domain.PlacementStatus;
 import com.fintech.beneficiary.infrastructure.adapter.in.api.dto.PlacementResponse;
 import com.fintech.beneficiary.infrastructure.adapter.out.client.OriginationClient;
 import com.fintech.beneficiary.infrastructure.adapter.out.client.PartyClient;
+import com.fintech.beneficiary.infrastructure.adapter.out.kyc.SyntheticIdentity;
+import com.fintech.beneficiary.application.service.PlacementInviteService;
 import com.fintech.beneficiary.infrastructure.config.BeneficiaryProperties;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -47,15 +49,40 @@ class KycSimulationController {
     private final OriginationClient origination;
     private final PartyClient party;
     private final BeneficiaryProperties props;
+    private final PlacementInviteService inviteService;
 
     KycSimulationController(PlacementLifecycleUseCase lifecycle,
                             OriginationClient origination,
                             PartyClient party,
-                            BeneficiaryProperties props) {
-        this.lifecycle   = lifecycle;
-        this.origination = origination;
-        this.party       = party;
-        this.props       = props;
+                            BeneficiaryProperties props,
+                            PlacementInviteService inviteService) {
+        this.lifecycle     = lifecycle;
+        this.origination   = origination;
+        this.party         = party;
+        this.props         = props;
+        this.inviteService = inviteService;
+    }
+
+    /**
+     * Una liga nueva para abrir la web de KYC a mano.
+     *
+     * <p>Existe porque la entrega por WhatsApp todavía no está en notifications y el token en
+     * claro no se guarda en ningún lado: sin esto no habría forma de obtener una liga que funcione.
+     * Rota — la anterior queda revocada — porque la única copia del token anterior es la que ya
+     * se entregó, y no se puede volver a leer.
+     */
+    @Operation(summary = "Rotar la liga de KYC de una colocación",
+               description = "Revoca la liga viva y devuelve una nueva, con el token en claro. Sólo local.")
+    @PostMapping("/placements/{placementId}/invite-link")
+    ResponseEntity<java.util.Map<String, Object>> inviteLink(@PathVariable UUID placementId) {
+        Placement placement = lifecycle.findById(placementId);
+        var minted = inviteService.mint(placement);
+        log.info("[simulación] liga rotada para la colocación {}", placementId);
+        java.util.Map<String, Object> body = new java.util.LinkedHashMap<>();
+        body.put("link", minted.link());
+        body.put("token", minted.token());
+        body.put("expiresAt", minted.expiresAt());
+        return ResponseEntity.ok(body);
     }
 
     @Operation(summary = "Completar el KYC de la beneficiaria",
@@ -75,13 +102,16 @@ class KycSimulationController {
         }
 
         KycPayload data = body == null ? KycPayload.empty() : body;
-        String[] names = splitName(placement.getBeneficiaryFullName());
-        String curp = data.curp() != null ? data.curp() : syntheticCurp(names, placement.getBeneficiaryPhone());
+        // La misma identidad sintética que produce el OCR stub de la web: una persona simulada y
+        // la misma persona por la liga tienen que verse idénticas ante origination.
+        String[] names = SyntheticIdentity.splitName(placement.getBeneficiaryFullName());
+        String curp = data.curp() != null ? data.curp()
+                : SyntheticIdentity.syntheticCurp(names, placement.getBeneficiaryPhone());
 
         var prospect = origination.createIndividualProspect(new OriginationClient.NewProspect(
                 names[0], names[1], names[2],
                 curp,
-                data.rfc() != null ? data.rfc() : rfcFrom(curp),
+                data.rfc() != null ? data.rfc() : SyntheticIdentity.rfcFrom(curp),
                 data.dateOfBirth() != null ? data.dateOfBirth() : "1990-06-12",
                 data.gender() != null ? data.gender() : "FEMALE",
                 data.stateOfBirth() != null ? data.stateOfBirth() : "Ciudad de México",
@@ -94,7 +124,9 @@ class KycSimulationController {
                 data.city() != null ? data.city() : "Ciudad de México",
                 data.state() != null ? data.state() : "Ciudad de México",
                 data.postalCode() != null ? data.postalCode() : "03020",
-                "Kredius#Beneficiaria2026"));
+                "Kredius#Beneficiaria2026"),
+                // El simulador representa el flujo conversacional del diseño; la web usa WEB.
+                "WHATSAPP");
 
         // El Party nace de un evento de Kafka, así que puede tardar un instante en existir.
         var partyRow = party.awaitByProspect(prospect.prospectId(), 15, 400)
@@ -111,76 +143,6 @@ class KycSimulationController {
         log.info("[simulación] colocación {} lista para decisión — prospecto {} party {}",
                 placementId, prospect.prospectId(), partyRow.partyId());
         return ResponseEntity.ok(PlacementResponse.from(ready));
-    }
-
-    private static String[] splitName(String full) {
-        String[] parts = full == null ? new String[0] : full.trim().split("\\s+");
-        return switch (parts.length) {
-            case 0 -> new String[]{"Beneficiaria", "Sin", "Apellido"};
-            case 1 -> new String[]{parts[0], "Sin", "Apellido"};
-            case 2 -> new String[]{parts[0], parts[1], "Sin"};
-            case 3 -> new String[]{parts[0], parts[1], parts[2]};
-            default -> new String[]{parts[0] + " " + parts[1], parts[2], parts[3]};
-        };
-    }
-
-    /**
-     * CURP con la forma que exige origination; no pretende ser la real de nadie.
-     *
-     * <p>Se quitan acentos antes de armarla: «Díaz» produciría una Í y el patrón sólo acepta
-     * A-Z. Es el mismo saneo que haría un OCR de verdad al leer la credencial.
-     */
-    private static String syntheticCurp(String[] names, String phone) {
-        String paterno = ascii(names[1]);
-        String materno = ascii(names[2]);
-        String name  = ascii(names[0]);
-        String initials = letter(paterno, 0) + vowel(paterno) + letter(materno, 0) + letter(name, 0);
-        // AAAAdddddd H|M EE CCC d — 18 posiciones exactas.
-        return (initials + "900612" + "MDF"
-                + letter(paterno, 1) + letter(materno, 1) + letter(name, 1)
-                + phone.charAt(8) + phone.charAt(9)).toUpperCase();
-    }
-
-    /**
-     * RFC de persona física a partir de la CURP: sus diez primeras posiciones más homoclave.
-     *
-     * <p>Las tres de la homoclave las calcula el SAT; aquí se derivan de la propia CURP para que
-     * sean estables entre reintentos — un RFC que cambia en cada llamada rompería la
-     * idempotencia del alta.
-     */
-    private static String rfcFrom(String curp) {
-        String base = curp.substring(0, 10);
-        int hash = Math.abs(curp.hashCode());
-        char[] alphabet = "ABCDEFGHIJKLMNPQRSTUVWXYZ".toCharArray();
-        return base + alphabet[hash % alphabet.length]
-                    + (hash / 10 % 10)
-                    + alphabet[(hash / 100) % alphabet.length];
-    }
-
-    /** Sin acentos, sin ñ y sin nada que no sea una letra del alfabeto inglés. */
-    private static String ascii(String s) {
-        if (s == null || s.isBlank()) return "X";
-        String normalized = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD)
-                .replaceAll("\\p{M}", "")
-                .replace("Ñ", "X").replace("ñ", "x")
-                .replaceAll("[^A-Za-z]", "");
-        return normalized.isBlank() ? "X" : normalized.toUpperCase();
-    }
-
-    /** La i-ésima letra, o X si no la hay. Ya viene saneada por {@link #ascii(String)}. */
-    private static String letter(String s, int i) {
-        return s != null && s.length() > i ? String.valueOf(s.charAt(i)).toUpperCase() : "X";
-    }
-
-    /** Primera vocal interna del apellido — la tercera posición de una CURP real. */
-    private static String vowel(String s) {
-        if (s == null || s.length() < 2) return "X";
-        for (char c : s.substring(1).toCharArray()) {
-            if ("AEIOU".indexOf(Character.toUpperCase(c)) >= 0) {
-                return String.valueOf(Character.toUpperCase(c));
-            }
-        }
-        return "X";
     }
 
     private static String syntheticClabe() {

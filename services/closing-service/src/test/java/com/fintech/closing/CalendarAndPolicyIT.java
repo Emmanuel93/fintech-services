@@ -54,7 +54,7 @@ class CalendarAndPolicyIT {
                     + "org.redisson.spring.starter.RedissonAutoConfigurationV2");
     }
 
-    @Autowired BusinessCalendarService calendario;
+    @Autowired BusinessCalendarService calendar;
     @Autowired ClosePolicyResolver resolver;
     @Autowired CalendarDayRepository calendarDays;
     @Autowired JdbcTemplate jdbc;
@@ -66,36 +66,36 @@ class CalendarAndPolicyIT {
     void reglaGeneralSinCargarElAño() {
         // La tabla guarda sólo excepciones: un calendario nuevo funciona desde el primer día sin
         // tener que sembrarle 365 filas antes de poder cerrar nada.
-        assertThat(calendario.isBusinessDay("MX", LocalDate.of(2026, 8, 24))).isTrue();   // lunes
-        assertThat(calendario.isBusinessDay("MX", LocalDate.of(2026, 8, 22))).isFalse();  // sábado
-        assertThat(calendario.isBusinessDay("MX", LocalDate.of(2026, 8, 23))).isFalse();  // domingo
+        assertThat(calendar.isBusinessDay("MX", LocalDate.of(2026, 8, 24))).isTrue();   // lunes
+        assertThat(calendar.isBusinessDay("MX", LocalDate.of(2026, 8, 22))).isFalse();  // sábado
+        assertThat(calendar.isBusinessDay("MX", LocalDate.of(2026, 8, 23))).isFalse();  // domingo
     }
 
     @Test
     @DisplayName("un festivo cargado gana sobre la regla general")
     void elFestivoGana() {
         LocalDate independencia = LocalDate.of(2026, 9, 16);   // miércoles
-        assertThat(calendario.isBusinessDay("MX", independencia)).isTrue();
+        assertThat(calendar.isBusinessDay("MX", independencia)).isTrue();
 
         calendarDays.save(CalendarDay.of("MX", independencia, false, "Independencia"));
 
-        assertThat(calendario.isBusinessDay("MX", independencia)).isFalse();
+        assertThat(calendar.isBusinessDay("MX", independencia)).isFalse();
     }
 
     @Test
     @DisplayName("un corte en domingo se corre según la política del producto")
-    void elCorteEnDomingoSeCorre() {
+    void asundayCutoffShifts() {
         LocalDate domingo = LocalDate.of(2026, 8, 23);
 
-        assertThat(calendario.shift("MX", domingo, NonBusinessDayShift.NEXT))
+        assertThat(calendar.shift("MX", domingo, NonBusinessDayShift.NEXT))
                 .as("NEXT: al lunes; no se le cobra al cliente un día que no operó")
                 .isEqualTo(LocalDate.of(2026, 8, 24));
 
-        assertThat(calendario.shift("MX", domingo, NonBusinessDayShift.PREV))
+        assertThat(calendar.shift("MX", domingo, NonBusinessDayShift.PREV))
                 .as("PREV: al viernes; se usa cuando el corte no puede cruzar el fin de mes")
                 .isEqualTo(LocalDate.of(2026, 8, 21));
 
-        assertThat(calendario.shift("MX", domingo, NonBusinessDayShift.NONE))
+        assertThat(calendar.shift("MX", domingo, NonBusinessDayShift.NONE))
                 .as("NONE: se queda; el devengo no necesita que el banco abra")
                 .isEqualTo(domingo);
     }
@@ -104,16 +104,16 @@ class CalendarAndPolicyIT {
     @DisplayName("un día hábil no se mueve aunque la regla sea NEXT")
     void elHabilNoSeMueve() {
         LocalDate lunes = LocalDate.of(2026, 8, 24);
-        assertThat(calendario.shift("MX", lunes, NonBusinessDayShift.NEXT)).isEqualTo(lunes);
+        assertThat(calendar.shift("MX", lunes, NonBusinessDayShift.NEXT)).isEqualTo(lunes);
     }
 
     @Test
     @DisplayName("sumar días hábiles salta el fin de semana")
     void sumarHabiles() {
         // Viernes + 3 hábiles = miércoles, no lunes.
-        assertThat(calendario.plusBusinessDays("MX", LocalDate.of(2026, 8, 21), 3))
+        assertThat(calendar.plusBusinessDays("MX", LocalDate.of(2026, 8, 21), 3))
                 .isEqualTo(LocalDate.of(2026, 8, 26));
-        assertThat(calendario.businessDaysBetween("MX",
+        assertThat(calendar.businessDaysBetween("MX",
                 LocalDate.of(2026, 8, 21), LocalDate.of(2026, 8, 26))).isEqualTo(3);
     }
 
@@ -130,7 +130,7 @@ class CalendarAndPolicyIT {
 
     @Test
     @DisplayName("un producto sin política propia cae a la global")
-    void sinPoliticaPropiaCaeAGlobal() {
+    void withoutItsOwnPolicyItFallsBackToGlobal() {
         ClosePolicy p = resolver.require(null, "PRODUCTO_QUE_NO_EXISTE", LocalDate.of(2026, 8, 24));
 
         assertThat(p.scopeType()).isEqualTo(ClosePolicy.ScopeType.GLOBAL);
@@ -181,7 +181,7 @@ class CalendarAndPolicyIT {
 
     @Test
     @DisplayName("sin política vigente se falla explícito, no se inventa una por defecto")
-    void sinPoliticaFallaExplicito() {
+    void withoutApolicyItFailsLoudly() {
         // Inventarle un default a un producto que no la declaró es cómo se acaba devengando con
         // una convención que nadie eligió.
         jdbc.update("UPDATE closing.close_cycle_policies SET status = 'RETIRED' WHERE scope_type = 'GLOBAL'");
@@ -196,7 +196,7 @@ class CalendarAndPolicyIT {
 
     @Test
     @DisplayName("las fases del producto se leen tipadas y en orden")
-    void fasesTipadas() {
+    void typedPhases() {
         ClosePolicy p = resolver.require(null, "CREDIT_CARD", LocalDate.of(2026, 8, 24));
 
         assertThat(p.phaseList()).startsWith(ClosePhase.RECONCILE, ClosePhase.ACCRUAL);

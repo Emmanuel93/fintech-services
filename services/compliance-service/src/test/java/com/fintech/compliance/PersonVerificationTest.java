@@ -81,12 +81,98 @@ class PersonVerificationTest {
     private Repo repo;
     private Publisher publisher;
     private Journal journal;
+    /** Lo que party contestaría hoy: prospecto → Party. Vacío = el Party todavía no existe. */
+    private Map<UUID, UUID> partiesKnown;
 
     @BeforeEach
-    void setUp() { repo = new Repo(); publisher = new Publisher(); journal = new Journal(); }
+    void setUp() {
+        repo = new Repo(); publisher = new Publisher(); journal = new Journal();
+        partiesKnown = new LinkedHashMap<>();
+    }
 
     private PersonVerificationService serviceWith(Lists lists) {
-        return new PersonVerificationService(repo, new ScreeningService(lists, 0.85), publisher, journal);
+        return new PersonVerificationService(repo, new ScreeningService(lists, 0.85), publisher, journal,
+                prospect -> Optional.ofNullable(partiesKnown.get(prospect)));
+    }
+
+    private ScreeningSubject withoutParty(String name) {
+        return new ScreeningSubject(null, name, LocalDate.of(1985, 3, 12), null, null, "MX");
+    }
+
+    // ── El veredicto llega con su Party, aunque se haya evaluado antes de que existiera ─────────
+
+    @Test
+    @DisplayName("en el alta el Party aún no existe: el veredicto sale sin él, como antes")
+    void atOnboardingThePartyIsUsuallyUnknown() {
+        var v = serviceWith(new Lists()).evaluateNewPerson(withoutParty("ROSA DIAZ FUENTES"), PROSPECT_ID);
+
+        assertThat(v.getPartyId()).isNull();
+        assertThat(publisher.completados).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("si party ya lo creó al evaluar, el veredicto sale con su Party")
+    void ifPartyAlreadyExistsTheVerdictCarriesIt() {
+        partiesKnown.put(PROSPECT_ID, PARTY);
+
+        var v = serviceWith(new Lists()).evaluateNewPerson(withoutParty("ROSA DIAZ FUENTES"), PROSPECT_ID);
+
+        assertThat(v.getPartyId()).isEqualTo(PARTY);
+    }
+
+    @Test
+    @DisplayName("el dictamen de identidad completa el Party que faltaba y republica con él")
+    void theIdentityVerdictAttachesTheMissingParty() {
+        var service = serviceWith(new Lists());
+        var v = service.evaluateNewPerson(withoutParty("ROSA DIAZ FUENTES"), PROSPECT_ID);
+        partiesKnown.put(PROSPECT_ID, PARTY);   // minutos después, party ya lo creó
+
+        var dictaminada = service.adjudicateIdentity(v.getVerificationId(), IdentityStatus.VERIFIED,
+                "analista-1", "INE y selfie coinciden");
+
+        // Sin esto credit-portfolio descartaba el veredicto y la disposición quedaba bloqueada
+        // «sin veredicto» para siempre, aun con la identidad comprobada.
+        assertThat(dictaminada.getPartyId()).isEqualTo(PARTY);
+        assertThat(publisher.completados).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("adjudicar listas también completa el Party")
+    void clearingListsAttachesTheMissingPartyToo() {
+        var service = serviceWith(new Lists().sanctioning("ROSA DIAZ FUENTES"));
+        var v = service.evaluateNewPerson(withoutParty("ROSA DIAZ FUENTES"), PROSPECT_ID);
+        partiesKnown.put(PROSPECT_ID, PARTY);
+
+        var despejada = service.adjudicateScreening(v.getVerificationId(), ScreeningStatus.CLEARED,
+                "cumplimiento-1", "homónimo: otra fecha de nacimiento");
+
+        assertThat(despejada.getPartyId()).isEqualTo(PARTY);
+    }
+
+    @Test
+    @DisplayName("la evaluación bajo demanda no reevalúa, pero sí completa y republica el Party declarado")
+    void onDemandAttachesTheDeclaredPartyWithoutReevaluating() {
+        var service = serviceWith(new Lists());
+        service.evaluateNewPerson(withoutParty("ROSA DIAZ FUENTES"), PROSPECT_ID);
+
+        var otra = service.evaluateOnDemand(subject("ROSA DIAZ FUENTES"), PROSPECT_ID);
+
+        assertThat(otra.getPartyId()).isEqualTo(PARTY);
+        assertThat(publisher.completados).isEqualTo(2);
+        assertThat(journal.rows).as("no se volvió a consultar listas").hasSize(1);
+    }
+
+    @Test
+    @DisplayName("un Party ya conocido nunca se sobrescribe con otro")
+    void aKnownPartyIsNeverReplaced() {
+        var service = serviceWith(new Lists());
+        var v = service.evaluateNewPerson(subject("ROSA DIAZ FUENTES"), PROSPECT_ID);
+        partiesKnown.put(PROSPECT_ID, UUID.randomUUID());
+
+        var dictaminada = service.adjudicateIdentity(v.getVerificationId(), IdentityStatus.VERIFIED,
+                "analista-1", "INE y selfie coinciden");
+
+        assertThat(dictaminada.getPartyId()).isEqualTo(PARTY);
     }
 
     private ScreeningSubject subject(String name) {

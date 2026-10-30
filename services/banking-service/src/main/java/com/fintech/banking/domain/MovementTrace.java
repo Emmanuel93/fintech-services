@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -28,6 +29,15 @@ public class MovementTrace {
     @Id
     @Column(name = "trace_id", nullable = false, updatable = false)
     private UUID id;
+
+    /**
+     * Cada tramo llega por un topic distinto, y dos pueden tocar la misma traza a la vez. Sin
+     * versión, el que confirma segundo reescribe la fila con lo que leyó antes y borra el tramo del
+     * otro; con ella, pierde y se reintenta sobre lo que ya hay.
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
 
     @Column(name = "source_system", length = 40)
     private String sourceSystem;
@@ -71,6 +81,23 @@ public class MovementTrace {
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
+    // Cuándo llegó cada tramo. Que un tramo exista dice que pasó; cuándo, dice dónde buscar.
+    @Column(name = "routed_at")
+    private OffsetDateTime routedAt;
+
+    @Column(name = "dispatched_at")
+    private OffsetDateTime dispatchedAt;
+
+    /** La liquidación que confirma el conector. Informativa: no es un eslabón de {@link #isComplete()}. */
+    @Column(name = "settled_at")
+    private OffsetDateTime settledAt;
+
+    @Column(name = "reconciled_at")
+    private OffsetDateTime reconciledAt;
+
+    @Column(name = "posted_at")
+    private OffsetDateTime postedAt;
+
     protected MovementTrace() {}
 
     public static MovementTrace open(UUID payoutId, String sourceSystem, String sourceReference,
@@ -89,32 +116,97 @@ public class MovementTrace {
         return t;
     }
 
-    /** Tesorería eligió cuenta: el pago ya sabe por dónde sale. */
+    /**
+     * Completa el origen con lo que el tramo actual sabe y el que abrió la traza no.
+     *
+     * <p>La traza la puede abrir el despacho al conector, que habla vocabulario de pagos y no sabe
+     * de qué crédito viene. Cuando llega el hecho que sí lo sabe, se rellena lo que falta —<b>nunca
+     * se pisa</b> lo que ya estaba—: el primero que lo dijo es el que manda.
+     */
+    public void describeOrigin(String sourceSystem, String sourceReference,
+                               UUID creditAccountId, BigDecimal amount) {
+        if (this.sourceSystem == null)    this.sourceSystem    = sourceSystem;
+        if (this.sourceReference == null) this.sourceReference = sourceReference;
+        if (this.creditAccountId == null) this.creditAccountId = creditAccountId;
+        if (this.amount == null)          this.amount          = amount;
+        this.updatedAt = OffsetDateTime.now();
+    }
+
+    /**
+     * Tesorería eligió cuenta: el pago ya sabe por dónde sale.
+     *
+     * <p>Un reintento antes de salir a la red puede re-rutear, y gana la última cuenta. Ya
+     * despachado, no: un despacho reentregado tarde no puede regresar la traza a {@code ROUTED} ni
+     * cambiar la cuenta por la que el dinero ya salió.
+     */
     public void routed(UUID bankAccountId, String eventId) {
+        if (trackingKey != null && this.bankAccountId != null) {
+            return;
+        }
         this.bankAccountId = bankAccountId;
-        this.status        = "ROUTED";
+        this.routedAt      = OffsetDateTime.now();
+        if (trackingKey == null) {
+            this.status = "ROUTED";
+        }
         advance(eventId);
     }
 
-    /** El conector le asignó clave de rastreo: el pago salió a la red. */
+    /**
+     * El conector le asignó clave de rastreo: el pago salió a la red.
+     *
+     * <p>Lo pueden decir dos hechos —la aceptación del proveedor y su liquidación— y el segundo
+     * sólo completa lo que el primero no traía (la fecha de operación). La clave de una orden no
+     * cambia, así que la primera que llega es la buena.
+     */
     public void dispatched(String trackingKey, LocalDate businessDate, String eventId) {
+        if (this.trackingKey != null) {
+            if (this.businessDate == null && businessDate != null) {
+                this.businessDate = businessDate;
+                advance(eventId);
+            }
+            return;
+        }
         this.trackingKey  = trackingKey;
         this.businessDate = businessDate;
-        this.status       = "DISPATCHED";
+        this.dispatchedAt = OffsetDateTime.now();
+        if (!isPastDispatch()) {
+            this.status = "DISPATCHED";
+        }
+        advance(eventId);
+    }
+
+    /**
+     * El conector confirmó la liquidación. No cierra la cadena —eso lo hace el estado de cuenta—,
+     * pero separa «el banco aún no lo reporta» de «el dinero aún no llega».
+     */
+    public void settled(OffsetDateTime when, String eventId) {
+        if (this.settledAt != null) {
+            return;
+        }
+        this.settledAt = when != null ? when : OffsetDateTime.now();
+        if (!"RECONCILED".equals(status) && !"RETURNED".equals(status)) {
+            this.status = "SETTLED";
+        }
         advance(eventId);
     }
 
     /** El banco lo reporta en el estado de cuenta: el dinero existe fuera de nuestros registros. */
     public void reconciled(UUID lineId, String eventId) {
-        this.lineId = lineId;
-        this.status = "RECONCILED";
+        this.lineId       = lineId;
+        this.reconciledAt = OffsetDateTime.now();
+        this.status       = "RECONCILED";
         advance(eventId);
     }
 
     /** El mayor lo asentó. Es el último eslabón: de aquí sale el número que va a un estado financiero. */
     public void posted(String voucherRef, String eventId) {
         this.voucherRef = voucherRef;
+        this.postedAt   = OffsetDateTime.now();
         advance(eventId);
+    }
+
+    private boolean isPastDispatch() {
+        return "SETTLED".equals(status) || "RECONCILED".equals(status) || "RETURNED".equals(status);
     }
 
     public void returned(String eventId) {
@@ -159,4 +251,10 @@ public class MovementTrace {
     public BigDecimal getAmount()     { return amount; }
     public LocalDate getBusinessDate(){ return businessDate; }
     public String getStatus()         { return status; }
+    public OffsetDateTime getCreatedAt()    { return createdAt; }
+    public OffsetDateTime getRoutedAt()     { return routedAt; }
+    public OffsetDateTime getDispatchedAt() { return dispatchedAt; }
+    public OffsetDateTime getSettledAt()    { return settledAt; }
+    public OffsetDateTime getReconciledAt() { return reconciledAt; }
+    public OffsetDateTime getPostedAt()     { return postedAt; }
 }

@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -31,11 +32,23 @@ public class MovementTraceService {
 
     public MovementTraceService(MovementTraceRepository repo) { this.repo = repo; }
 
+    /**
+     * Abre la traza del pago, o completa su origen si ya estaba abierta.
+     *
+     * <p>Idempotente: reabrir no duplica. Pero tampoco es un no-op — la traza la puede abrir el
+     * despacho al conector, que no sabe de qué crédito viene, y es el hecho de disbursement el que
+     * trae {@code creditAccountId}. Sin completarlo, «este crédito, ¿por dónde salió su dinero?»
+     * no encontraría el pago.
+     */
     @Transactional
     public void onRequest(UUID payoutId, String sourceSystem, String sourceReference,
                             UUID creditAccountId, BigDecimal amount, String eventId) {
         repo.findByPayoutId(payoutId).ifPresentOrElse(
-                t -> log.debug("La traza del pago {} ya existía — idempotente", payoutId),
+                t -> {
+                    log.debug("La traza del pago {} ya existía — se completa su origen", payoutId);
+                    t.describeOrigin(sourceSystem, sourceReference, creditAccountId, amount);
+                    repo.save(t);
+                },
                 () -> repo.save(MovementTrace.open(payoutId, sourceSystem, sourceReference,
                         creditAccountId, amount, eventId)));
     }
@@ -48,6 +61,12 @@ public class MovementTraceService {
     @Transactional
     public void onDispatch(UUID payoutId, String trackingKey, LocalDate businessDate, String eventId) {
         trace(payoutId).ifPresent(t -> { t.dispatched(trackingKey, businessDate, eventId); repo.save(t); });
+    }
+
+    /** El conector confirmó la liquidación. Informativo: el eslabón que cierra es el del banco. */
+    @Transactional
+    public void onSettle(UUID payoutId, OffsetDateTime settledAt, String eventId) {
+        trace(payoutId).ifPresent(t -> { t.settled(settledAt, eventId); repo.save(t); });
     }
 
     /**
@@ -73,6 +92,16 @@ public class MovementTraceService {
     @Transactional(readOnly = true)
     public List<MovementTrace> byCreditAccount(UUID creditAccountId) {
         return repo.findByCreditAccountId(creditAccountId);
+    }
+
+    /**
+     * «Este pago, ¿en qué eslabón va?» — por el id del pago, que es la única llave presente desde
+     * el primer tramo. Por clave de rastreo no se encuentra un pago que aún no sale a la red, y por
+     * crédito tampoco uno cuyo origen todavía no llega.
+     */
+    @Transactional(readOnly = true)
+    public Optional<MovementTrace> byPayout(UUID payoutId) {
+        return repo.findByPayoutId(payoutId);
     }
 
     /** «Esta clave de rastreo, ¿de qué crédito era?» */

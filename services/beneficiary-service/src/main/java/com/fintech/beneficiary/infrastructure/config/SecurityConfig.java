@@ -20,8 +20,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  *       distribuidor, detrás del JWT que valida el gateway y que llega como {@code X-User-Id}.</li>
  *   <li><b>Pública</b> ({@code /api/v1/beneficiary/public/**}) — la beneficiaria, sin JWT y sin
  *       cuenta. Está en {@code permitAll} porque Spring Security no tiene nada que validar aquí:
- *       la credencial es el token de invitado de la liga, y quien lo revisa es el filtro de token
- *       de la fase 2, no esta cadena. Marcarlo {@code authenticated()} rompería el flujo entero;
+ *       la credencial es el token de la liga o el de sesión ({@code X-Kyc-Session}), y quien los
+ *       revisa es {@code GuestSessionGuard}, no esta cadena. Marcarlo {@code authenticated()} rompería el flujo entero;
  *       dejarlo abierto sin ese filtro dejaría el servicio abierto de par en par.</li>
  * </ul>
  */

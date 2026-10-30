@@ -1,6 +1,7 @@
 package com.fintech.closing.domain;
 
 import java.time.LocalDate;
+import java.util.Optional;
 
 /**
  * La cadencia de pago del producto, y cómo avanza una fecha.
@@ -23,13 +24,23 @@ public enum PaymentCadence {
 
     public abstract LocalDate advance(LocalDate from, int periods);
 
-    /** Mensual por defecto: es lo que hace cartera cuando el producto no la declara. */
-    public static PaymentCadence from(String value) {
-        if (value == null || value.isBlank()) return MONTHLY;
+    /**
+     * La cadencia declarada, o <b>vacío si no hay ninguna reconocible</b>.
+     *
+     * <p>Antes devolvía {@code MONTHLY} ante nulo <b>y</b> ante basura, con lo que «no configurado» y
+     * «configurado mensual» producían el mismo resultado siendo hechos distintos. Un producto
+     * configurado semanal cuyo perfil llegara sin el dato cortaba mensual y <b>nada fallaba</b>.
+     *
+     * <p>Devolver {@code Optional} obliga al llamador a decidir qué hace con la ausencia — y lo que
+     * hace es caer a mensual <b>diciéndolo en el log</b>, que es distinto de caer en silencio.
+     */
+    public static Optional<PaymentCadence> parse(String value) {
+        if (value == null || value.isBlank()) return Optional.empty();
         return switch (value.trim().toUpperCase()) {
-            case "WEEKLY"   -> WEEKLY;
-            case "BIWEEKLY" -> BIWEEKLY;
-            default          -> MONTHLY;
+            case "WEEKLY"   -> Optional.of(WEEKLY);
+            case "BIWEEKLY" -> Optional.of(BIWEEKLY);
+            case "MONTHLY"  -> Optional.of(MONTHLY);
+            default          -> Optional.empty();
         };
     }
 }

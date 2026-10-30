@@ -11,6 +11,17 @@ import com.fintech.beneficiary.domain.Placement;
 import com.fintech.beneficiary.domain.PlacementStatus;
 import com.fintech.beneficiary.domain.PlacementTransition;
 import com.fintech.beneficiary.infrastructure.adapter.in.api.dto.BackofficePlacementResponse;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fintech.beneficiary.application.KycData;
+import com.fintech.beneficiary.application.port.out.ConsentRecordRepository;
+import com.fintech.beneficiary.application.port.out.KycDocumentRepository;
+import com.fintech.beneficiary.application.port.out.KycSessionRepository;
+import com.fintech.beneficiary.domain.KycDocumentSummary;
+import com.fintech.beneficiary.domain.KycDocumentType;
+import com.fintech.beneficiary.domain.KycSession;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -53,17 +64,29 @@ class BackofficePlacementController {
     private final PlacementTransitionRepository transitions;
     private final IdentityVerificationGateway verificationGateway;
     private final KycPolicyResolver kycPolicyResolver;
+    private final KycDocumentRepository kycDocuments;
+    private final KycSessionRepository kycSessions;
+    private final ConsentRecordRepository consentRecords;
+    private final ObjectMapper objectMapper;
 
     BackofficePlacementController(PlacementQueryRepository placementQuery,
                                   PlacementLifecycleUseCase placementLifecycle,
                                   PlacementTransitionRepository transitions,
                                   IdentityVerificationGateway verificationGateway,
-                                  KycPolicyResolver kycPolicyResolver) {
+                                  KycPolicyResolver kycPolicyResolver,
+                                  KycDocumentRepository kycDocuments,
+                                  KycSessionRepository kycSessions,
+                                  ConsentRecordRepository consentRecords,
+                                  ObjectMapper objectMapper) {
         this.placementQuery      = placementQuery;
         this.placementLifecycle  = placementLifecycle;
         this.transitions         = transitions;
         this.verificationGateway = verificationGateway;
         this.kycPolicyResolver   = kycPolicyResolver;
+        this.kycDocuments        = kycDocuments;
+        this.kycSessions         = kycSessions;
+        this.consentRecords      = consentRecords;
+        this.objectMapper        = objectMapper;
     }
 
     @Operation(summary = "Bandeja de colocaciones — todos los filtros opcionales",
@@ -118,14 +141,101 @@ class BackofficePlacementController {
         body.put("placement", BackofficePlacementResponse.from(placement, now));
         body.put("timeline", transitions.findByPlacementIdOrderByOccurredAtAsc(placementId).stream()
                 .map(BackofficePlacementController::timelineEntry).toList());
-        // La captura granular de identidad —coincidencia facial, prueba de vida, cotejo
-        // INE/RENAPO— todavía no existe en este servicio. Se declara ausente en vez de omitirse
-        // para que la consola pueda decir «pendiente» en lugar de dibujar una sección vacía que
-        // parece un error.
-        body.put("identityEvidence", Map.of(
-                "available", false,
-                "reason", "La captura de identidad del beneficiario aún no está implementada"));
+        body.put("identityEvidence", identityEvidence(placementId));
         return ResponseEntity.ok(body);
+    }
+
+    @Operation(summary = "Ver un documento del KYC web",
+               description = "Los bytes con su tipo de contenido, para abrirlo en la ficha (`inline`).")
+    @ApiResponse(responseCode = "404", description = "La beneficiaria no entregó ese documento")
+    @GetMapping("/{placementId}/documents/{documentType}/file")
+    ResponseEntity<byte[]> document(@PathVariable UUID placementId,
+                                    @PathVariable KycDocumentType documentType) {
+        return kycDocuments.findByPlacementIdAndDocumentType(placementId, documentType)
+                .map(d -> ResponseEntity.ok()
+                        .contentType(MediaType.parseMediaType(d.getContentType()))
+                        // `inline`: se abre junto a lo capturado. Quien dictamina compara la foto
+                        // contra los datos; no colecciona credenciales en su carpeta de descargas.
+                        .header(HttpHeaders.CONTENT_DISPOSITION,
+                                "inline; filename=\"" + documentType.name().toLowerCase() + "\"")
+                        .header(HttpHeaders.CACHE_CONTROL, "no-store")
+                        .body(d.getContent()))
+                .orElseGet(() -> ResponseEntity.notFound().build());
+    }
+
+    /**
+     * Lo que el analista compara para dictaminar: las fotos, lo que ella capturó y lo que firmó.
+     *
+     * <p>No hay proveedor —ni OCR, ni prueba de vida, ni RENAPO—: la evidencia es la captura misma,
+     * y el cotejo lo hace una persona. Sin capturas se declara ausente con su motivo en vez de
+     * omitirse, para que la consola diga «pendiente» y no dibuje una sección vacía que parece un
+     * error.
+     */
+    private Map<String, Object> identityEvidence(UUID placementId) {
+        List<KycDocumentSummary> docs = kycDocuments.summariesFor(placementId);
+        Map<String, Object> evidence = new LinkedHashMap<>();
+        evidence.put("available", !docs.isEmpty());
+        if (docs.isEmpty()) {
+            evidence.put("reason", "La beneficiaria todavía no ha entregado documentos en la web de KYC");
+        }
+        evidence.put("documents", docs.stream().map(d -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("documentType", d.documentType().name());
+            m.put("contentType", d.contentType());
+            m.put("sizeBytes", d.sizeBytes());
+            m.put("uploadedAt", d.uploadedAt());
+            return m;
+        }).toList());
+        evidence.put("captured", kycSessions.findFirstByPlacementIdOrderByCreatedAtDesc(placementId)
+                .map(KycSession::getCapturedData)
+                .map(this::capturedView)
+                .orElse(null));
+        evidence.put("consents", consentRecords.findByPlacementIdOrderByAcceptedAtAsc(placementId).stream()
+                .map(c -> {
+                    Map<String, Object> m = new LinkedHashMap<>();
+                    m.put("consentType", c.getConsentType().name());
+                    m.put("textVersion", c.getTextVersion());
+                    m.put("acceptedAt", c.getAcceptedAt());
+                    m.put("ipAddress", c.getIpAddress());
+                    return m;
+                }).toList());
+        return evidence;
+    }
+
+    /**
+     * Lo capturado, con la CLABE enmascarada. Para cotejar identidad basta saber que la hay y a
+     * qué banco va; los 18 dígitos completos son un dato de pago, no de identidad.
+     */
+    private Map<String, Object> capturedView(String json) {
+        KycData d;
+        try {
+            d = objectMapper.readValue(json, KycData.class);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("firstName", d.firstName());
+        m.put("lastName1", d.lastName1());
+        m.put("lastName2", d.lastName2());
+        m.put("curp", d.curp());
+        m.put("rfc", d.rfc());
+        m.put("dateOfBirth", d.dateOfBirth());
+        m.put("occupation", d.occupation());
+        m.put("monthlyIncome", d.monthlyIncome());
+        m.put("street", d.street());
+        m.put("exteriorNumber", d.exteriorNumber());
+        m.put("neighborhood", d.neighborhood());
+        m.put("municipality", d.municipality());
+        m.put("city", d.city());
+        m.put("state", d.state());
+        m.put("postalCode", d.postalCode());
+        m.put("clabeMasked", maskClabe(d.clabe()));
+        return m;
+    }
+
+    static String maskClabe(String clabe) {
+        if (clabe == null || clabe.length() < 4) return null;
+        return clabe.substring(0, 3) + " •••• •••• ••• " + clabe.substring(clabe.length() - 4);
     }
 
     @Operation(summary = "Dictaminar la identidad de una beneficiaria",

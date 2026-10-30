@@ -22,4 +22,20 @@ public interface DisbursementOrderRepository {
     List<DisbursementOrder> lockDueForDispatch(int batchSize);
 
     List<DisbursementOrder> findByCompany(UUID companyId, int page, int size);
+
+    /**
+     * La consulta de tesorería: de un crédito, o por beneficiario o clave de rastreo, del más nuevo
+     * al más viejo. Los dos filtros son opcionales; vacíos, todas.
+     *
+     * @param creditAccountId el crédito tal como lo devuelve el eco de {@code sourceMetadata}
+     * @param q fragmento del nombre del beneficiario o de la clave de rastreo
+     */
+    OrderPage search(UUID creditAccountId, String q, int page, int size);
+
+    /** Una página de órdenes con su total, para que la pantalla sepa cuántas hay sin traerlas. */
+    record OrderPage(List<DisbursementOrder> content, int page, int size, long totalElements) {
+        public int totalPages() {
+            return size <= 0 ? 0 : (int) ((totalElements + size - 1) / size);
+        }
+    }
 }

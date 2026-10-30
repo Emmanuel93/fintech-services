@@ -9,7 +9,7 @@ class ClosePhaseTest {
 
     @Test
     @DisplayName("RECONCILE va primero: nada depende de una fase anterior")
-    void reconcileEsLaPrimera() {
+    void reconcileComesFirst() {
         // Devengar sobre una bitácora con huecos produce un número equivocado que después hay que
         // perseguir por toda la cadena. Conciliar primero cuesta una fase; después, un reproceso.
         assertThat(ClosePhase.RECONCILE.isFirst()).isTrue();
@@ -33,7 +33,7 @@ class ClosePhaseTest {
 
     @Test
     @DisplayName("la cadena diaria está completa y sin ciclos")
-    void cadenaDiariaIntegra() {
+    void thedailyChainIsWhole() {
         var orden = ClosePhase.dailyOrder();
         assertThat(orden).startsWith(ClosePhase.RECONCILE).endsWith(ClosePhase.PROPAGATE);
 

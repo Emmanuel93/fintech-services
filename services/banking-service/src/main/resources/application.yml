@@ -74,3 +74,9 @@ fintech:
   banking:
     # Moneda de las cuentas propias mientras no haya operación en otra divisa.
     base-currency: MXN
+    # Los hechos de disbursement que enhebran la traza del dinero (ver PayoutTraceRecorder).
+    # Configurables porque disbursement y stp nombran el despacho por variable de entorno
+    # (DISBURSEMENT_STP_TOPIC / STP_INBOUND_TOPIC): si allá cambia, aquí tiene que cambiar igual.
+    topics:
+      payment-requested: ${BANKING_TOPIC_PAYMENT_REQUESTED:disbursement.stp-requested}
+      disbursement-accepted: ${BANKING_TOPIC_DISBURSEMENT_ACCEPTED:disbursement.accepted}

@@ -15,7 +15,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DESTINO="${RESPALDOS:-./respaldos}"
+# Fuera del repo, con el resto del material de pruebas: un respaldo no es código.
+DESTINO="${RESPALDOS:-${MATERIAL_DIR:-$HOME/Documents/material-kredius}/respaldos}"
 NOMBRE="${2-siembra}"
 ARCHIVO="$DESTINO/$NOMBRE.sql.gz"
 

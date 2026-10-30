@@ -6,6 +6,8 @@
 #   ./run.sh --caso 1             # sólo uno (1, 2 o 3)
 #   ./run.sh --quincenas 6        # cuántas quincenas devenga antes de cerrar
 #   ./run.sh --sin-reporte
+#   ./run.sh --sin-video          # no arma los videos de demostración (short, middle, demo_completa)
+#   ./run.sh --sin-demo-completa  # no graba los actos de operación, contabilidad, tesorería e IAM
 #
 # Requiere, en la Mac: docker compose arriba en fintech-services, simulador de iOS booteado,
 # flutter, node/npx, jq. Ver README.md.
@@ -17,16 +19,19 @@ source ./lib.sh
 QUINCENAS=4
 CASOS="1 2 3"
 CON_REPORTE=1
+CON_VIDEO=1
+CON_DEMO_COMPLETA=1
 
 # La evidencia se abre antes de parsear argumentos: si `die` salta ahí, `_paso` ya tiene dónde
 # escribir en vez de reventar por una redirección a un directorio inexistente.
-# La evidencia se archiva por commit y, dentro, por corrida: `evidencia/<commit>/<fecha>/`.
+# La evidencia se archiva por commit y, dentro, por corrida: `pruebas/<commit>/<fecha>/`, fuera del
+# repo, en la carpeta de material (`~/Documents/material-kredius`, o `MATERIAL_DIR`): el repo es código.
 # Un video sin saber contra qué código se grabó no prueba nada —el mismo caso pasa o falla según
 # el commit—, así que el sha va en la ruta y no en un README que nadie actualiza.
 COMMIT="$(git -C "$PWD" rev-parse --short HEAD 2>/dev/null || echo sin-commit)"
 git -C "$PWD" diff --quiet HEAD 2>/dev/null || COMMIT="$COMMIT-sucio"
 CORRIDA="$(date +%Y%m%d-%H%M%S)"
-EVIDENCIA="$PWD/evidencia/$COMMIT/$CORRIDA"
+EVIDENCIA="${MATERIAL_DIR:-$HOME/Documents/material-kredius}/pruebas/$COMMIT/$CORRIDA"
 mkdir -p "$EVIDENCIA"
 : > "$EVIDENCIA/pasos.jsonl"
 : > "$EVIDENCIA/api.log"
@@ -38,6 +43,8 @@ while [ $# -gt 0 ]; do
     --caso)       necesita_valor "$@"; CASOS="$2"; shift 2 ;;
     --quincenas)  necesita_valor "$@"; QUINCENAS="$2"; shift 2 ;;
     --sin-reporte) CON_REPORTE=0; shift ;;
+    --sin-video)   CON_VIDEO=0; shift ;;
+    --sin-demo-completa) CON_DEMO_COMPLETA=0; shift ;;
     -h|--help)    sed -n '2,12p' "$0"; exit 0 ;;
     *) die "opción desconocida: $1" ;;
   esac
@@ -101,6 +108,16 @@ preflight() {
   [ -n "$(bo_login cobranza@kredius.mx)" ] \
     || die "falta cobranza@kredius.mx — corre tools/e2e/01-seed.sh del backoffice"
   ok "Login de staff correcto (underwriter y cobranza)"
+  # La mesa de cumplimiento y la de KYC de beneficiarias las trabaja OPS_SUPERVISOR (seeds 017/018
+  # de identity). Sin él, los actos 2 y 6 —la revisión manual que sustituye a Incode— no pueden ni
+  # empezar.
+  [ -n "$(bo_login "$OPS_EMAIL")" ] \
+    || die "falta $OPS_EMAIL — corre tools/e2e/01-seed.sh del backoffice"
+  ok "Login de la mesa de cumplimiento correcto ($OPS_EMAIL)"
+
+  local cmp; cmp=$(svc_code GET "$COMPLIANCE/api/v1/compliance/verifications?size=1")
+  [ "$cmp" = "200" ] && ok "compliance-service responde (cola de cumplimiento)" \
+    || die "compliance-service no responde (HTTP ${cmp:-sin respuesta}) — ¿está levantado y migrado?"
 
   # `rewind-accrual-schedules` exige `date`: con test-support encendido responde 400 (falta el
   # parámetro) y apagado responde 404 (el bean no existe). Un 404 en `route-to-review` no
@@ -126,6 +143,15 @@ preflight() {
   curl -sS -m 3 -o /dev/null "http://localhost:4200" \
     && ok "Backoffice en http://localhost:4200" \
     || die "el backoffice no levantó"
+
+  # La web pública de alta la levanta el mismo run-dev.sh del backoffice (puerto 4300).
+  for _ in $(seq 1 30); do curl -sS -m 2 -o /dev/null "$KYC_WEB_URL" && break; sleep 2; done
+  curl -sS -m 3 -o /dev/null "$KYC_WEB_URL" \
+    && ok "Web de alta de beneficiarias en $KYC_WEB_URL" \
+    || die "la web de KYC no responde en $KYC_WEB_URL — ¿run-dev.sh incluye apps/kyc-web?"
+  local kyc_gw; kyc_gw=$(curl -sS -m 5 -o /dev/null -w '%{http_code}' "http://kyc.localhost:$GATEWAY_PORT/api/v1/beneficiary/public/invites/no-existe")
+  [ "$kyc_gw" = "404" ] && ok "El gateway enruta kyc.localhost a la API pública (404 uniforme para una liga inválida)" \
+    || die "kyc.localhost no responde como se espera (HTTP $kyc_gw) — recrea el gateway"
 }
 
 # ── Utilidades de dominio ────────────────────────────────────────────────────
@@ -160,6 +186,35 @@ cuenta_de_prospecto() { # prospectId → creditAccountId
            WHERE ca.obligor_party_id = '$1'
               OR ca.obligor_party_id = (SELECT party_id FROM party.parties WHERE prospect_id = '$1' LIMIT 1)
            ORDER BY ca.created_at DESC LIMIT 1;" | tr -d ' '
+}
+
+# El veredicto de KYC/AML de una persona (compliance, por la red interna). Vacío si aún no tiene.
+veredicto_de() { svc GET "$COMPLIANCE/api/v1/compliance/verifications/by-prospect/$1" | jq -c 'select(.verificationId)' 2>/dev/null; }
+
+prospecto_campo() { # prospectId campo → valor (lo que capturó en el alta)
+  svc GET "$ORIGINATION/api/v1/origination/prospects/$1" | jq -r ".$2 // empty"
+}
+
+# Paga la línea hasta dejarla en cero, por el canal móvil.
+#
+# Una sola vez no basta: los intereses del devengo llegan a cartera por Kafka y siguen aplicándose
+# después de leer el adeudo, así que pagar el `totalDebt` del momento dejaba un remanente —la
+# corrida del 2026-10-30 quedó con $29 de capital, $800 de interés y $128 de IVA y aun así se
+# narraba como «liquidado»—. Se paga, se espera, se vuelve a leer del dueño y se paga lo que quede.
+liquidar_linea() { # tok cuenta
+  local tok="$1" cuenta="$2" intento adeudo pagado=0
+  for intento in 1 2 3 4 5; do
+    sleep 5
+    adeudo=$(svc GET "$PORTFOLIO/api/v1/portfolio/accounts/$cuenta" "" "X-User-Id: regresion" | jq -r '.totalDebt // 0')
+    if [ -z "$adeudo" ] || awk "BEGIN{exit !($adeudo <= 0.009)}"; then
+      ok "Línea liquidada: adeudo en cero tras $((intento - 1)) pago(s) por \$$pagado"
+      return 0
+    fi
+    bff_post "$tok" "/credit/payment" "{\"amount\":$adeudo}" >/dev/null
+    pagado=$(awk "BEGIN{printf \"%.2f\", $pagado + $adeudo}")
+    log "Pago $intento por el canal móvil: \$$adeudo"
+  done
+  err "la línea no quedó en cero tras 5 pagos: adeudo $(svc GET "$PORTFOLIO/api/v1/portfolio/accounts/$cuenta" "" "X-User-Id: regresion" | jq -r '.totalDebt')"
 }
 
 folio_de() { svc GET "$ORIGINATION/api/v1/origination/applications/$1" | jq -r '.folio // empty'; }
@@ -300,14 +355,31 @@ caso_distribuidora() { # $1 = liquidar | mora
   export CASO_ACTUAL="caso-$([ "$desenlace" = liquidar ] && echo 2 || echo 3)-distribuidora-manual-$desenlace"
   local dir="$EVIDENCIA/$CASO_ACTUAL"; mkdir -p "$dir"
   log "════ CASO distribuidora — desenlace: $desenlace ════"
+  log "Sin Incode: toda identidad la comprueba una persona en el backoffice"
 
   # DL-DIST-STD-V1 ya tiene la banda BAJO inalcanzable: cae en manual por el camino natural.
 
-  # ── ACTO 1 · app: alta de distribuidora ─────────────────────────────────
-  grabar_inicio "app-acto1-alta-distribuidora.mp4"
-  correr_app "regresion/c2_solicitud_test.dart" "$dir/acto1.log"
+  # ── Documentos de muestra de la distribuidora ───────────────────────────
+  # La CURP de la corrida se fija aquí y no en la app: es la que lleva su INE de muestra, y en la
+  # mesa de cumplimiento una persona compara una contra la otra. Los documentos se sirven por HTTP
+  # local porque el simulador comparte la red de la Mac pero no su disco.
+  local curp_corrida docs_dir docs_pid
+  curp_corrida="MESL930326M$(LC_ALL=C tr -dc 'A-Z' </dev/urandom | head -c 5)$(LC_ALL=C tr -dc 'A-Z0-9' </dev/urandom | head -c 1)$((RANDOM % 10))"
+  docs_dir="$dir/documentos-distribuidora"
+  ( cd "$BO_DIR" && node tools/e2e/browser/fixtures-kyc/documentos.cjs "$docs_dir" distribuidora "$curp_corrida" ) >/dev/null \
+    && ok "Documentos de muestra de la distribuidora (INE, selfie, comprobante) con su CURP $curp_corrida" \
+    || warn "no se generaron los documentos de muestra — la app subirá el relleno mínimo"
+  python3 -m http.server "$DOCS_PORT" --bind 127.0.0.1 --directory "$docs_dir" >/dev/null 2>&1 &
+  docs_pid=$!
+  sleep 1
+
+  # ── ACTO 1 · app: alta de la distribuidora ──────────────────────────────
+  grabar_inicio "01-app-alta-distribuidora.mp4"
+  correr_app "regresion/c2_solicitud_test.dart" "$dir/acto1.log" \
+    --dart-define="RE2E_CURP=$curp_corrida" --dart-define="RE2E_DOCS_URL=http://127.0.0.1:$DOCS_PORT"
   local r1=$?; grabar_fin
-  [ $r1 -eq 0 ] && ok "ACTO 1 — alta de distribuidora y solicitud de línea" || err "ACTO 1 falló"
+  kill "$docs_pid" 2>/dev/null
+  [ $r1 -eq 0 ] && ok "ACTO 1 — alta de la distribuidora en la app" || err "ACTO 1 falló"
 
   local phone password prospect_id
   phone=$(handoff PHONE "$dir/acto1.log")
@@ -320,13 +392,45 @@ caso_distribuidora() { # $1 = liquidar | mora
   fi
   [ -z "$prospect_id" ] && die "no pude resolver el PROSPECT_ID ni por handoff ni por base — revisa $dir/acto1.log"
 
+  # ── Cumplimiento: la distribuidora espera dictamen ──────────────────────
+  # Sin proveedor de KYC, toda alta queda en identidad IN_REVIEW y la compuerta de originación la
+  # detiene. Se comprueba que la compuerta está puesta ANTES de que la mesa la abra: pedir la línea
+  # ahora tiene que rebotar con 422 y el motivo, no con un 500.
+  local verif
+  verif=$(espera "veredicto de cumplimiento" 20 1 "veredicto_de '$prospect_id'")
+  [ -n "$verif" ] || die "compliance nunca evaluó a la distribuidora ($prospect_id)"
+  afirma "La identidad de la distribuidora espera revisión manual" "IN_REVIEW" "$(jq -r '.identityStatus' <<<"$verif")"
+  local curp_dist; curp_dist=$(prospecto_campo "$prospect_id" curp)
+
+  local tok_mov; tok_mov=$(bff_login "$phone" "$password")
+  [ -z "$tok_mov" ] && die "no pude entrar al BFF móvil como $phone"
+  local rebote; rebote=$(bff_post_code "$tok_mov" "/credit/applications" \
+      "{\"prospectId\":\"$prospect_id\",\"productType\":\"DISTRIBUTOR_LINE\"}")
+  case "$rebote" in
+    422) ok "La compuerta detiene la línea mientras la identidad no se dictamina (422)" ;;
+    *)   err "esperaba 422 de la compuerta de KYC antes del dictamen, llegó HTTP $rebote" ;;
+  esac
+
+  # ── ACTO 2 · backoffice: la mesa de cumplimiento dictamina ──────────────
+  correr_bo "regresion-cumplimiento.spec.ts" "02-bo-cumplimiento-distribuidora" \
+    "RE2E_PERSONA=$curp_dist" "RE2E_ACCION=aprobar" \
+    && ok "ACTO 2 — identidad de la distribuidora comprobada a mano en la mesa de cumplimiento" \
+    || err "ACTO 2 falló"
+  verif=$(veredicto_de "$prospect_id")
+  afirma "Identidad dictaminada" "VERIFIED" "$(jq -r '.identityStatus' <<<"$verif")"
+  afirma "Listas despejadas"     "CLEARED"  "$(jq -r '.screeningStatus' <<<"$verif")"
+  afirma_contiene "El dictamen tiene autor con nombre" "@kredius.mx" "$(jq -r '.decidedBy' <<<"$verif")"
+  # El veredicto viaja por Kafka a party, que es lo que consulta la compuerta de originación.
+  espera "party con la persona despejada" 20 1 \
+    "svc GET '$PARTY/api/v1/parties/by-prospect/$prospect_id' | jq -r 'select(.identityStatus==\"VERIFIED\") | .identityStatus'" >/dev/null \
+    && ok "party ya proyectó el veredicto: la compuerta abre" \
+    || err "party no recibió el veredicto de compliance"
+
   # HALLAZGO: una distribuidora recién dada de alta no tiene cómo pedir su línea desde la app
   # (su bottom nav no incluye «Oportunidades» y el home oculta la puerta al catálogo mientras
   # está en revisión). La solicitud se crea por el BFF —el mismo canal de la app— igual que hace
   # hoy scripts/seed-distribuidoras.py.
   warn "HUECO: la app no permite solicitar la línea de distribuidor — se crea por el BFF"
-  local tok_mov; tok_mov=$(bff_login "$phone" "$password")
-  [ -z "$tok_mov" ] && die "no pude entrar al BFF móvil como $phone"
   local creada; creada=$(bff_post "$tok_mov" "/credit/applications" \
       "{\"prospectId\":\"$prospect_id\",\"productType\":\"DISTRIBUTOR_LINE\"}")
   local app_id; app_id=$(jq -r '.applicationId // .id // empty' <<<"$creada")
@@ -343,10 +447,10 @@ caso_distribuidora() { # $1 = liquidar | mora
   esac
   afirma "Producto correcto" "DISTRIBUTOR_LINE" "$(jq -r '.productType' <<<"$detalle")"
 
-  # ── ACTO 2 · backoffice ─────────────────────────────────────────────────
-  correr_bo "regresion-decision.spec.ts" "bo-acto2-decision" \
+  # ── ACTO 3 · backoffice: el underwriter aprueba la línea ────────────────
+  correr_bo "regresion-decision.spec.ts" "03-bo-aprobacion-linea" \
     "RE2E_APP_ID=$app_id" "RE2E_FOLIO=$(folio_de "$app_id")" "RE2E_ACCION=aprobar" \
-    && ok "ACTO 2 — línea aprobada desde la consola" || err "ACTO 2 falló"
+    && ok "ACTO 3 — línea aprobada desde la consola" || err "ACTO 3 falló"
 
   # Oferta/contrato/firma de la línea: por API. La app todavía no tiene esas pantallas para
   # DISTRIBUTOR_LINE (ver PLAN_REGRESION_E2E.md §4.1). Es hueco de producto, no de la prueba.
@@ -355,77 +459,90 @@ caso_distribuidora() { # $1 = liquidar | mora
   linea=$(espera "línea en cartera" 30 2 "cuenta_de_prospecto '$prospect_id'")
   [ -n "$linea" ] && ok "Línea activa en cartera: $linea" || err "la línea no apareció en cartera"
 
-  # ── ACTO 3 · app: la línea y la colocación ──────────────────────────────
-  grabar_inicio "app-acto3-linea-y-colocacion.mp4"
-  correr_app "regresion/c2_colocacion_test.dart" "$dir/acto3.log" \
+  # ── ACTO 4 · app: la línea y la colocación ──────────────────────────────
+  grabar_inicio "04-app-linea-y-colocacion.mp4"
+  correr_app "regresion/c2_colocacion_test.dart" "$dir/acto4.log" \
     --dart-define="RE2E_PHONE=$phone" --dart-define="RE2E_PASSWORD=$password"
-  local r3=$?; grabar_fin
-  [ $r3 -eq 0 ] && ok "ACTO 3 — línea visible y colocación enviada" || err "ACTO 3 falló"
+  local r4=$?; grabar_fin
+  [ $r4 -eq 0 ] && ok "ACTO 4 — línea visible y colocación enviada" || err "ACTO 4 falló"
 
-  local placement; placement=$(handoff PLACEMENT_ID "$dir/acto3.log")
-  # KYC de la beneficiaria simulado — si no, la colocación nunca llega a disposición.
-  if [ -n "$placement" ]; then
-    # La respuesta se mira: si el KYC falla a media carga —por ejemplo con un CURP sintético
-    # duplicado— la colocación queda en KYC_IN_PROGRESS y ya no avanza, pero descartando la
-    # salida esto se anunciaba como un ✓ y el rojo aparecía tres pasos después, en la disposición.
-    local kyc kyc_status
-    kyc=$(svc POST "$BENEFICIARY/api/v1/internal/test-support/placements/$placement/complete-kyc" '{}')
-    # El BFF serializa el estado en camelCase («bureauReady»), no con el nombre del enum
-    # («BUREAU_READY»): se normaliza antes de comparar para no volver a inventar un rojo.
-    kyc_status=$(jq -r '.status // empty' <<<"$kyc" 2>/dev/null)
-    case "$(printf '%s' "$kyc_status" | tr '[:lower:]' '[:upper:]' | tr -d '_')" in
-      BUREAUREADY|KYCCOMPLETED|APPROVED|DISBURSING|DISBURSED)
-        ok "KYC de la beneficiaria simulado ($kyc_status)" ;;
-      *)
-        err "el KYC de la beneficiaria no avanzó: ${kyc:-sin respuesta}" ;;
-    esac
-    # El KYC **no** desemboca en disposición: deja la colocación en BUREAU_READY, que la propia
-    # app rotula «ESPERA TU OK» / "terminó su verificación. Revisa su historial para decidir"
-    # (DistributorQueryController.java:146). Quien decide es la distribuidora, y hasta que
-    # aprueba no hay disposición ni calendario — por eso el acto 4, el acto 5 y la liquidación
-    # caían todos por lo mismo. Se aprueba por el BFF móvil, el mismo canal que usaría la app.
-    # La mesa de KYC dictamina la identidad ANTES de que la distribuidora pueda aprobar: es lo
-    # único que habilita el depósito (`Placement.approve` lanza IdentityNotVerifiedException si
-    # sigue en PENDING). El `complete-kyc` deja el expediente armado, no dictaminado — el juicio
-    # es de una persona, y por eso vive en el backoffice y no en el simulador de KYC.
-    local dictamen
-    dictamen=$(svc POST "$BENEFICIARY/api/v1/backoffice/placements/$placement/identity-review" \
-        '{"decision":"VERIFIED","decidedBy":"regresion-e2e","verificationSource":"MANUAL"}')
-    case "$(jq -r '.placement.identityDecision // empty' <<<"$dictamen" 2>/dev/null)" in
-      VERIFIED) ok "Identidad de la beneficiaria dictaminada por la mesa de KYC" ;;
-      *)        err "la mesa de KYC no dictaminó la identidad: ${dictamen:-sin respuesta}" ;;
-    esac
+  local placement beneficiaria beneficiaria_tel
+  placement=$(handoff PLACEMENT_ID "$dir/acto4.log")
+  beneficiaria=$(handoff BENEFICIARIA_NOMBRE "$dir/acto4.log")
+  beneficiaria_tel=$(handoff BENEFICIARIA_TEL "$dir/acto4.log")
+  [ -z "$placement" ] && die "el acto 4 no dejó PLACEMENT_ID — revisa $dir/acto4.log"
 
-    # El approve también se mira: antes se daba por bueno sin leer la respuesta, y el rojo
-    # aparecía tres pasos después, en la disposición que nunca llegaba.
-    local aprobada
-    aprobada=$(bff_post "$tok_mov" "/placements/$placement/approve" '{"riskAcknowledged":true}')
-    case "$(printf '%s' "$(jq -r '.status // empty' <<<"$aprobada" 2>/dev/null)" | tr '[:lower:]' '[:upper:]' | tr -d '_')" in
-      APPROVED|DISBURSING|DISBURSED|ACTIVE)
-        ok "Colocación aprobada por la distribuidora (canal móvil)" ;;
-      *) err "la distribuidora no pudo aprobar la colocación: ${aprobada:-sin respuesta}" ;;
-    esac
+  # ── ACTO 5 · web: la beneficiaria se da de alta desde su liga ───────────
+  # La liga se le entregaría por WhatsApp; la entrega todavía no existe (notifications no consume
+  # la invitación), así que el orquestador la pide al soporte de pruebas, que rota el token —el
+  # anterior deja de servir— y la abre en un navegador con tamaño de teléfono.
+  warn "HUECO: la liga no se envía por WhatsApp todavía — el orquestador la toma del soporte de pruebas"
+  local liga
+  liga=$(svc POST "$BENEFICIARY/api/v1/internal/test-support/placements/$placement/invite-link" '{}' | jq -r '.link // empty')
+  [ -n "$liga" ] && ok "Liga de la beneficiaria acuñada" || die "no se pudo acuñar la liga de $placement"
+  correr_bo "regresion-kyc-web.spec.ts" "05-web-alta-beneficiaria" \
+    "RE2E_KYC_LINK=$liga" "RE2E_BENEFICIARIA=$beneficiaria" "RE2E_BENEFICIARIA_TEL=$beneficiaria_tel" \
+    && ok "ACTO 5 — la beneficiaria completó su alta en la página (INE, selfie, datos, CLABE, autorización)" \
+    || err "ACTO 5 falló"
+
+  local ficha; ficha=$(svc GET "$BENEFICIARY/api/v1/backoffice/placements/$placement")
+  printf '%s' "$ficha" > "$dir/estado-tras-alta-web.json"
+  local st_col; st_col=$(jq -r '.placement.status // empty' <<<"$ficha")
+  case "$st_col" in
+    BUREAU_READY|KYC_COMPLETED) ok "Expediente completo y buró consultado ($st_col)" ;;
+    *) err "tras el alta web esperaba BUREAU_READY, llegó «$st_col»" ;;
+  esac
+  afirma "La identidad de la beneficiaria espera a una persona" "PENDING" \
+    "$(jq -r '.placement.identityDecision // empty' <<<"$ficha")"
+  afirma "La evidencia del alta llegó al backoffice" "true" "$(jq -r '.identityEvidence.available' <<<"$ficha")"
+
+  # ── ACTO 6 · backoffice: la mesa de KYC comprueba a la beneficiaria ─────
+  correr_bo "regresion-beneficiaria.spec.ts" "06-bo-identidad-beneficiaria" \
+    "RE2E_PLACEMENT_ID=$placement" "RE2E_BENEFICIARIA=$beneficiaria" \
+    && ok "ACTO 6 — identidad de la beneficiaria comprobada a mano (INE contra selfie)" \
+    || err "ACTO 6 falló"
+  ficha=$(svc GET "$BENEFICIARY/api/v1/backoffice/placements/$placement")
+  afirma "Dictamen de la colocación" "VERIFIED" "$(jq -r '.placement.identityDecision // empty' <<<"$ficha")"
+  local ben_party ben_prospect
+  ben_party=$(jq -r '.placement.beneficiaryPartyId // empty' <<<"$ficha")
+  ben_prospect=$(psql_q "SELECT prospect_id FROM party.parties WHERE party_id = '$ben_party';" | tr -d ' ')
+  afirma "El mismo dictamen llegó a su expediente de persona en compliance" "VERIFIED" \
+    "$(veredicto_de "$ben_prospect" | jq -r '.identityStatus')"
+  espera "veredicto de la beneficiaria en la compuerta de disposición" 20 1 \
+    "psql_q \"SELECT screening_status FROM credit_portfolio.party_verifications WHERE party_id = '$ben_party';\" | tr -d ' '" >/dev/null \
+    && ok "La compuerta de disposición ya conoce el veredicto de la beneficiaria" \
+    || err "credit-portfolio no proyectó el veredicto de la beneficiaria — la disposición se va a bloquear"
+
+  # ── ACTO 7 · app: la distribuidora ve su historial y aprueba ────────────
+  grabar_inicio "07-app-aprobacion-distribuidora.mp4"
+  correr_app "regresion/c2_aprobacion_test.dart" "$dir/acto7.log" \
+    --dart-define="RE2E_PHONE=$phone" --dart-define="RE2E_PASSWORD=$password" \
+    --dart-define="RE2E_BENEFICIARIA=$beneficiaria"
+  local r7=$?; grabar_fin
+  if [ $r7 -eq 0 ]; then
+    ok "ACTO 7 — la distribuidora aprobó la colocación desde la app"
   else
-    warn "el acto 3 no dejó PLACEMENT_ID — sigo con la última disposición de la línea"
+    err "ACTO 7 falló — apruebo por el BFF móvil para que el resto del caso siga"
+    bff_post "$tok_mov" "/placements/$placement/approve" '{"riskAcknowledged":true}' >/dev/null
   fi
 
   local disp
   disp=$(espera "disposición creada" 30 2 \
     "psql_q \"SELECT disposition_id FROM credit_portfolio.dispositions
                WHERE credit_account_id = '$linea' ORDER BY created_at DESC LIMIT 1;\" | tr -d ' '")
-  [ -n "$disp" ] && ok "Disposición: $disp" || err "no se creó la disposición"
+  [ -n "$disp" ] && ok "Disposición a la beneficiaria: $disp" || err "no se creó la disposición"
+  # El depósito se confirma cuando STP liquida, y el simulador —igual que el poll real contra
+  # STP— consulta las órdenes en vuelo cada 3 min (`fintech.stp.polling.interval`). Se espera un
+  # ciclo completo y un margen: con 60 s la corrida declaraba «no llegó» un depósito que llegaba.
+  espera "colocación depositada" 48 5 \
+    "svc GET '$BENEFICIARY/api/v1/backoffice/placements/$placement' | jq -r 'select(.placement.status==\"DISBURSED\") | .placement.status'" >/dev/null \
+    && ok "Depósito confirmado a la CLABE de la beneficiaria (DISBURSED)" \
+    || err "el depósito no se confirmó en 4 min: $(svc GET "$BENEFICIARY/api/v1/backoffice/placements/$placement" | jq -r '.placement.status')"
 
   # ── Reloj y desenlace ───────────────────────────────────────────────────
   devengar_quincenas "$QUINCENAS"
   if [ "$desenlace" = "liquidar" ]; then
-    local adeudo; adeudo=$(bff_get "$tok_mov" "/credit/account" | jq -r '(.[0].totalDebt // .totalDebt // 0)')
-    if [ -n "$adeudo" ] && [ "$adeudo" != "0" ] && [ "$adeudo" != "null" ]; then
-      bff_post "$tok_mov" "/credit/payment" "{\"amount\":$adeudo}" >/dev/null
-      sleep 4
-      ok "Adeudo pagado por el canal móvil ($adeudo)"
-    else
-      warn "el BFF no reportó adeudo — no hay nada que liquidar"
-    fi
+    liquidar_linea "$tok_mov" "$linea"
   fi
 
   if [ "$desenlace" = "mora" ]; then
@@ -435,23 +552,47 @@ caso_distribuidora() { # $1 = liquidar | mora
     [ "${dpd:-0}" -gt 0 ] && ok "DPD calculado: $dpd días" || err "days_delinquent siguió en 0"
   fi
 
-  # ── ACTO 4 · app ────────────────────────────────────────────────────────
-  grabar_inicio "app-acto4-$desenlace.mp4"
-  correr_app "regresion/c2_seguimiento_test.dart" "$dir/acto4.log" \
+  # ── ACTO 8 · app ────────────────────────────────────────────────────────
+  grabar_inicio "08-app-$desenlace.mp4"
+  correr_app "regresion/c2_seguimiento_test.dart" "$dir/acto8.log" \
     --dart-define="RE2E_PHONE=$phone" --dart-define="RE2E_PASSWORD=$password" \
     --dart-define="RE2E_DESENLACE=$desenlace"
-  local r4=$?; grabar_fin
-  [ $r4 -eq 0 ] && ok "ACTO 4 — la app refleja el desenlace ($desenlace)" || err "ACTO 4 falló"
+  local r8=$?; grabar_fin
+  [ $r8 -eq 0 ] && ok "ACTO 8 — la app refleja el desenlace ($desenlace)" || err "ACTO 8 falló"
 
-  # ── ACTO 5 · backoffice ─────────────────────────────────────────────────
+  # ── ACTO 9 · backoffice ─────────────────────────────────────────────────
   if [ "$desenlace" = "mora" ]; then
-    correr_bo "regresion-cobranza.spec.ts" "bo-acto5-cobranza" \
+    correr_bo "regresion-cobranza.spec.ts" "09-bo-cobranza" \
       "RE2E_CUENTA=$linea" "RE2E_CONTRATO=$(contrato_de "$linea")" \
-      && ok "ACTO 5 — el caso aparece en cobranza con su tramo" || err "ACTO 5 falló"
+      && ok "ACTO 9 — el caso aparece en cobranza con su tramo" || err "ACTO 9 falló"
   else
-    correr_bo "regresion-cartera.spec.ts" "bo-acto5-cartera" \
+    correr_bo "regresion-cartera.spec.ts" "09-bo-cartera" \
       "RE2E_CUENTA=$linea" "RE2E_CONTRATO=$(contrato_de "$linea")" "RE2E_ESPERADO=liquidado" \
-      && ok "ACTO 5 — la línea y su disposición se ven en cartera" || err "ACTO 5 falló"
+      && ok "ACTO 9 — la línea y su disposición se ven en cartera" || err "ACTO 9 falló"
+  fi
+
+  # ── DEMO COMPLETA · lo que pasa detrás ──────────────────────────────────
+  # La misma colocación, seguida por las áreas que no ve el cliente: operación, red comercial,
+  # contabilidad, tesorería e IAM. Son de consulta salvo la reasignación de ejecutivo (acto 11),
+  # que es justo lo que se demuestra: cómo se acomoda a la distribuidora en su región.
+  if [ "$desenlace" = "liquidar" ] && [ "$CON_DEMO_COMPLETA" = 1 ]; then
+    local contrato clave
+    contrato=$(contrato_de "$linea")
+    clave=$(psql_q "SELECT o.tracking_key FROM stp.payment_orders o
+                     JOIN disbursement.disbursement_orders d ON d.disbursement_id::text = o.payment_request_id::text
+                    WHERE d.amount = 45000 ORDER BY o.created_at DESC LIMIT 1;" 2>/dev/null | tr -d ' ')
+    local comunes=("RE2E_CONTRATO=$contrato" "RE2E_CUENTA=$linea" "RE2E_DISTRIBUIDORA=LAURA MÉNDEZ SOTO"
+                   "RE2E_BENEFICIARIA=$beneficiaria" "RE2E_CLAVE_RASTREO=$clave")
+    correr_bo "regresion-colocaciones.spec.ts" "10-bo-colocaciones" "${comunes[@]}" \
+      && ok "ACTO 10 — la colocación se sigue en beneficiarios y en cartera" || err "ACTO 10 falló"
+    correr_bo "regresion-region.spec.ts" "11-bo-region" "${comunes[@]}" \
+      && ok "ACTO 11 — la distribuidora queda acomodada en la Sucursal Culiacán" || err "ACTO 11 falló"
+    correr_bo "regresion-contabilidad.spec.ts" "12-bo-contabilidad" "${comunes[@]}" \
+      && ok "ACTO 12 — las pólizas de la colocación, asiento por asiento" || err "ACTO 12 falló"
+    correr_bo "regresion-tesoreria.spec.ts" "13-bo-tesoreria" "${comunes[@]}" \
+      && ok "ACTO 13 — el SPEI en tesorería, con su clave de rastreo" || err "ACTO 13 falló"
+    correr_bo "regresion-iam.spec.ts" "14-bo-iam" "${comunes[@]}" \
+      && ok "ACTO 14 — roles, permisos y la auditoría del caso" || err "ACTO 14 falló"
   fi
 }
 
@@ -468,6 +609,14 @@ done
 restaurar_banda
 
 [ -f "$EVIDENCIA/bo-dev.pid" ] && kill "$(cat "$EVIDENCIA/bo-dev.pid")" 2>/dev/null
+
+# Un solo video por caso: todos los actos de las tres interfaces, en orden y con su título.
+if [ "$CON_VIDEO" = 1 ]; then
+  for d in "$EVIDENCIA"/caso-*; do
+    [ -d "$d" ] || continue
+    ./une-video.sh "$d" || warn "no se pudo unir el video de $(basename "$d")"
+  done
+fi
 
 if [ "$CON_REPORTE" = 1 ]; then
   python3 ./reporte.py "$EVIDENCIA" && log "Reporte: $EVIDENCIA/reporte.html"

@@ -33,6 +33,8 @@ public class DispositionRequestedListener {
                 payload.amount(),
                 payload.beneficiaryPartyId(),
                 payload.payeeAccount(),
+                payload.payeeName(),
+                payload.payeeTaxId(),
                 payload.termPeriods()));
     }
 }

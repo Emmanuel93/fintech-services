@@ -234,5 +234,15 @@ public class PersonVerification {
     public String getScreenedListVersions()     { return screenedListVersions; }
     public String getDecidedBy()                { return decidedBy; }
     public String getDecisionNotes()            { return decisionNotes; }
+    public Instant getDecidedAt()               { return decidedAt; }
+    public Instant getScreenedAt()              { return screenedAt; }
+    public Instant getCreatedAt()               { return createdAt; }
     public Instant getUpdatedAt()               { return updatedAt; }
+
+    // Los datos con los que se cruzó. La mesa los necesita para saber a quién está mirando: una
+    // cola de identidades que sólo muestra UUIDs obliga a abrir cada fila para saber de quién es.
+    public String getSubjectFullName()               { return subjectFullName; }
+    public java.time.LocalDate getSubjectDateOfBirth() { return subjectDateOfBirth; }
+    public String getSubjectCurp()                   { return subjectCurp; }
+    public String getSubjectRfc()                    { return subjectRfc; }
 }

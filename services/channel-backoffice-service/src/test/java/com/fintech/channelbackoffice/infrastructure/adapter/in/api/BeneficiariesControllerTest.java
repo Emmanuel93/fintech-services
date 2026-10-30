@@ -1,6 +1,7 @@
 package com.fintech.channelbackoffice.infrastructure.adapter.in.api;
 
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.BeneficiaryClient;
+import com.fintech.channelbackoffice.infrastructure.adapter.out.client.ComplianceClient;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.PartyClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -29,12 +30,128 @@ class BeneficiariesControllerTest {
 
     @Mock BeneficiaryClient beneficiaryClient;
     @Mock PartyClient partyClient;
+    @Mock ComplianceClient complianceClient;
+    @Mock StaffIdentityResolver staffIdentities;
 
     BeneficiariesController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new BeneficiariesController(beneficiaryClient, partyClient);
+        controller = new BeneficiariesController(beneficiaryClient, partyClient, complianceClient, staffIdentities);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void sinSesion() { org.springframework.security.core.context.SecurityContextHolder.clearContext(); }
+
+    private static void sesionDe(String userId) {
+        org.springframework.security.core.context.SecurityContextHolder.getContext().setAuthentication(
+                new org.springframework.security.authentication.UsernamePasswordAuthenticationToken(
+                        userId, null, List.of()));
+    }
+
+    /** La respuesta de beneficiary tras dictaminar: la colocación con el Party de la beneficiaria. */
+    private static Map<String, Object> dictaminada(UUID beneficiaryPartyId) {
+        Map<String, Object> placement = new LinkedHashMap<>();
+        placement.put("beneficiaryPartyId", beneficiaryPartyId);
+        placement.put("identityStatus", "VERIFIED");
+        return new LinkedHashMap<>(Map.of("placement", placement, "verificationStrategy", "MANUAL"));
+    }
+
+    private static PartyClient.PartyResponse beneficiaria(UUID partyId, UUID prospectId) {
+        return new PartyClient.PartyResponse(partyId, prospectId, null, "INDIVIDUAL", "ACTIVE",
+                "Rosa Elena", "Díaz", "Fuentes", null, null, null, null, null, null, null, null);
+    }
+
+    // ── El dictamen de la colocación llega al veredicto de la persona ───────────────────────
+
+    @Test
+    @DisplayName("comprobar la identidad en la colocación la comprueba también en compliance, con el mismo autor")
+    void aVerifiedPlacementMirrorsToCompliance() {
+        sesionDe("staff-ops-1");
+        UUID placementId = UUID.randomUUID(), partyId = UUID.randomUUID(), prospectId = UUID.randomUUID();
+        UUID verificationId = UUID.randomUUID();
+        given(beneficiaryClient.reviewIdentity(placementId, "VERIFIED", "staff-ops-1", null, null))
+                .willReturn(dictaminada(partyId));
+        given(partyClient.batch(List.of(partyId), "partyId")).willReturn(List.of(beneficiaria(partyId, prospectId)));
+        given(complianceClient.byProspect(prospectId)).willReturn(Optional.of(
+                Map.of("verificationId", verificationId.toString(), "identityStatus", "IN_REVIEW")));
+        given(complianceClient.decideIdentity(eq(verificationId), eq("VERIFIED"), eq("staff-ops-1"), any()))
+                .willReturn(Map.of("identityStatus", "VERIFIED"));
+
+        var body = controller.reviewIdentity(placementId,
+                new BeneficiariesController.IdentityReviewRequest("VERIFIED", null, null)).getBody();
+
+        assertThat(body.get("complianceSync")).isEqualTo(Map.of("done", true, "identityStatus", "VERIFIED"));
+        verify(complianceClient).decideIdentity(eq(verificationId), eq("VERIFIED"), eq("staff-ops-1"),
+                org.mockito.ArgumentMatchers.contains(placementId.toString()));
+    }
+
+    @Test
+    @DisplayName("el dictamen de la colocación se firma con el correo del staff, no con su id")
+    void theVerdictIsSignedWithTheEmail() {
+        sesionDe("staff-ops-1");
+        given(staffIdentities.resolve("staff-ops-1")).willReturn(Optional.of(
+                new StaffIdentityResolver.StaffIdentity("ops@kredius.mx", "Olivia Paz", null)));
+        UUID placementId = UUID.randomUUID();
+        given(beneficiaryClient.reviewIdentity(placementId, "VERIFIED", "ops@kredius.mx", null, null))
+                .willReturn(dictaminada(null));
+
+        controller.reviewIdentity(placementId, new BeneficiariesController.IdentityReviewRequest("VERIFIED", null, null));
+
+        verify(beneficiaryClient).reviewIdentity(placementId, "VERIFIED", "ops@kredius.mx", null, null);
+    }
+
+    @Test
+    @DisplayName("si compliance ya la dictaminó, no se firma encima")
+    void anAlreadyDecidedPersonIsNotSignedAgain() {
+        sesionDe("staff-ops-1");
+        UUID placementId = UUID.randomUUID(), partyId = UUID.randomUUID(), prospectId = UUID.randomUUID();
+        given(beneficiaryClient.reviewIdentity(any(), any(), any(), any(), any())).willReturn(dictaminada(partyId));
+        given(partyClient.batch(List.of(partyId), "partyId")).willReturn(List.of(beneficiaria(partyId, prospectId)));
+        given(complianceClient.byProspect(prospectId)).willReturn(Optional.of(
+                Map.of("verificationId", UUID.randomUUID().toString(), "identityStatus", "VERIFIED")));
+
+        controller.reviewIdentity(placementId, new BeneficiariesController.IdentityReviewRequest("VERIFIED", null, null));
+
+        verify(complianceClient, never()).decideIdentity(any(), any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("si compliance no contesta, el dictamen de la colocación queda y se informa sin fallar")
+    void aComplianceOutageDoesNotLoseTheVerdict() {
+        sesionDe("staff-ops-1");
+        UUID partyId = UUID.randomUUID();
+        given(beneficiaryClient.reviewIdentity(any(), any(), any(), any(), any())).willReturn(dictaminada(partyId));
+        given(partyClient.batch(List.of(partyId), "partyId"))
+                .willReturn(List.of(beneficiaria(partyId, UUID.randomUUID())));
+        given(complianceClient.byProspect(any())).willThrow(new IllegalStateException("compliance caído"));
+
+        var response = controller.reviewIdentity(UUID.randomUUID(),
+                new BeneficiariesController.IdentityReviewRequest("VERIFIED", null, null));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(200);
+        @SuppressWarnings("unchecked")
+        var sync = (Map<String, Object>) response.getBody().get("complianceSync");
+        assertThat(sync.get("done")).isEqualTo(false);
+        assertThat(response.getBody().get("placement")).isNotNull();
+    }
+
+    @Test
+    @DisplayName("un rechazo viaja a compliance con su motivo")
+    void aRejectionTravelsWithItsReason() {
+        sesionDe("staff-ops-1");
+        UUID partyId = UUID.randomUUID(), prospectId = UUID.randomUUID(), verificationId = UUID.randomUUID();
+        given(beneficiaryClient.reviewIdentity(any(), eq("REJECTED"), any(), eq("La selfie no es la de la INE"), any()))
+                .willReturn(dictaminada(partyId));
+        given(partyClient.batch(List.of(partyId), "partyId")).willReturn(List.of(beneficiaria(partyId, prospectId)));
+        given(complianceClient.byProspect(prospectId)).willReturn(Optional.of(
+                Map.of("verificationId", verificationId.toString(), "identityStatus", "IN_REVIEW")));
+
+        controller.reviewIdentity(UUID.randomUUID(), new BeneficiariesController.IdentityReviewRequest(
+                "REJECTED", "La selfie no es la de la INE", null));
+
+        verify(complianceClient).decideIdentity(eq(verificationId), eq("REJECTED"), eq("staff-ops-1"),
+                org.mockito.ArgumentMatchers.contains("La selfie no es la de la INE"));
     }
 
     private static Map<String, Object> row(UUID distributorPartyId, String status, String identity) {

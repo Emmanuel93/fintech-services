@@ -49,6 +49,14 @@ dependencies {
 }
 
 tasks.withType<Test> {
+    // Las pruebas siembran sus propias listas: la sincronización de arranque las mezclaría con las
+    // del publicador simulado y cambiaría lo que cada prueba espera encontrar.
+    systemProperty("fintech.compliance.watchlist-sync.on-startup", "false")
+    // Y ninguna prueba debe alcanzar un party de verdad: con el stack local levantado, el default
+    // `localhost:8083` es el party-service real y las pruebas dependían de lo que hubiera en él.
+    // El puerto 9 rechaza la conexión al instante: el directorio contesta «no sé», que es el caso
+    // que las pruebas de integración cubren.
+    systemProperty("fintech.compliance.party-service-url", "http://localhost:9")
     useJUnitPlatform()
     systemProperty("api.version", "1.44")
     environment("TESTCONTAINERS_RYUK_DISABLED", "true")

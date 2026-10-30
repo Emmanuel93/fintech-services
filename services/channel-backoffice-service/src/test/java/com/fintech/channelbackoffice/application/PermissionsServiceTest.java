@@ -54,6 +54,17 @@ class PermissionsServiceTest {
     }
 
     @Test
+    void treasury_isReadByFinanceOpsAndAudit_butNotBySalesOrSupport() {
+        // Mismo reparto que el seed `019`: tesorería, quien opera los pagos y el auditor.
+        for (String role : List.of("ADMIN", "OPS_SUPERVISOR", "FINANCE", "AUDITOR")) {
+            assertThat(service.capabilitiesFor(List.of(role))).as(role).contains("treasury.view");
+        }
+        for (String role : List.of("EXECUTIVE", "SUPPORT", "CREDIT_ANALYST", "COLLECTIONS_AGENT")) {
+            assertThat(service.capabilitiesFor(List.of(role))).as(role).doesNotContain("treasury.view");
+        }
+    }
+
+    @Test
     void matrix_isPopulated_andReloadRebuilds() {
         assertThat(service.matrix()).containsKey("ADMIN");
         assertThat(service.matrix().get("ADMIN")).contains("audit.view", "salesorg.manage", "applications.decide");
