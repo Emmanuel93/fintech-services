@@ -170,6 +170,10 @@ contrato_de() { psql_q "SELECT contract_number FROM credit_portfolio.credit_acco
 # no de la prueba, y no se parchea desde aquí: se anota y se resuelve por base, que es de donde
 # este orquestador ya saca la cuenta, el contrato y las disposiciones.
 ids_por_telefono() { # phone → "prospectId|applicationId" (applicationId vacío si aún no hay)
+  # Sin teléfono no hay a quién buscar. Con el handoff vacío esto era `LIKE '%'`: devolvía la
+  # solicitud más reciente de toda la base —de otra persona, de otra corrida— y el caso seguía
+  # afirmando sobre ella («esperaba UNDER_MANUAL_REVIEW, llegó DISBURSED»).
+  [ -n "$1" ] || return 0
   psql_q "SELECT p.prospect_id || '|' || COALESCE(a.application_id::text, '')
             FROM origination.prospects p
             LEFT JOIN origination.credit_applications a ON a.prospect_id = p.prospect_id
@@ -195,17 +199,33 @@ prospecto_campo() { # prospectId campo → valor (lo que capturó en el alta)
   svc GET "$ORIGINATION/api/v1/origination/prospects/$1" | jq -r ".$2 // empty"
 }
 
+adeudo_de() { svc GET "$PORTFOLIO/api/v1/portfolio/accounts/$1" "" "X-User-Id: regresion" | jq -r '.totalDebt // 0'; }
+
+# El adeudo cuando deja de moverse: dos lecturas iguales con 4 s de diferencia (tope 2 min).
+#
+# Los días de devengo que se adelantan con el reloj de prueba llegan a cartera por Kafka uno a
+# uno; con las JVM en frío se aplican a ~1 por segundo. Leer el adeudo a mitad de esa fila y
+# pagarlo deja remanente en cada vuelta: la corrida del 2026-10-30 agotó los 5 pagos persiguiendo
+# 56 días de interés que seguían entrando y terminó con $29 de adeudo.
+adeudo_estable() { # cuenta → totalDebt
+  local cuenta="$1" previo="" actual="" i
+  for i in $(seq 1 30); do
+    actual=$(adeudo_de "$cuenta")
+    if [ -n "$actual" ] && [ "$actual" = "$previo" ]; then echo "$actual"; return 0; fi
+    previo="$actual"
+    sleep 4
+  done
+  echo "$actual"
+}
+
 # Paga la línea hasta dejarla en cero, por el canal móvil.
 #
-# Una sola vez no basta: los intereses del devengo llegan a cartera por Kafka y siguen aplicándose
-# después de leer el adeudo, así que pagar el `totalDebt` del momento dejaba un remanente —la
-# corrida del 2026-10-30 quedó con $29 de capital, $800 de interés y $128 de IVA y aun así se
-# narraba como «liquidado»—. Se paga, se espera, se vuelve a leer del dueño y se paga lo que quede.
+# Se paga lo que se debe cuando el devengo ya terminó de llegar (`adeudo_estable`), y se vuelve a
+# leer del dueño por si algo entró después: el pago tampoco es instantáneo en cartera.
 liquidar_linea() { # tok cuenta
   local tok="$1" cuenta="$2" intento adeudo pagado=0
   for intento in 1 2 3 4 5; do
-    sleep 5
-    adeudo=$(svc GET "$PORTFOLIO/api/v1/portfolio/accounts/$cuenta" "" "X-User-Id: regresion" | jq -r '.totalDebt // 0')
+    adeudo=$(adeudo_estable "$cuenta")
     if [ -z "$adeudo" ] || awk "BEGIN{exit !($adeudo <= 0.009)}"; then
       ok "Línea liquidada: adeudo en cero tras $((intento - 1)) pago(s) por \$$pagado"
       return 0
@@ -214,7 +234,7 @@ liquidar_linea() { # tok cuenta
     pagado=$(awk "BEGIN{printf \"%.2f\", $pagado + $adeudo}")
     log "Pago $intento por el canal móvil: \$$adeudo"
   done
-  err "la línea no quedó en cero tras 5 pagos: adeudo $(svc GET "$PORTFOLIO/api/v1/portfolio/accounts/$cuenta" "" "X-User-Id: regresion" | jq -r '.totalDebt')"
+  err "la línea no quedó en cero tras 5 pagos: adeudo $(adeudo_de "$cuenta")"
 }
 
 folio_de() { svc GET "$ORIGINATION/api/v1/origination/applications/$1" | jq -r '.folio // empty'; }
@@ -277,25 +297,88 @@ caso1() {
     forzar_banda_manual "$_p"
   done
 
-  # ── ACTO 1 · app: alta y solicitud ──────────────────────────────────────
+  # ── Documentos de muestra ──────────────────────────────────────────────
+  # Sin proveedor biométrico, una persona compara el INE contra la selfie y contra la CURP
+  # capturada: la CURP de la corrida se fija aquí, es la que lleva el INE de muestra. Es la misma
+  # persona de TestData que usa el perfil «distribuidora» del generador.
+  local curp_corrida docs_dir docs_pid
+  curp_corrida="MESL930326M$(LC_ALL=C tr -dc 'A-Z' </dev/urandom | head -c 5)$(LC_ALL=C tr -dc 'A-Z0-9' </dev/urandom | head -c 1)$((RANDOM % 10))"
+  docs_dir="$dir/documentos"
+  ( cd "$BO_DIR" && node tools/e2e/browser/fixtures-kyc/documentos.cjs "$docs_dir" distribuidora "$curp_corrida" ) >/dev/null \
+    && ok "Documentos de muestra (INE, selfie, comprobante) con su CURP $curp_corrida" \
+    || warn "no se generaron los documentos de muestra — la app subirá el relleno mínimo"
+  python3 -m http.server "$DOCS_PORT" --bind 127.0.0.1 --directory "$docs_dir" >/dev/null 2>&1 &
+  docs_pid=$!
+  sleep 1
+
+  # ── ACTO 1 · app: alta y primer intento ────────────────────────────────
+  # La compuerta de identidad detiene la solicitud: la app tiene que decir «Estamos verificando
+  # tu identidad», no «no pudimos enviar tu solicitud».
   grabar_inicio "app-acto1-alta-y-solicitud.mp4"
-  correr_app "regresion/c1_solicitud_test.dart" "$dir/acto1.log"
+  correr_app "regresion/c1_solicitud_test.dart" "$dir/acto1.log" \
+    --dart-define="RE2E_CURP=$curp_corrida" --dart-define="RE2E_DOCS_URL=http://127.0.0.1:$DOCS_PORT"
   local r1=$?
   grabar_fin
-  [ $r1 -eq 0 ] && ok "ACTO 1 — alta y solicitud en la app" || err "ACTO 1 falló (ver acto1.log)"
+  kill "$docs_pid" 2>/dev/null
+  [ $r1 -eq 0 ] && ok "ACTO 1 — alta en la app; la solicitud espera la verificación de identidad" \
+                || err "ACTO 1 falló (ver acto1.log)"
 
-  local phone password app_id prospect_id
+  local phone password app_id prospect_id curp
   phone=$(handoff PHONE "$dir/acto1.log")
   password=$(handoff PASSWORD "$dir/acto1.log")
-  app_id=$(handoff APPLICATION_ID "$dir/acto1.log")
   prospect_id=$(handoff PROSPECT_ID "$dir/acto1.log")
-  if [ -z "$app_id" ] || [ -z "$prospect_id" ]; then
-    warn "HUECO: GET /credit/applications del BFF móvil responde 500 (página vs lista) — resuelvo los identificadores por base"
+  curp=$(handoff CURP "$dir/acto1.log")
+  if [ -z "$prospect_id" ] && [ -n "$phone" ]; then
     local par; par=$(ids_por_telefono "$phone")
-    [ -z "$prospect_id" ] && prospect_id="${par%%|*}"
-    [ -z "$app_id" ]      && app_id="${par##*|}"
+    prospect_id="${par%%|*}"
   fi
-  [ -z "$app_id" ] && die "no pude resolver el APPLICATION_ID ni por handoff ni por base — revisa $dir/acto1.log"
+  if [ -z "$prospect_id" ]; then
+    err "sin prospecto de esta corrida (ni por handoff ni por base) — el caso 1 se detiene; revisa $dir/acto1.log"
+    return 0
+  fi
+  [ -z "$curp" ] && curp=$(prospecto_campo "$prospect_id" curp)
+
+  # ── La compuerta se sostuvo ────────────────────────────────────────────
+  local verif
+  verif=$(espera "veredicto de cumplimiento" 20 1 "veredicto_de '$prospect_id'")
+  afirma "La identidad espera revisión manual" "IN_REVIEW" "$(jq -r '.identityStatus' <<<"$verif")"
+  afirma "La compuerta no dejó crear la solicitud antes del dictamen" "0" \
+    "$(psql_q "SELECT count(*) FROM origination.credit_applications WHERE prospect_id = '$prospect_id';" | tr -d ' ')"
+
+  # ── ACTO 1b · backoffice: la mesa de cumplimiento dictamina ─────────────
+  correr_bo "regresion-cumplimiento.spec.ts" "bo-acto1b-cumplimiento" \
+    "RE2E_PERSONA=$curp" "RE2E_ACCION=aprobar" \
+    && ok "ACTO 1b — identidad comprobada a mano en la mesa de cumplimiento" \
+    || err "ACTO 1b falló"
+  verif=$(veredicto_de "$prospect_id")
+  afirma "Identidad dictaminada" "VERIFIED" "$(jq -r '.identityStatus' <<<"$verif")"
+  afirma "Listas despejadas"     "CLEARED"  "$(jq -r '.screeningStatus' <<<"$verif")"
+  # El veredicto viaja por Kafka a party, que es lo que consulta la compuerta de originación.
+  espera "party con la persona despejada" 20 1 \
+    "svc GET '$PARTY/api/v1/parties/by-prospect/$prospect_id' | jq -r 'select(.identityStatus==\"VERIFIED\") | .identityStatus'" >/dev/null \
+    && ok "party ya proyectó el veredicto: la compuerta abre" \
+    || err "party no recibió el veredicto de compliance"
+
+  # ── ACTO 1c · app: la solicitud se reenvía ─────────────────────────────
+  grabar_inicio "app-acto1c-reenvio.mp4"
+  correr_app "regresion/c1_reenvio_test.dart" "$dir/acto1c.log" \
+    --dart-define="RE2E_PHONE=$phone" --dart-define="RE2E_PASSWORD=$password"
+  local r1c=$?
+  grabar_fin
+  [ $r1c -eq 0 ] && ok "ACTO 1c — con la identidad verificada, la solicitud se reenvía y pasa a revisión" \
+                 || err "ACTO 1c falló (ver acto1c.log)"
+
+  app_id=$(handoff APPLICATION_ID "$dir/acto1c.log")
+  if [ -z "$app_id" ]; then
+    warn "HUECO: GET /credit/applications del BFF móvil responde 500 (página vs lista) — resuelvo la solicitud por base"
+    local par2; par2=$(ids_por_telefono "$phone")
+    app_id="${par2##*|}"
+  fi
+  # Sin solicitud propia el caso termina aquí, y sólo él: los demás casos no dependen de éste.
+  if [ -z "$app_id" ]; then
+    err "sin solicitud de esta corrida (ni por handoff ni por base) — el caso 1 se detiene; revisa $dir/acto1c.log"
+    return 0
+  fi
   log "Solicitud $app_id · prospecto $prospect_id · $phone"
 
   # ── Verificación de servicios ───────────────────────────────────────────
@@ -390,7 +473,10 @@ caso_distribuidora() { # $1 = liquidar | mora
     local par; par=$(ids_por_telefono "$phone")
     prospect_id="${par%%|*}"
   fi
-  [ -z "$prospect_id" ] && die "no pude resolver el PROSPECT_ID ni por handoff ni por base — revisa $dir/acto1.log"
+  if [ -z "$prospect_id" ]; then
+    err "sin prospecto de esta corrida (ni por handoff ni por base) — el caso se detiene; revisa $dir/acto1.log"
+    return 0
+  fi
 
   # ── Cumplimiento: la distribuidora espera dictamen ──────────────────────
   # Sin proveedor de KYC, toda alta queda en identidad IN_REVIEW y la compuerta de originación la

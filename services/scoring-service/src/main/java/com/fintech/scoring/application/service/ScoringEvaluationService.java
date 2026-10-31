@@ -83,7 +83,17 @@ public class ScoringEvaluationService {
         }
 
         CirculoReport report = reportOpt.get();
-        return Optional.of(evaluate(report, report.getPrefetchId(), policyOpt.get(), applicationId));
+        return switch (report.getStatus()) {
+            case SUCCESS -> Optional.of(evaluate(report, report.getPrefetchId(), policyOpt.get(), applicationId));
+            // Sin historial: no hay qué puntuar, y tampoco es un error del sistema.
+            case NO_HIT, NOT_FOUND -> Optional.of(withoutBureauHistory(report, policyOpt.get(), applicationId));
+            case PENDING -> throw new BureauReportPending(
+                    "El reporte de buró del prospecto " + prospectId + " sigue pendiente");
+            // ERROR: el buró no contestó o rechazó la consulta. Evaluarlo era decidir a ciegas.
+            case ERROR -> throw new EvaluationNotReady(EvaluationNotReady.Reason.PREFETCH_FAILED,
+                    "El reporte de buró del prospecto " + prospectId + " es ERROR (" + report.getErrorCode() + ": "
+                            + report.getErrorMessage() + ") — no se evalúa; applicationId=" + applicationId);
+        };
     }
 
     /**
@@ -95,12 +105,18 @@ public class ScoringEvaluationService {
         CirculoReport report = reportRepository.findByProspectId(prospectId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "No CirculoReport found for prospectId=" + prospectId));
+        if (!report.getStatus().isUsable()) {
+            throw new IllegalStateException("El reporte de buró del prospecto " + prospectId
+                    + " es " + report.getStatus() + ": no se puede evaluar");
+        }
 
         ScoringPolicy policy = policyRepository.findActiveBy(productTypeIntent)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "No active policy for " + productTypeIntent));
 
-        return evaluate(report, report.getPrefetchId(), policy, null);
+        return report.getStatus() == CirculoReportStatus.SUCCESS
+                ? evaluate(report, report.getPrefetchId(), policy, null)
+                : withoutBureauHistory(report, policy, null);
     }
 
     public Optional<ScoreEvaluation> findLatestEvaluation(UUID prospectId) {
@@ -130,7 +146,15 @@ public class ScoringEvaluationService {
         Optional<CirculoReport> reportOpt = reportRepository.findByProspectId(prospectId);
         UUID reportId;
         List<PrequalificationItem> items;
-        if (reportOpt.isPresent()) {
+        if (reportOpt.isPresent() && !reportOpt.get().getStatus().isUsable()) {
+            // Un reporte en error o pendiente no precalifica nada: se dice por qué, no se puntúa.
+            CirculoReport report = reportOpt.get();
+            reportId = report.getReportId();
+            String reason = "BUREAU_" + report.getStatus();
+            items = productTypes.stream()
+                    .map(productType -> new PrequalificationItem(productType, false, reason, null, null, 0))
+                    .toList();
+        } else if (reportOpt.isPresent()) {
             CirculoReport report = reportOpt.get();
             reportId = report.getReportId();
             items = productTypes.stream()
@@ -158,6 +182,12 @@ public class ScoringEvaluationService {
             return new PrequalificationItem(productType, false, "NO_ACTIVE_POLICY", null, null, 0);
         }
         ScoringPolicy policy = policyOpt.get();
+        if (report.getStatus() != CirculoReportStatus.SUCCESS) {
+            // Sin historial se precalifica con la misma regla con que se va a decidir: la del producto.
+            NoHistoryOutcome o = noHistoryOutcome(policy);
+            return new PrequalificationItem(
+                    productType, true, null, o.decision().name(), o.riskLevel().name(), o.score());
+        }
         ScoringRuleEvaluator.Result result = ruleEvaluator.evaluate(policy, report);
         RiskDecision rd = resolveRiskAndDecision(result, policy);
         return new PrequalificationItem(
@@ -200,14 +230,71 @@ public class ScoringEvaluationService {
 
         ScoreEvaluation saved = evaluationRepository.save(evaluation);
 
-        publishCompleted(saved, policy, applicationId);
+        publishCompleted(saved, policy, applicationId, List.of());
 
         return saved;
     }
 
-    private void publishCompleted(ScoreEvaluation evaluation, ScoringPolicy policy, UUID applicationId) {
+    /**
+     * Lo que la política del producto decide para quien no tiene historial en buró.
+     *
+     * <p>El score sin historial ({@link NoHistoryPolicy#score()}, 0 por defecto) pasa por las bandas
+     * de la política como cualquier otro: lo decide el producto, no una regla global. Dos defensas,
+     * aunque la política ya se valida al publicarse ({@link ScoringPolicyService#validateNoHistory}):
+     * sin historial nunca se aprueba en automático, y los datos adicionales sólo viajan cuando hay
+     * alguien que los revise.
+     */
+    private NoHistoryOutcome noHistoryOutcome(ScoringPolicy policy) {
+        NoHistoryPolicy rule = policy.getNoHistory();
+        RiskThreshold band = resolveThreshold(policy.getThresholds(), rule.score());
+        ScoringDecision decision = band.getDecision() == ScoringDecision.AUTO_APPROVED
+                ? ScoringDecision.MANUAL_REVIEW
+                : band.getDecision();
+        List<NoHistoryRequirement> requirements = decision == ScoringDecision.MANUAL_REVIEW
+                ? rule.requirements()
+                : List.of();
+        return new NoHistoryOutcome(rule.score(), band.getRiskLevel(), decision, requirements);
+    }
+
+    private record NoHistoryOutcome(int score, RiskLevel riskLevel, ScoringDecision decision,
+                                    List<NoHistoryRequirement> requirements) {}
+
+    /**
+     * El buró no tiene historial de la persona. No hay reglas que evaluar: se registra el score que
+     * la política le asigna, su banda, su decisión y lo que se le pide, con un detalle que dice por
+     * qué —para que la mesa vea que no hubo motor detrás—.
+     */
+    private ScoreEvaluation withoutBureauHistory(CirculoReport report, ScoringPolicy policy, UUID applicationId) {
+        NoHistoryOutcome o = noHistoryOutcome(policy);
+        log.info("Sin historial de buró prospectId={} applicationId={} status={} → score {} {} {} requisitos={}",
+                report.getProspectId(), applicationId, report.getStatus(), o.score(), o.riskLevel(),
+                o.decision(), o.requirements());
+        String pide = o.requirements().isEmpty() ? ""
+                : "; se pide: " + String.join(", ", o.requirements().stream().map(NoHistoryRequirement::label).toList());
+        RuleEvaluationDetail detail = new RuleEvaluationDetail(null, "BUREAU_HISTORY", null, true, o.score(),
+                o.decision() == ScoringDecision.REJECTED,
+                "Sin historial en buró (" + report.getStatus() + "): score " + o.score()
+                        + " por la política del producto → " + o.riskLevel() + ", " + decisionLabel(o.decision()) + pide);
+        ScoreEvaluation evaluation = ScoreEvaluation.create(
+                UUID.randomUUID(), report.getPrefetchId(), report.getReportId(),
+                report.getProspectId(), policy.getPolicyId(), o.score(), o.riskLevel(), o.decision(), List.of(detail));
+        ScoreEvaluation saved = evaluationRepository.save(evaluation);
+        publishCompleted(saved, policy, applicationId, o.requirements());
+        return saved;
+    }
+
+    private static String decisionLabel(ScoringDecision decision) {
+        return switch (decision) {
+            case AUTO_APPROVED -> "aprobación automática";
+            case MANUAL_REVIEW -> "revisión manual";
+            case REJECTED      -> "rechazo";
+        };
+    }
+
+    private void publishCompleted(ScoreEvaluation evaluation, ScoringPolicy policy, UUID applicationId,
+                                  List<NoHistoryRequirement> requirements) {
         try {
-            ScoringCompletedEvent event = ScoringCompletedEvent.from(evaluation, policy, applicationId);
+            ScoringCompletedEvent event = ScoringCompletedEvent.from(evaluation, policy, applicationId, requirements);
             eventPublisher.publishCompleted(event);
             log.info("ScoringCompleted event queued prospectId={} evaluationId={} decision={}",
                     evaluation.getProspectId(), evaluation.getEvaluationId(), evaluation.getDecision());
@@ -244,7 +331,7 @@ public class ScoringEvaluationService {
                 .map(p -> new EvaluationNotReady(EvaluationNotReady.Reason.PREFETCH_FAILED,
                         "El prefetch de buró terminó en " + p.getStatus() + " ("
                                 + p.getFailureReason() + ") — applicationId=" + applicationId))
-                .orElseGet(() -> new EvaluationNotReady(EvaluationNotReady.Reason.NO_PREFETCH,
+                .orElseGet(() -> new BureauReportPending(EvaluationNotReady.Reason.NO_PREFETCH,
                         "Nunca hubo prefetch de buró para el prospecto " + prospectId
                                 + " — ¿sin consentimiento? applicationId=" + applicationId));
     }

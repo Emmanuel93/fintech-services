@@ -1,6 +1,8 @@
 package com.fintech.scoring.infrastructure.adapter.out.circulo;
 
+import com.fintech.scoring.application.port.out.BureauUnavailableException;
 import com.fintech.scoring.application.port.out.dto.CirculoQueryRequest;
+import com.fintech.scoring.infrastructure.config.CirculoProperties;
 import com.fintech.scoring.domain.CirculoReport;
 import com.fintech.scoring.domain.CirculoReportStatus;
 import com.github.tomakehurst.wiremock.junit5.WireMockRuntimeInfo;
@@ -95,28 +97,74 @@ class CirculoCreditoAdapterIT {
     // ── Error paths ───────────────────────────────────────────────────────────
 
     @Test
-    void query_500ServerError_returnsErrorReport() {
+    void query_500ServerError_esTransitorioYSeLanzaParaReintentar() {
         stubFor(post(urlEqualTo(CDC_PATH))
                 .willReturn(serverError()));
+
+        assertThatThrownBy(() -> adapter.query(reportId, prefetchId, prospectId, validRequest))
+                .isInstanceOf(BureauUnavailableException.class)
+                .hasMessageContaining("500");
+    }
+
+    @Test
+    void query_429_esTransitorio() {
+        stubFor(post(urlEqualTo(CDC_PATH))
+                .willReturn(aResponse().withStatus(429)));
+
+        assertThatThrownBy(() -> adapter.query(reportId, prefetchId, prospectId, validRequest))
+                .isInstanceOf(BureauUnavailableException.class);
+    }
+
+    @Test
+    void query_400_esDefinitivoYDevuelveReporteError() {
+        stubFor(post(urlEqualTo(CDC_PATH))
+                .willReturn(aResponse().withStatus(400).withBody("{\"errores\":[]}")));
 
         CirculoReport result = adapter.query(reportId, prefetchId, prospectId, validRequest);
 
         assertThat(result.getStatus()).isEqualTo(CirculoReportStatus.ERROR);
-        assertThat(result.getErrorCode()).isEqualTo("CDC_CALL_FAILED");
+        assertThat(result.getErrorCode()).isEqualTo("CDC_HTTP_400");
     }
 
     @Test
-    void query_connectionRefused_returnsErrorReport(WireMockRuntimeInfo wm) {
+    void query_connectionRefused_esTransitorio(WireMockRuntimeInfo wm) {
         // Point to a port where nothing listens
         RestClient deadClient = RestClient.builder()
                 .baseUrl("http://localhost:1")
                 .build();
         adapter = new CirculoCreditoAdapter(deadClient);
 
-        CirculoReport result = adapter.query(reportId, prefetchId, prospectId, validRequest);
+        assertThatThrownBy(() -> adapter.query(reportId, prefetchId, prospectId, validRequest))
+                .isInstanceOf(BureauUnavailableException.class);
+    }
 
-        assertThat(result.getStatus()).isEqualTo(CirculoReportStatus.ERROR);
-        assertThat(result.getErrorCode()).isEqualTo("CDC_CALL_FAILED");
+    @Test
+    void query_buroQueNoContesta_seCortaEnElTimeoutConfigurado(WireMockRuntimeInfo wm) {
+        // El buró acepta la conexión y tarda 3 s; el cliente espera 300 ms. Antes no había límite.
+        stubFor(post(urlEqualTo(CDC_PATH))
+                .willReturn(okJson(successResponseJson()).withFixedDelay(3_000)));
+        CirculoProperties props = new CirculoProperties();
+        props.setUrl(wm.getHttpBaseUrl());
+        props.setApiKey("test-api-key");
+        props.setReadTimeout(java.time.Duration.ofMillis(300));
+        adapter = new CirculoCreditoAdapter(new CirculoConfig().circuloRestClient(props), props);
+
+        long inicio = System.nanoTime();
+        assertThatThrownBy(() -> adapter.query(reportId, prefetchId, prospectId, validRequest))
+                .isInstanceOf(BureauUnavailableException.class);
+        long ms = (System.nanoTime() - inicio) / 1_000_000;
+
+        // Rendimiento: se corta cerca del límite, lejos de los 3 s del buró.
+        assertThat(ms).isLessThan(1_500L);
+    }
+
+    @Test
+    void sinCredencialElAdaptadorRealNoArranca() {
+        CirculoProperties props = new CirculoProperties();
+        props.setUrl("http://localhost:1");
+        assertThatThrownBy(() -> new CirculoCreditoAdapter(new CirculoConfig().circuloRestClient(props), props))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("CIRCULO_CREDITO_API_KEY");
     }
 
     // ── Request validation ────────────────────────────────────────────────────

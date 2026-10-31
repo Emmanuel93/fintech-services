@@ -12,4 +12,6 @@
     <include file="db/changelog/commission/006-create-event-publication.sql"   relativeToChangelogFile="false"/>
     <include file="db/changelog/commission/007-seed-commission-policies.sql"   relativeToChangelogFile="false"/>
     <include file="db/changelog/commission/008-idempotencia-liquidacion.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/009-candado-de-crones.sql" relativeToChangelogFile="false"/>
+
 </databaseChangeLog>

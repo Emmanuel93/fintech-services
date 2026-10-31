@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Corre el ciclo de cobranza automática una vez al día, a las 10:00.
@@ -28,7 +29,8 @@ public class DunningScheduleJob {
         this.dunningService = dunningService;
     }
 
-    @Scheduled(cron = "0 0 10 * * *")
+    @SchedulerLock(name = "collections.dunning-schedule", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 0 10 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
         log.info("DunningScheduleJob starting");
         int enviados = dunningService.runDailyCycle();

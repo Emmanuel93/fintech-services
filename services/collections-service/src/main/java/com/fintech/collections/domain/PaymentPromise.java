@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /** PP-01: only one ACTIVE promise per caseId at a time (enforced by the service, via repository check). */
 @Entity
@@ -40,7 +41,7 @@ public class PaymentPromise {
     protected PaymentPromise() {}
 
     public static PaymentPromise create(UUID caseId, BigDecimal amount, LocalDate promisedDate, String recordedBy) {
-        if (promisedDate.isBefore(LocalDate.now())) {
+        if (promisedDate.isBefore(BusinessClock.current().today())) {
             throw new InvalidCaseStateException("promisedDate must be >= today: " + promisedDate);
         }
         PaymentPromise p = new PaymentPromise();

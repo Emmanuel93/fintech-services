@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -28,6 +29,22 @@ public class ScoringPolicyService {
     public ScoringPolicy create(String prospectType, String productTypeIntent,
                                 String name, String description,
                                 List<RuleSpec> rules, List<ThresholdSpec> thresholds) {
+        return create(prospectType, productTypeIntent, name, description, rules, thresholds, NoHistoryPolicy.DEFAULT);
+    }
+
+    /**
+     * Publica la política del producto, con lo que se hace con quien no tiene historial en buró.
+     *
+     * <p>Se valida antes de tocar la vigente: una política que no se puede publicar no debe dejar al
+     * producto sin ninguna.
+     */
+    @Transactional
+    public ScoringPolicy create(String prospectType, String productTypeIntent,
+                                String name, String description,
+                                List<RuleSpec> rules, List<ThresholdSpec> thresholds,
+                                NoHistoryPolicy noHistory) {
+        NoHistoryPolicy sinHistorial = noHistory == null ? NoHistoryPolicy.DEFAULT : noHistory;
+        validateNoHistory(sinHistorial, thresholds);
         // Sustituir la vigente, si la hay. Sólo puede haber una activa por producto, y eso lo
         // garantiza un índice único parcial en la base.
         //
@@ -52,7 +69,7 @@ public class ScoringPolicyService {
 
         ScoringPolicy policy = ScoringPolicy.create(
                 UUID.randomUUID(), prospectType, productTypeIntent, name, description,
-                siguienteVersion);
+                siguienteVersion, sinHistorial);
 
         for (RuleSpec spec : rules) {
             ScoringRule rule = ScoringRule.create(
@@ -74,6 +91,43 @@ public class ScoringPolicyService {
         log.info("Created scoring policy policyId={} name='{}' for {}/{}",
                 saved.getPolicyId(), name, prospectType, productTypeIntent);
         return saved;
+    }
+
+    /**
+     * Lo que la política dice de quien no tiene historial tiene que poder cumplirse.
+     *
+     * <ul>
+     *   <li>Sin historial <b>no se aprueba en automático</b>: no hay comportamiento de pago que lo
+     *       respalde. Si el score sin historial cae en una banda de aprobación automática, la política
+     *       se rechaza aquí y no en silencio a la hora de evaluar.</li>
+     *   <li>Pedir datos adicionales sólo tiene sentido si alguien los va a revisar. Con un score que
+     *       cae en rechazo, la petición nunca llegaría a nadie.</li>
+     * </ul>
+     */
+    static void validateNoHistory(NoHistoryPolicy noHistory, List<ThresholdSpec> thresholds) {
+        if (thresholds == null || thresholds.isEmpty()) {
+            return; // la validación de bandas vacías es de la petición, no de esta regla
+        }
+        ThresholdSpec banda = bandFor(thresholds, noHistory.score());
+        if (banda.decision() == ScoringDecision.AUTO_APPROVED) {
+            throw new InvalidScoringPolicyException("Sin historial en buró no se aprueba en automático: con score "
+                    + noHistory.score() + " cae en " + banda.riskLevel() + " (aprobación automática). "
+                    + "Baja el score sin historial a la banda de revisión y, si hace falta, pide datos adicionales.");
+        }
+        if (banda.decision() == ScoringDecision.REJECTED && !noHistory.requirements().isEmpty()) {
+            throw new InvalidScoringPolicyException("Los datos adicionales sólo se piden si alguien los revisa: con score "
+                    + noHistory.score() + " quien no tiene historial cae en " + banda.riskLevel()
+                    + " (rechazo). Sube el score sin historial a la banda de revisión o quita los datos adicionales.");
+        }
+    }
+
+    /** La banda que le toca a un score: la de mayor mínimo que alcanza, o la más baja si no alcanza ninguna. */
+    static ThresholdSpec bandFor(List<ThresholdSpec> thresholds, int score) {
+        return thresholds.stream()
+                .sorted(Comparator.comparingInt(ThresholdSpec::minScore).reversed())
+                .filter(t -> score >= t.minScore())
+                .findFirst()
+                .orElseGet(() -> thresholds.stream().min(Comparator.comparingInt(ThresholdSpec::minScore)).orElseThrow());
     }
 
     @Transactional

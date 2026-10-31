@@ -151,3 +151,12 @@ databaseChangeLog:
             path: db/changelog/origination/017-bnpl-al-firmar.sql
             relativeToChangelogFile: false
             splitStatements: true
+
+  - changeSet:
+      id: 018-candado-de-crones
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/018-candado-de-crones.sql
+            relativeToChangelogFile: false
+            splitStatements: true

@@ -16,6 +16,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.Optional;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Service
 @Transactional
@@ -117,7 +118,7 @@ public class AccrualScheduleService {
             boolean estabaActiva = schedule.isMoratoriumActive();
 
             schedule.updateMoratorium(overduePrincipal, vencimientoMasAntiguo,
-                    LocalDate.now(), schedule.getGracePeriodDays());
+                    BusinessClock.current().today(), schedule.getGracePeriodDays());
             scheduleRepository.save(schedule);
 
             if (estabaActiva != schedule.isMoratoriumActive()) {
@@ -154,7 +155,7 @@ public class AccrualScheduleService {
         BigDecimal basis     = schedule.getApprovedAmount();
         BigDecimal feeAmount = basis.multiply(feeRate).setScale(2, RoundingMode.HALF_UP);
         BigDecimal taxAmount = feeAmount.multiply(properties.getVatRate()).setScale(2, RoundingMode.HALF_UP);
-        LocalDate today      = LocalDate.now();
+        LocalDate today      = BusinessClock.current().today();
 
         ChargeRecord fee = ChargeRecord.create(
                 accountId, schedule.getObligorPartyId(),

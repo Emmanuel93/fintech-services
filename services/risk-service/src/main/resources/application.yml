@@ -56,6 +56,10 @@ springdoc:
     path: /swagger-ui.html
 
 fintech:
+  # Candado de crones: la tabla vive en el esquema del servicio (ver SchedulingLockAutoConfiguration).
+  scheduling:
+    lock:
+      table: risk.shedlock
   risk:
     # IFRS-9 staging thresholds (días). Stage 2 = SICR backstop 30d; Stage 3 = default 90d.
     stage2-days-threshold: ${RISK_STAGE2_DAYS:30}

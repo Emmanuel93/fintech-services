@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /** AG-05: 08:15 daily — PROPOSED agreements with no debtor response within the window -> EXPIRED. */
 @Component
@@ -18,7 +19,8 @@ public class AgreementExpirationJob {
         this.agreementService = agreementService;
     }
 
-    @Scheduled(cron = "0 15 8 * * *")
+    @SchedulerLock(name = "collections.agreement-expiration", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 15 8 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
         log.info("AgreementExpirationJob starting");
         agreementService.expireStaleProposals();

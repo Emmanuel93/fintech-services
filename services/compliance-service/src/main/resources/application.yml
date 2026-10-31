@@ -67,6 +67,10 @@ management:
       show-details: when-authorized
 
 fintech:
+  # Candado de crones: la tabla vive en el esquema del servicio (ver SchedulingLockAutoConfiguration).
+  scheduling:
+    lock:
+      table: compliance.shedlock
   compliance:
     # Cada lista con su cadencia. Se declara aquí y no se descubre: una lista que deja de
     # sincronizarse sin que nadie lo note es un control apagado que parece encendido.
@@ -77,6 +81,30 @@ fintech:
       enabled: ${COMPLIANCE_WATCHLIST_SYNC_ENABLED:true}
       on-startup: ${COMPLIANCE_WATCHLIST_SYNC_ON_STARTUP:true}
       cron: ${COMPLIANCE_WATCHLIST_SYNC_CRON:0 30 2 * * *}
+    # De dónde llegan las listas. `mock` (por defecto) sólo arranca en ambientes bajos; `http` las
+    # descarga del proveedor declarado aquí. Conectar uno (QeQ, el CSV de OFAC, la 69-B del SAT) es
+    # llenar sus fuentes: URL con {date}, credencial del ambiente y layout del archivo.
+    # PENDIENTE: QeQ entrega los archivos por SFTP, no por HTTP. Falta un adaptador SFTP sobre el
+    # mismo puerto (GovernmentListPort: bytes + layout); el parser y la carga ya existen.
+    #
+    #   provider:
+    #     mode: http
+    #     name: QeQ
+    #     sources:
+    #       PEP-MX:
+    #         url: https://<proveedor>/listas/pep?fecha={date}
+    #         auth-header: Authorization
+    #         auth-value: ${COMPLIANCE_LISTS_PROVIDER_TOKEN}
+    #         delimiter: ","
+    #         charset: UTF-8
+    #         columns: { name: NOMBRE, curp: CURP, rfc: RFC, dateOfBirth: FECHA_NAC, program: CARGO }
+    #         date-patterns: [ "yyyy-MM-dd", "dd/MM/yyyy" ]
+    provider:
+      mode: ${COMPLIANCE_LISTS_PROVIDER_MODE:mock}
+      name: ${COMPLIANCE_LISTS_PROVIDER_NAME:proveedor-http}
+      connect-timeout: ${COMPLIANCE_LISTS_CONNECT_TIMEOUT:5s}
+      read-timeout: ${COMPLIANCE_LISTS_READ_TIMEOUT:60s}
+
     watchlists:
       - source-code: OFAC-SDN
         kind: SANCTIONS

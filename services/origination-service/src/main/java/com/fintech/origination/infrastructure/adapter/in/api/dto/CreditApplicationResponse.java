@@ -103,7 +103,7 @@ public record CreditApplicationResponse(
         if (a.getApplicationId() == null) return null;
         java.time.Instant createdAt = a.getCreatedAt() != null ? a.getCreatedAt() : java.time.Instant.EPOCH;
         String yearMonth = java.time.LocalDateTime
-                .ofInstant(createdAt, java.time.ZoneOffset.UTC)
+                .ofInstant(createdAt, com.fintech.shared.time.BusinessClock.current().zone())
                 .format(java.time.format.DateTimeFormatter.ofPattern("yyyyMM"));
         String suffix = a.getApplicationId().toString()
                 .replace("-", "").substring(0, 8).toUpperCase();

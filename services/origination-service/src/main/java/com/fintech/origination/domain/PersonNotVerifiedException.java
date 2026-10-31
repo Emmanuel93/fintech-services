@@ -14,13 +14,27 @@ public class PersonNotVerifiedException extends RuntimeException {
 
     private final UUID prospectId;
     private final String reason;
+    private final String identityStatus;
+    private final String screeningStatus;
 
     public PersonNotVerifiedException(UUID prospectId, String reason) {
-        super("La persona del prospecto " + prospectId + " no puede originar crédito: " + reason);
-        this.prospectId = prospectId;
-        this.reason     = reason;
+        this(prospectId, reason, null, null);
     }
 
-    public UUID prospectId() { return prospectId; }
-    public String reason()   { return reason; }
+    /**
+     * Con los dos estados por separado: quien recibe el 422 —la app— decide qué decirle a la persona
+     * con ellos, no leyendo el texto del motivo.
+     */
+    public PersonNotVerifiedException(UUID prospectId, String reason, String identityStatus, String screeningStatus) {
+        super("La persona del prospecto " + prospectId + " no puede originar crédito: " + reason);
+        this.prospectId      = prospectId;
+        this.reason          = reason;
+        this.identityStatus  = identityStatus;
+        this.screeningStatus = screeningStatus;
+    }
+
+    public UUID prospectId()        { return prospectId; }
+    public String reason()          { return reason; }
+    public String identityStatus()  { return identityStatus; }
+    public String screeningStatus() { return screeningStatus; }
 }

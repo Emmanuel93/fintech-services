@@ -54,6 +54,9 @@ public class CreditApplicationService
 
     private static final Logger log = LoggerFactory.getLogger(CreditApplicationService.class);
 
+    /** Quién pide los documentos cuando no los pide un analista sino la política del producto. */
+    static final String SCORING_REQUESTER = "politica-de-scoring";
+
     private final CreditApplicationRepository applicationRepository;
     private final ProspectRepository prospectRepository;
     private final ScoreRequestPublisher scoreRequestPublisher;
@@ -102,7 +105,8 @@ public class CreditApplicationService
         if (!verification.allowsToProceed()) {
             log.warn("Solicitud bloqueada prospectId={} productType={} — {}",
                     cmd.prospectId(), cmd.productType(), verification.blockReason());
-            throw new PersonNotVerifiedException(cmd.prospectId(), verification.blockReason());
+            throw new PersonNotVerifiedException(cmd.prospectId(), verification.blockReason(),
+                    verification.identityStatus(), verification.screeningStatus());
         }
 
         // OA-03: one active application per (prospectId, productType)
@@ -240,6 +244,15 @@ public class CreditApplicationService
                             app.getApplicationId());
                 }
                 applicationRepository.save(app);
+                // Sin historial en buró, la política del producto puede pedir algo más —una constancia
+                // de estudios, un aval—. Se pide por el mismo camino que usa el analista: con plazo,
+                // aviso y vencimiento, en vez de dejarlo escrito en un detalle que nadie lee.
+                if (!cmd.requirements().isEmpty()) {
+                    requestDocuments(new RequestDocumentsCommand(app.getApplicationId(), SCORING_REQUESTER,
+                            "Sin historial en buró: la política del producto pide "
+                                    + String.join(", ", cmd.requirements()),
+                            cmd.correlationId()));
+                }
             }
             case "REJECTED" -> {
                 app.reject(

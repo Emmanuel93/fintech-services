@@ -70,7 +70,6 @@ management:
 
 fintech:
   scoring:
-    circulo-query-timeout-ms: ${SCORING_CIRCULO_TIMEOUT_MS:5000}
     score-validity-days: ${SCORING_VALIDITY_DAYS:90}
     # Reintentos de evaluación cuando el score-requested llega antes de que el prefetch
     # del buró haya persistido el reporte (ver ScoreRequestedEventListener).
@@ -78,9 +77,20 @@ fintech:
     evaluation-retry-backoff-ms: ${SCORING_EVAL_RETRY_BACKOFF_MS:600}
     # Vigencia del snapshot de precalificación (home "créditos disponibles") antes de recalcular.
     prequalification-ttl-hours: ${PREQUALIFICATION_TTL_HOURS:24}
+    # Quien no tiene historial en buró (NO_HIT / NOT_FOUND) se decide con la política de su producto
+    # (score sin historial + bandas + datos adicionales), no aquí: ver scoring.scoring_policies.
   circulo:
     url: ${CIRCULO_CREDITO_BASE_URL:https://services.circulodecredito.com.mx/sandbox}
-    api-key: ${CIRCULO_CREDITO_API_KEY:YfuKKDGcx8DBFLny8gWJVaBcx0xUc5oT}
-    timeout-seconds: ${CIRCULO_CREDITO_TIMEOUT_SECONDS:30}
+    # Sin valor por defecto: la credencial sale del ambiente (gestor de secretos), nunca del repo.
+    # El adaptador real no arranca sin ella.
+    api-key: ${CIRCULO_CREDITO_API_KEY:}
+    connect-timeout: ${CIRCULO_CREDITO_CONNECT_TIMEOUT:3s}
+    read-timeout: ${CIRCULO_CREDITO_READ_TIMEOUT:10s}
+    # Falla transitoria (timeout, caída, 5xx, 429): reintento con backoff exponencial.
+    retry:
+      max-retries: ${CIRCULO_CREDITO_MAX_RETRIES:3}
+      initial-backoff: ${CIRCULO_CREDITO_INITIAL_BACKOFF:1s}
+      multiplier: ${CIRCULO_CREDITO_BACKOFF_MULTIPLIER:2.0}
+      max-backoff: ${CIRCULO_CREDITO_MAX_BACKOFF:10s}
     # SOLO dev/local: usa MockCirculoAdapter (reporte determinista por CURP) en vez del buró real.
     mock-enabled: ${SCORING_CIRCULO_MOCK_ENABLED:false}

@@ -9,22 +9,28 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import com.fintech.shared.time.BusinessClock;
 
 @Component
 public class MoratoriumAccrualJob {
 
+
     private static final Logger log = LoggerFactory.getLogger(MoratoriumAccrualJob.class);
 
     private final InterestAccrualService accrualService;
+    private final BusinessClock businessClock;
 
-    public MoratoriumAccrualJob(InterestAccrualService accrualService) {
+    public MoratoriumAccrualJob(InterestAccrualService accrualService, BusinessClock businessClock) {
+        this.businessClock = businessClock;
         this.accrualService = accrualService;
     }
 
     // Runs at 23:30 every day (after ordinary interest at 23:00)
-    @Scheduled(cron = "0 30 23 * * *")
+    @SchedulerLock(name = "charges.moratorium-accrual", lockAtMostFor = "PT2H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 30 23 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void runMoratoriumAccrual() {
-        runMoratoriumAccrualFor(LocalDate.now());
+        runMoratoriumAccrualFor(businessClock.today());
     }
 
     /** Igual que el ordinario: la fecha se recibe para poder devengar historia día a día. */

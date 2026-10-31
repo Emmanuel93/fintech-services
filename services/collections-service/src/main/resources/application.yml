@@ -56,6 +56,10 @@ springdoc:
     path: /swagger-ui.html
 
 fintech:
+  # Candado de crones: la tabla vive en el esquema del servicio (ver SchedulingLockAutoConfiguration).
+  scheduling:
+    lock:
+      table: collections.shedlock
   collections:
     write-off-threshold-days: ${COLLECTIONS_WRITEOFF_THRESHOLD_DAYS:181}
     max-contact-attempts-per-day: ${COLLECTIONS_MAX_CONTACT_ATTEMPTS:3}

@@ -37,7 +37,8 @@ class BureauPrefetchServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new BureauPrefetchService(prefetchRepository, reportRepository, circuloGateway);
+        service = new BureauPrefetchService(prefetchRepository, reportRepository, circuloGateway,
+                BureauRetryPolicy.defaults(), d -> { });
         lenient().when(prefetchRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(reportRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
     }

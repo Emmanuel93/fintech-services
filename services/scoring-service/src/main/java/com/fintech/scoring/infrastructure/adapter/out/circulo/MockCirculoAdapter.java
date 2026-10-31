@@ -6,10 +6,17 @@ import com.fintech.scoring.domain.CirculoReport;
 import com.fintech.scoring.domain.CirculoReportStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fintech.shared.simulation.SimulatorGuard;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import com.fintech.scoring.application.port.out.BureauUnavailableException;
 
 /**
  * Adaptador de buró SOLO para ambientes dev/local ({@code fintech.circulo.mock-enabled=true}).
@@ -31,7 +38,8 @@ import java.util.UUID;
  *   <tr><td>{@code ZZER}</td><td>{@code ERROR}</td><td>el buró contesta que no pudo</td></tr>
  *   <tr><td>{@code ZZNH}</td><td>{@code NO_HIT}</td><td>persona sin historial</td></tr>
  *   <tr><td>{@code ZZNF}</td><td>{@code NOT_FOUND}</td><td>el buró no la encuentra</td></tr>
- *   <tr><td>{@code ZZTO}</td><td><b>lanza</b></td><td>timeout o caída — el prefetch queda FAILED</td></tr>
+ *   <tr><td>{@code ZZTO}</td><td><b>lanza</b> siempre</td><td>buró caído: se agotan los reintentos y el prefetch queda FAILED</td></tr>
+ *   <tr><td>{@code ZZRT}</td><td>lanza dos veces y luego contesta</td><td>falla transitoria: el reintento con backoff la absorbe</td></tr>
  *   <tr><td>cualquier otro</td><td>FICO 720–819, historial limpio</td><td>el camino feliz</td></tr>
  * </table>
  *
@@ -47,6 +55,17 @@ class MockCirculoAdapter implements CirculoGateway {
 
     private static final Logger log = LoggerFactory.getLogger(MockCirculoAdapter.class);
 
+    /** Fallas transitorias del escenario ZZRT: dos por prospecto, luego contesta. */
+    private static final int TRANSIENT_FAILURES = 2;
+    private final Map<UUID, AtomicInteger> transientAttempts = new ConcurrentHashMap<>();
+
+    /** Un buró simulado en producción decide créditos con reportes inventados: no arranca. */
+    @Autowired
+    void refuseToRunInProduction(Environment environment) {
+        SimulatorGuard.requireNonProduction(environment, "MockCirculoAdapter (buró simulado)",
+                "SCORING_CIRCULO_MOCK_ENABLED=false y CIRCULO_CREDITO_API_KEY con la credencial del ambiente");
+    }
+
     @Override
     public CirculoReport query(UUID reportId, UUID prefetchId, UUID prospectId, CirculoQueryRequest req) {
         String curp = req.curp() != null ? req.curp().toUpperCase() : "";
@@ -58,6 +77,16 @@ class MockCirculoAdapter implements CirculoGateway {
             log.warn("[MOCK BURÓ] Escenario TIMEOUT para prospectId={} — el buró no contesta", prospectId);
             throw new BureauUnavailableException(
                     "Mock: Círculo no respondió en el tiempo previsto (CURP ZZTO)");
+        }
+        if (curp.startsWith("ZZRT")) {
+            int intento = transientAttempts.computeIfAbsent(prospectId, k -> new AtomicInteger()).incrementAndGet();
+            if (intento <= TRANSIENT_FAILURES) {
+                log.warn("[MOCK BURÓ] Escenario TRANSITORIO intento {} para prospectId={} — el buró no contesta todavía",
+                        intento, prospectId);
+                throw new BureauUnavailableException(
+                        "Mock: Círculo no respondió (falla transitoria " + intento + "/" + TRANSIENT_FAILURES + ")");
+            }
+            transientAttempts.remove(prospectId);
         }
         CirculoReportStatus fallo = failureScenario(curp);
         if (fallo != null) {

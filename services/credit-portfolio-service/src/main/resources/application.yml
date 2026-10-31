@@ -80,6 +80,10 @@ springdoc:
     try-it-out-enabled: true
 
 fintech:
+  # Candado de crones: la tabla vive en el esquema del servicio (ver SchedulingLockAutoConfiguration).
+  scheduling:
+    lock:
+      table: credit_portfolio.shedlock
   credit-portfolio:
     reminder-lead-days: ${CREDIT_PORTFOLIO_REMINDER_LEAD_DAYS:3}
   test-support:

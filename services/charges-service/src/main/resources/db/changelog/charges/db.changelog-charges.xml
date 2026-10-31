@@ -16,4 +16,6 @@
 
     <include file="db/changelog/charges/008-bnpl-fecha-de-arranque.sql" relativeToChangelogFile="false"/>
 
+    <include file="db/changelog/charges/009-candado-de-crones.sql" relativeToChangelogFile="false"/>
+
 </databaseChangeLog>

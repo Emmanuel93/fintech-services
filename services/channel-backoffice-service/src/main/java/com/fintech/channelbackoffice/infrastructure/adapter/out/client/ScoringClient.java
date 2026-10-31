@@ -99,6 +99,19 @@ public class ScoringClient {
                 .block();
     }
 
+    /** Qué se le puede pedir a quien no tiene historial en buró. Catálogo del dominio, tal cual. */
+    public List<Map<String, Object>> noHistoryRequirements() {
+        log.info("-> GET scoring-service /api/v1/scoring/policies/no-history-requirements");
+        return webClient.get()
+                .uri("/api/v1/scoring/policies/no-history-requirements")
+                .headers(DomainClientSupport.staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("scoring-service", r))
+                .bodyToFlux(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .collectList()
+                .block();
+    }
+
     /** Da de alta una política. El dominio versiona: crear sobre un par existente sube versión. */
     public Map<String, Object> createPolicy(Map<String, Object> body) {
         log.info("-> POST scoring-service /api/v1/scoring/policies");
@@ -122,8 +135,14 @@ public class ScoringClient {
             boolean active,
             int version,
             List<RuleView> rules,
-            List<ThresholdView> thresholds
+            List<ThresholdView> thresholds,
+            NoHistoryView noHistory
     ) {}
+
+    /** Qué hace la política con quien no tiene historial en buró: score y datos que se le piden. */
+    public record NoHistoryView(int score, List<RequirementView> requirements) {}
+
+    public record RequirementView(String code, String label) {}
 
     public record RuleView(
             UUID ruleId, String ruleType, String creditType, String operator,

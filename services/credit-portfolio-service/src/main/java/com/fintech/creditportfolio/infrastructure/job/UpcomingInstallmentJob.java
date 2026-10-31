@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Nightly at 00:00 (just before InstallmentDueJob at 00:01) — finds PENDING installments due
@@ -22,24 +24,34 @@ import java.util.List;
 @Component
 public class UpcomingInstallmentJob {
 
+
     private static final Logger log = LoggerFactory.getLogger(UpcomingInstallmentJob.class);
 
     private final InstallmentRepository installmentRepository;
     private final CreditPortfolioEventPublisher eventPublisher;
     private final CreditPortfolioProperties properties;
+    private final BusinessClock businessClock;
 
     public UpcomingInstallmentJob(InstallmentRepository installmentRepository,
                                    CreditPortfolioEventPublisher eventPublisher,
-                                   CreditPortfolioProperties properties) {
+                                   CreditPortfolioProperties properties,
+                                  BusinessClock businessClock) {
+        this.businessClock = businessClock;
         this.installmentRepository = installmentRepository;
         this.eventPublisher        = eventPublisher;
         this.properties            = properties;
     }
 
-    @Scheduled(cron = "0 0 0 * * *")
+    @SchedulerLock(name = "credit-portfolio.upcoming-installment", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 0 0 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     @Transactional(readOnly = true)
     public void run() {
-        LocalDate target = LocalDate.now().plusDays(properties.getReminderLeadDays());
+        runFor(businessClock.today());
+    }
+
+    /** El trabajo para un «hoy» explícito, sin candado: lo usa el soporte de pruebas (ver InstallmentDueJob). */
+    public void runFor(LocalDate today) {
+        LocalDate target = today.plusDays(properties.getReminderLeadDays());
         List<Installment> upcoming = installmentRepository.findDueOn(target);
         log.info("UpcomingInstallmentJob starting installments={} targetDate={}", upcoming.size(), target);
 

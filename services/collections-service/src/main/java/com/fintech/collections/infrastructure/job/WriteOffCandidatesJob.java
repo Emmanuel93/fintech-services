@@ -13,6 +13,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * ES-03: weekly — identifies MANAGED/LEGAL cases at or past write_off_threshold_days and
@@ -35,7 +36,8 @@ public class WriteOffCandidatesJob {
         this.properties      = properties;
     }
 
-    @Scheduled(cron = "0 0 6 * * MON")
+    @SchedulerLock(name = "collections.write-off-candidates", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 0 6 * * MON", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
         List<CollectionCase> candidates = caseRepository.findByStatusInAndDaysDelinquentGreaterThanEqual(
                 List.of(CaseStatus.MANAGED, CaseStatus.LEGAL), properties.getWriteOffThresholdDays());

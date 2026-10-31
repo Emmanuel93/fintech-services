@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * La cartera del distribuidor: su línea y el avance de cada disposición.
@@ -115,7 +116,7 @@ public class CreditPortfolioClient {
 
     /** Deriva el resumen que consume la fila de la colocación a partir de las cuotas reales. */
     private static DispositionSchedule summarize(UUID dispositionId, List<Installment> installments) {
-        LocalDate hoy = LocalDate.now();
+        LocalDate hoy = BusinessClock.current().today();
         int paid = (int) installments.stream().filter(Installment::pagada).count();
 
         // El atraso es el de la cuota vencida más antigua sin pagar: es el criterio con el que

@@ -13,9 +13,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Decide cuándo la cobranza automática se calla, y deja constancia de por qué.
@@ -143,6 +143,6 @@ public class CommunicationHoldService {
 
     /** Fin del día local: una promesa «para el 20» vale todo el 20, no hasta las 00:00 del 20. */
     private static Instant endOfDay(LocalDate day) {
-        return day.atTime(23, 59, 59).atZone(ZoneId.systemDefault()).toInstant();
+        return day.atTime(23, 59, 59).atZone(BusinessClock.current().zone()).toInstant();
     }
 }

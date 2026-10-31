@@ -1,5 +1,6 @@
 package com.fintech.scoring.infrastructure.adapter.in.messaging;
 
+import com.fintech.scoring.application.service.PendingEvaluationService;
 import com.fintech.scoring.application.service.ScoringEvaluationService;
 import com.fintech.scoring.domain.ScoreEvaluation;
 import org.slf4j.Logger;
@@ -31,10 +32,13 @@ public class ScoreRequestedEventListener {
     private static final Logger log = LoggerFactory.getLogger(ScoreRequestedEventListener.class);
 
     private final ScoringEvaluationService scoringEvaluationService;
+    private final PendingEvaluationService pendingEvaluations;
 
     public ScoreRequestedEventListener(
-            ScoringEvaluationService scoringEvaluationService) {
+            ScoringEvaluationService scoringEvaluationService,
+            PendingEvaluationService pendingEvaluations) {
         this.scoringEvaluationService = scoringEvaluationService;
+        this.pendingEvaluations = pendingEvaluations;
     }
 
     @KafkaListener(
@@ -87,18 +91,27 @@ public class ScoreRequestedEventListener {
      * que la decisión se toma en {@link #isTransient(Throwable)}.
      */
     /**
-     * Lo que queda cuando ya no hay nada que esperar: se registra y se deja pendiente.
+     * Lo que queda cuando el reintento ya no sirve.
      *
-     * <p><b>No hay salida automática y tampoco humana para el buró</b>: nadie puede inventar un
-     * puntaje. La solicitud se queda esperando a que alguien vuelva a pedir el reporte o la rechace
-     * a mano, y por eso el log lleva el motivo — no para saber que falló, sino para saber
-     * <em>qué</em> hacer con ella.
+     * <p><b>Si el reporte va en camino</b> ({@link BureauReportPending}), la solicitud se estaciona y
+     * el prefetch la reanuda al terminar. Antes se quedaba aquí, con un warning, en PENDING_SCORING
+     * para siempre: el reintento cubre unos segundos y un buró real con reintentos puede tardar casi
+     * un minuto.
+     *
+     * <p><b>Si no va a llegar</b> —prefetch fallido, sin política— no hay salida automática ni humana
+     * para el buró: nadie puede inventar un puntaje. Se registra con el motivo, no para saber que
+     * falló, sino para saber <em>qué</em> hacer con ella.
      *
      * <p>El mensaje se consume a propósito: devolverlo a la cola lo haría rebotar sobre un estado
      * que no cambia, bloqueando la partición para las solicitudes que sí se pueden resolver.
      */
     @Recover
     void leavePendingForManualIntervention(EvaluationNotReady e, ScoreRequestedPayload payload) {
+        if (e instanceof BureauReportPending) {
+            pendingEvaluations.park(payload.applicationId(), payload.prospectId(),
+                    payload.prospectType(), payload.productType(), e.reason());
+            return;
+        }
         log.warn("Scoring PENDIENTE DE INTERVENCIÓN applicationId={} prospectId={} motivo={} — {}",
                 payload.applicationId(), payload.prospectId(), e.reason(), e.getMessage());
     }

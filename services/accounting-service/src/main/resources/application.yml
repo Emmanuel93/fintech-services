@@ -56,6 +56,10 @@ springdoc:
     path: /swagger-ui.html
 
 fintech:
+  # Candado de crones: la tabla vive en el esquema del servicio (ver SchedulingLockAutoConfiguration).
+  scheduling:
+    lock:
+      table: accounting.shedlock
   accounting:
     currency: MXN
     # Día del mes en que corre la facturación consolidada por party del período anterior.

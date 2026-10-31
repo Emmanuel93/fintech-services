@@ -17,4 +17,6 @@
     <include file="db/changelog/accounting/010-writeoff-derecognition.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/accounting/011-bank-suspense.sql"          relativeToChangelogFile="false"/>
     <include file="db/changelog/accounting/012-disposition-always-to-bank.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/013-candado-de-crones.sql" relativeToChangelogFile="false"/>
+
 </databaseChangeLog>

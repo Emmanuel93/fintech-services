@@ -864,17 +864,16 @@ flowchart TB
 
 | # | Externo real | Servicio | Puerto de salida | Adaptador local | Cómo se enciende el simulador |
 |---|---|---|---|---|---|
-| 1 | **Círculo de Crédito** — consulta (`POST /v2/rccficoscore`) | scoring | `CirculoGateway` | `MockCirculoAdapter` | `SCORING_CIRCULO_MOCK_ENABLED=true` (así está en `docker-compose.yml`) |
+| 1 | **Círculo de Crédito** — consulta (`POST /v2/rccficoscore`) | scoring | `CirculoGateway` | `MockCirculoAdapter` (escenarios por CURP, incluido `ZZRT`: falla transitoria que el reintento absorbe) | `SCORING_CIRCULO_MOCK_ENABLED=true`. El adaptador real (`CirculoCreditoAdapter`) ya está listo: timeouts `CIRCULO_CREDITO_CONNECT_TIMEOUT`/`READ_TIMEOUT`, reintento con backoff (`CIRCULO_CREDITO_MAX_RETRIES`=3) y no arranca sin `CIRCULO_CREDITO_API_KEY`. Quien no tiene historial (`NO_HIT`/`NOT_FOUND`) se decide con la **política del producto**: score sin historial (0 por defecto) por sus bandas y, si cae en revisión, datos adicionales que origination pide como documentos. Si el puntaje llega antes que el reporte, se estaciona y el prefetch lo reanuda |
 | 2 | **Círculo de Crédito** — reporte de cartera | collections | `BureauReportingPort` | `NoopBureauReportingAdapter` | Siempre — no hay adaptador real todavía |
 | 3 | **STP / SPEI** — registro y conciliación | stp | `StpGatewayPort` | `StubStpGateway` | `STP_GATEWAY_MODE=stub` (default) |
-| 4 | **SPEI / BANXICO** — camino heredado del desembolso | credit-portfolio | `SpeiDispatchPort` | `NoopSpeiDispatchAdapter` | Siempre |
-| 5 | **SPEI / CoDi** — retiro de saldo a favor | wallet | `WalletDispatchPort` | `NoopWalletDispatchAdapter` | Siempre |
 | 6 | **PAC** — timbrado CFDI ante el SAT | invoicing | `PacStampingPort` | `NoopPacAdapter` | Siempre |
 | 7 | **WhatsApp Cloud API · FCM/APNs · SMTP** | notifications | `WhatsAppAdapter` · `PushAdapter` · `EmailAdapter` | `NoopWhatsAppAdapter` · `NoopPushAdapter` · `NoopEmailAdapter` | Noop por default; **el correo sí tiene adaptador real**: `fintech.notifications.email.smtp-enabled=true` + credenciales `SMTP_*` |
 | 8 | **Geolocalización por IP** (MaxMind, IPinfo…) | identity | `GeoLocationPort` | `StubGeoLocationAdapter` | Siempre — devuelve `unknown` |
-| 9 | **Proveedor de KYC / biometría** | beneficiary · channel-mobile | *(sin puerto todavía)* | Modo `MANUAL` + `KycSimulationController` + stub de OCR | `fintech.beneficiary.identity-verification.mode=MANUAL` · `BENEFICIARY_KYC_SIMULATION_ENABLED=true` |
-| 10 | **Proveedor de firma** (NIP, biometría, e.firma) | origination | `SignatureValidator` | `NoopSignatureValidator` | Siempre — aprueba todo |
-| 11 | **Validación de CLABE** (SPEI) | origination | `ClabeValidator` | `NoopClabeValidator` | Siempre — sólo valida los 18 dígitos |
+| 9 | **Proveedor de KYC / biometría** | beneficiary · channel-mobile | `KycProviderPort` · `IneReaderPort` · `LivenessPort` | Revisión manual + `KycSimulationController` + `StubIneReader` / `StubLivenessAdapter` | `BENEFICIARY_KYC_SIMULATION_ENABLED=true` |
+| 10 | **Proveedor de firma** (NIP, biometría, e.firma) | origination | `SignatureValidator` | `SimulatedSignatureValidator` — rechaza una prueba vacía o `000000` | `fintech.origination.signature.provider=simulated` (default). El real entra por el mismo puerto con otro valor |
+| 11 | **Validación de CLABE** (SPEI) | origination | `ClabeValidator` | *(real, local)* `ClabeCheckDigitValidator` — dígito verificador | No es simulador; falta comprobar con el banco que la cuenta exista |
+| 13 | **Listas de gobierno** (OFAC, PEP, SAT 69-B) | compliance | `GovernmentListPort` | `MockGovernmentListAdapter` (CSV sucio, determinista) | `COMPLIANCE_LISTS_PROVIDER_MODE=mock` (default). Para fuentes HTTP ya está `HttpGovernmentListAdapter` (`mode=http`, fuentes en `fintech.compliance.provider.sources`: URL con `{date}`, credencial y layout). **Pendiente — QeQ entrega por SFTP**: falta `SftpGovernmentListAdapter` (mismo puerto: bytes + layout declarado; el parser y la carga idempotente ya existen) |
 | 12 | **Pasarela de SMS** (código OTP) | channel-mobile | `OtpService` | Código fijo de desarrollo | `OTP_CODE_VALIDATION=false` + `OTP_DEV_CODE` |
 
 ### El único simulador que no miente
@@ -891,7 +890,7 @@ monto** (`.00` liquida, `.02` rechazo PLD, `.06` nunca aparece, `.08` sello alte
 
 | Guarda | Dónde | Qué hace |
 |---|---|---|
-| **Lista blanca de perfiles** | `StubStpGateway` | Sólo arranca con `local`, `dev`, `test`, `ci`, `docker`, `qa`, `staging`. Cualquier otro perfil —o ninguno— **impide el arranque**. Es lista blanca y no lista negra a propósito: el compose de este repo levanta con perfil `docker`, así que una lista negra de «prod» no habría protegido de promover ese mismo compose |
+| **`SimulatorGuard` (lista blanca de ambientes)** | `StubStpGateway`, `MockCirculoAdapter`, `MockGovernmentListAdapter`, `SimulatedSignatureValidator` | Sólo arrancan si el ambiente se declara bajo: `FINTECH_ENVIRONMENT` en `local`, `dev`, `test`, `ci`, `qa`, `staging` (el compose declara `local`), o con perfiles que lo sean (las pruebas, `test`). **`docker` ya no cuenta**: dice dónde corre el proceso, no qué ambiente es, y promover el compose sin tocarlo habría dejado los simuladores encendidos. Una declaración de producción gana siempre |
 | **`@ConditionalOnProperty`** | `MockCirculoAdapter`, `NoopEmailAdapter`/`SmtpEmailAdapter` | El bean simplemente no existe si la bandera no está puesta |
 | **`WARN` en cada llamada** | `MockCirculoAdapter`, `NoopPacAdapter`, `NoopSpeiDispatchAdapter`… | Ningún log queda limpio mientras haya un simulador activo |
 | **Bandera de simulación de KYC** | `KycSimulationController` | Responde error explícito cuando `BENEFICIARY_KYC_SIMULATION_ENABLED=false` |
@@ -1347,3 +1346,5 @@ Los puertos listados son **internos** (dentro de la red Docker `fintech-network`
 - **Snapshot inmutable** de términos del producto al originar — la cuenta no depende del catálogo en runtime.
 - **Tipificación explícita** — `partyType`, `productType`, `dispositionType` gobiernan la lógica; nunca se infiere por comparación de atributos.
 - **El repo es código.** Todo el material de pruebas, comercial y de arquitectura —videos, imágenes, grabaciones, reportes, mediciones de capacidad y respaldos de base— vive en `~/Documents/material-kredius` (`comercial/`, `arquitectura/`, `pruebas/`, `respaldos/`), nunca aquí: `.gitignore` lo excluye y las herramientas lo escriben directo afuera (`MATERIAL_DIR` cambia la raíz). Detalle en [tools/regresion-e2e](tools/regresion-e2e/README.md#material-fuera-del-repo).
+- **Hora de negocio explícita.** Los contenedores corren en UTC; la fecha de negocio sale de `BusinessClock` (`shared`, zona `fintech.business.zone`, por defecto `America/Mexico_City`), nunca de `LocalDate.now()` a secas. Todo `@Scheduled(cron = …)` declara `zone = "${fintech.business.zone:America/Mexico_City}"` y lleva `@SchedulerLock` (ShedLock sobre la tabla `<esquema>.shedlock` del servicio): con varias réplicas, el cron corre una vez. `ScheduledJobsRunInBusinessTimeTest` lo vigila en cada build.
+- **Simuladores con guarda.** Todo simulador de proveedor llama a `SimulatorGuard` al arrancar: sin `FINTECH_ENVIRONMENT` en un ambiente bajo, el servicio no arranca. Un simulador encendido en producción se ve verde y no hace nada.

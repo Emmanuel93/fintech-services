@@ -43,6 +43,10 @@ public class BureauPrefetch {
     @Column(length = 500)
     private String failureReason;
 
+    /** Cuántas veces se llamó al buró en este prefetch, contando los reintentos. */
+    @Column(nullable = false)
+    private int attempts;
+
     protected BureauPrefetch() {}
 
     public static BureauPrefetch create(UUID prefetchId, UUID prospectId, String curp,
@@ -71,8 +75,14 @@ public class BureauPrefetch {
 
     public void markFailed(String reason) {
         this.status        = BureauPrefetchStatus.FAILED;
-        this.failureReason = reason;
+        // La columna es de 500: un mensaje de excepción más largo no debe tumbar el registro del fallo.
+        this.failureReason = reason != null && reason.length() > 500 ? reason.substring(0, 500) : reason;
         this.completedAt   = Instant.now();
+    }
+
+    /** Una llamada más al buró: el primer intento o un reintento. */
+    public void recordAttempt() {
+        this.attempts++;
     }
 
     public UUID getPrefetchId()             { return prefetchId; }
@@ -85,4 +95,5 @@ public class BureauPrefetch {
     public Instant getRequestedAt()         { return requestedAt; }
     public Instant getCompletedAt()         { return completedAt; }
     public String getFailureReason()        { return failureReason; }
+    public int getAttempts()                { return attempts; }
 }

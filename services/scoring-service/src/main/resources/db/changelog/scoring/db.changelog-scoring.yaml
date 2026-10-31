@@ -123,3 +123,30 @@ databaseChangeLog:
             path: db/changelog/scoring/014-rename-mora-check.sql
             relativeToChangelogFile: false
             splitStatements: false
+
+  - changeSet:
+      id: 015-intentos-del-prefetch
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/015-intentos-del-prefetch.sql
+            relativeToChangelogFile: false
+            splitStatements: false
+
+  - changeSet:
+      id: 016-evaluaciones-en-espera
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/016-evaluaciones-en-espera.sql
+            relativeToChangelogFile: false
+            splitStatements: false
+
+  - changeSet:
+      id: 017-politica-sin-historial
+      author: scoring-service
+      changes:
+        - sqlFile:
+            path: db/changelog/scoring/017-politica-sin-historial.sql
+            relativeToChangelogFile: false
+            splitStatements: false

@@ -40,6 +40,11 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class DelinquencyCalculationJobTest {
 
+    /** Reloj fijo en la zona de negocio: la prueba no depende de la hora ni de la zona de la máquina. */
+    private static final com.fintech.shared.time.BusinessClock CLOCK = new com.fintech.shared.time.BusinessClock(
+            java.time.Clock.fixed(java.time.Instant.parse("2026-10-30T18:00:00Z"),
+                    java.time.ZoneId.of("America/Mexico_City")));
+
     @Mock CreditAccountRepository accountRepository;
     @Mock InstallmentRepository installmentRepository;
     @Mock CreditPortfolioEventPublisher eventPublisher;
@@ -51,7 +56,7 @@ class DelinquencyCalculationJobTest {
     @BeforeEach
     void setUp() {
         processor = new DelinquencyAccountProcessor(accountRepository, installmentRepository, dispositionRepository, eventPublisher);
-        job = new DelinquencyCalculationJob(accountRepository, processor);
+        job = new DelinquencyCalculationJob(accountRepository, processor, CLOCK);
     }
 
     // ── DQ-01 ──────────────────────────────────────────────────────────────────
@@ -70,7 +75,7 @@ class DelinquencyCalculationJobTest {
 
     @Test
     void dq02_activeAccountNoOverdue_setsZeroDaysAndPublishes() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = CLOCK.today();
         CreditAccount account = activeAccount("50000");
         UUID accountId = account.getCreditAccountId();
 
@@ -93,7 +98,7 @@ class DelinquencyCalculationJobTest {
 
     @Test
     void dq03_singleOverdueInstallment_calculatesDaysCorrectly() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = CLOCK.today();
         LocalDate dueDate = today.minusDays(10);
         CreditAccount account = activeAccount("50000");
         UUID accountId = account.getCreditAccountId();
@@ -117,7 +122,7 @@ class DelinquencyCalculationJobTest {
 
     @Test
     void dq04_multipleOverdueInstallments_usesEarliestDueDate() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = CLOCK.today();
         CreditAccount account = activeAccount("50000");
         UUID accountId = account.getCreditAccountId();
 
@@ -139,7 +144,7 @@ class DelinquencyCalculationJobTest {
 
     @Test
     void dq05_processorThrowsForOneAccount_continuesWithRemainingAccounts() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = CLOCK.today();
         CreditAccount failing  = activeAccount("10000");
         CreditAccount succeeding = activeAccount("20000");
 

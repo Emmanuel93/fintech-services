@@ -12,6 +12,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Diario a las 00:01 — busca las mensualidades pendientes que vencen hoy
@@ -26,21 +28,34 @@ import java.util.List;
 @Component
 public class InstallmentDueJob {
 
+
     private static final Logger log = LoggerFactory.getLogger(InstallmentDueJob.class);
 
     private final InstallmentRepository installmentRepository;
     private final CreditPortfolioEventPublisher eventPublisher;
+    private final BusinessClock businessClock;
 
     public InstallmentDueJob(InstallmentRepository installmentRepository,
-                              CreditPortfolioEventPublisher eventPublisher) {
+                              CreditPortfolioEventPublisher eventPublisher,
+                             BusinessClock businessClock) {
+        this.businessClock = businessClock;
         this.installmentRepository = installmentRepository;
         this.eventPublisher        = eventPublisher;
     }
 
-    @Scheduled(cron = "0 1 0 * * *")
+    @SchedulerLock(name = "credit-portfolio.installment-due", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 1 0 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     @Transactional(readOnly = true)
     public void run() {
-        LocalDate today = LocalDate.now();
+        runFor(businessClock.today());
+    }
+
+    /**
+     * El trabajo del job para una fecha explícita, <b>sin candado</b>: lo usa el soporte de pruebas,
+     * que lo dispara varias veces seguidas al correr el reloj. El candado es para el cron, que
+     * corre en cada réplica; una llamada explícita ya es una sola.
+     */
+    public void runFor(LocalDate today) {
         List<Installment> due = installmentRepository.findDueOnOrBefore(today);
         log.info("InstallmentDueJob starting installments={} date={}", due.size(), today);
 

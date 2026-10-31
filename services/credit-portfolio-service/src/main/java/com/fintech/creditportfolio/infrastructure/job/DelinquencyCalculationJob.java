@@ -10,6 +10,8 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.List;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Nightly at 23:59 — recalculates daysDelinquent for every ACTIVE credit account
@@ -21,20 +23,33 @@ import java.util.List;
 @Component
 public class DelinquencyCalculationJob {
 
+
     private static final Logger log = LoggerFactory.getLogger(DelinquencyCalculationJob.class);
 
     private final CreditAccountRepository accountRepository;
     private final DelinquencyAccountProcessor processor;
+    private final BusinessClock businessClock;
 
     public DelinquencyCalculationJob(CreditAccountRepository accountRepository,
-                                      DelinquencyAccountProcessor processor) {
+                                      DelinquencyAccountProcessor processor,
+                                     BusinessClock businessClock) {
+        this.businessClock = businessClock;
         this.accountRepository = accountRepository;
         this.processor         = processor;
     }
 
-    @Scheduled(cron = "0 59 23 * * *")
+    @SchedulerLock(name = "credit-portfolio.delinquency-calculation", lockAtMostFor = "PT2H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 59 23 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
-        LocalDate today = LocalDate.now();
+        runFor(businessClock.today());
+    }
+
+    /**
+     * El trabajo del job para una fecha explícita, <b>sin candado</b>: lo usa el soporte de pruebas,
+     * que lo dispara varias veces seguidas al correr el reloj. El candado es para el cron, que
+     * corre en cada réplica; una llamada explícita ya es una sola.
+     */
+    public void runFor(LocalDate today) {
         List<CreditAccount> activeAccounts = accountRepository.findAllByStatus(CreditAccountStatus.ACTIVE);
         log.info("DelinquencyCalculationJob starting accounts={} date={}", activeAccounts.size(), today);
 

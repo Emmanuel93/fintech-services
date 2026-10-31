@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDate;
 import java.util.Map;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Dev-only: dispara bajo demanda los mismos beans @Scheduled que corren a medianoche,
@@ -50,7 +51,7 @@ class TestSupportController {
     @PostMapping("/run-daily-accrual")
     ResponseEntity<Map<String, Object>> runDailyAccrual(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        LocalDate target = date != null ? date : LocalDate.now();
+        LocalDate target = date != null ? date : BusinessClock.current().today();
         int eligible = accrualService.findScheduleIdsForAccrual(target).size();
         log.info("[test-support] Disparando DailyAccrualJob manualmente, date={} eligible={}", target, eligible);
         dailyAccrualJob.runDailyAccrualFor(target);
@@ -74,7 +75,7 @@ class TestSupportController {
     @PostMapping("/run-moratorium-accrual")
     ResponseEntity<Map<String, Object>> runMoratoriumAccrual(
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
-        LocalDate target = date != null ? date : LocalDate.now();
+        LocalDate target = date != null ? date : BusinessClock.current().today();
         int eligible = accrualService.findMoratoriumScheduleIds().size();
         log.info("[test-support] Disparando MoratoriumAccrualJob manualmente, date={} eligible={}", target, eligible);
         moratoriumAccrualJob.runMoratoriumAccrualFor(target);

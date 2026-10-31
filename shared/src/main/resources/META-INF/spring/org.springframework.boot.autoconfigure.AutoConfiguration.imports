@@ -1,2 +1,4 @@
 com.fintech.shared.lock.redis.LockAutoConfiguration$RedissonLockConfiguration
 com.fintech.shared.lock.redis.LockAutoConfiguration$RedisTemplateLockConfiguration
+com.fintech.shared.time.BusinessTimeAutoConfiguration
+com.fintech.shared.scheduling.SchedulingLockAutoConfiguration

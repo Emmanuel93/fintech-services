@@ -176,3 +176,12 @@ databaseChangeLog:
             path: db/changelog/creditportfolio/024-veredicto-por-prospecto.sql
             relativeToChangelogFile: false
             splitStatements: false
+
+  - changeSet:
+      id: 025-candado-de-crones
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/025-candado-de-crones.sql
+            relativeToChangelogFile: false
+            splitStatements: true

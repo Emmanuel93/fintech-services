@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Append-only-ish commission accrual. CR-01: {@code amount = basis * rate}. CR-02: rate is a
@@ -72,7 +73,7 @@ public class CommissionRecord {
         r.rate               = rate;
         r.amount             = basis.multiply(rate);
         r.status             = CommissionRecordStatus.ACCRUED;
-        r.period             = YearMonth.now().toString().replace("-", "");
+        r.period             = YearMonth.now(BusinessClock.current().clock()).toString().replace("-", "");
         r.accrualDate        = now;
         return r;
     }

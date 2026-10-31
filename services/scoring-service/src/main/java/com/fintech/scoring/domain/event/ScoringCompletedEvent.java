@@ -1,9 +1,11 @@
 package com.fintech.scoring.domain.event;
 
+import com.fintech.scoring.domain.NoHistoryRequirement;
 import com.fintech.scoring.domain.ScoreEvaluation;
 import com.fintech.scoring.domain.ScoringPolicy;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -25,9 +27,24 @@ public record ScoringCompletedEvent(
         int     totalScore,
         String  riskLevel,
         String  decision,       // AUTO_APPROVED | MANUAL_REVIEW | REJECTED
-        Instant evaluatedAt
+        Instant evaluatedAt,
+        // Lo que la política pide a quien no tiene historial en buró; vacío en cualquier otro caso.
+        // Origination lo convierte en una petición de documentos para la mesa.
+        List<Requirement> requirements
 ) {
+    /** Un dato adicional que se pide: el código para las máquinas, la etiqueta para las personas. */
+    public record Requirement(String code, String label) {}
+
+    public ScoringCompletedEvent {
+        requirements = requirements == null ? List.of() : List.copyOf(requirements);
+    }
+
     public static ScoringCompletedEvent from(ScoreEvaluation evaluation, ScoringPolicy policy, UUID applicationId) {
+        return from(evaluation, policy, applicationId, List.of());
+    }
+
+    public static ScoringCompletedEvent from(ScoreEvaluation evaluation, ScoringPolicy policy, UUID applicationId,
+                                             List<NoHistoryRequirement> requirements) {
         return new ScoringCompletedEvent(
                 UUID.randomUUID().toString(),
                 Instant.now(),
@@ -41,7 +58,8 @@ public record ScoringCompletedEvent(
                 evaluation.getTotalScore(),
                 evaluation.getRiskLevel().name(),
                 evaluation.getDecision().name(),
-                evaluation.getEvaluatedAt()
+                evaluation.getEvaluatedAt(),
+                requirements.stream().map(r -> new Requirement(r.name(), r.label())).toList()
         );
     }
 }

@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * PR-01: recomputes bucket/stage/provision for every ACTIVE RiskProfile and publishes
@@ -22,7 +23,8 @@ public class RiskAssessmentJob {
         this.riskAssessmentService = riskAssessmentService;
     }
 
-    @Scheduled(cron = "0 0 1 * * *")
+    @SchedulerLock(name = "risk.assessment", lockAtMostFor = "PT2H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 0 1 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
         log.info("RiskAssessmentJob starting nightly recompute");
         RiskAssessmentService.Result result = riskAssessmentService.reassessAll();

@@ -71,7 +71,10 @@ class ConfigTheEnvironmentNeverDeliversTest {
             "SMTP_PASSWORD", "el buzón local no autentica",
             // El blanco es el valor correcto: sin código fijo, el OTP se valida de verdad. Ponerlo
             // es lo que abre la puerta de atrás, y por eso ese es el lado que exige una decisión.
-            "OTP_DEV_CODE", "en blanco el OTP se valida de verdad; el valor es lo excepcional");
+            "OTP_DEV_CODE", "en blanco el OTP se valida de verdad; el valor es lo excepcional",
+            // La credencial no se versiona. En local corre el buró simulado y no la usa; el
+            // adaptador real se niega a arrancar sin ella, así que el blanco no pasa en silencio.
+            "CIRCULO_CREDITO_API_KEY", "el buró simulado no la usa; el real no arranca sin ella");
 
     /** {@code ${VARIABLE:}} y {@code ${VARIABLE:valor}} — capturamos nombre y default. */
     private static final Pattern PLACEHOLDER =

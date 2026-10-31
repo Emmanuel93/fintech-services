@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Hourly job that expires offers whose {@code validUntil} has passed (OM-04).
@@ -29,7 +30,8 @@ public class OfferExpirationJob {
         this.applicationRepository = applicationRepository;
     }
 
-    @Scheduled(cron = "0 0 * * * *")   // top of every hour
+    @SchedulerLock(name = "origination.offer-expiration", lockAtMostFor = "PT30M", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 0 * * * *", zone = "${fintech.business.zone:America/Mexico_City}")   // top of every hour
     public void expireStaleOffers() {
         Instant now = Instant.now();
         List<CreditApplication> expired = applicationRepository.findExpiredOffers(now);

@@ -9,22 +9,28 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import com.fintech.shared.time.BusinessClock;
 
 @Component
 public class DailyAccrualJob {
 
+
     private static final Logger log = LoggerFactory.getLogger(DailyAccrualJob.class);
 
     private final InterestAccrualService accrualService;
+    private final BusinessClock businessClock;
 
-    public DailyAccrualJob(InterestAccrualService accrualService) {
+    public DailyAccrualJob(InterestAccrualService accrualService, BusinessClock businessClock) {
+        this.businessClock = businessClock;
         this.accrualService = accrualService;
     }
 
     // Runs at 23:00 every day — per-schedule tx isolation via service proxy
-    @Scheduled(cron = "0 0 23 * * *")
+    @SchedulerLock(name = "charges.daily-accrual", lockAtMostFor = "PT2H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "0 0 23 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void runDailyAccrual() {
-        runDailyAccrualFor(LocalDate.now());
+        runDailyAccrualFor(businessClock.today());
     }
 
     /**

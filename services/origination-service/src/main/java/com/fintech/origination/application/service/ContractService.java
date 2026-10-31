@@ -17,13 +17,13 @@ import com.fintech.origination.domain.CreditOffer;
 import com.fintech.origination.domain.Prospect;
 import com.fintech.origination.domain.event.ContractSignedEvent;
 import com.fintech.origination.domain.event.CreditProductCreationRequestedEvent;
+import com.fintech.shared.time.BusinessClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
@@ -113,7 +113,9 @@ public class ContractService implements GenerateContractUseCase, SignContractUse
     }
 
     private String generateContractNumber(CreditApplication app) {
-        String yearMonth = LocalDateTime.now(ZoneOffset.UTC).format(CONTRACT_FMT);
+        // El mes del folio es el de la operación: firmado el 31 a las 19:00 en México es de octubre,
+        // aunque en UTC ya sea 1 de noviembre.
+        String yearMonth = LocalDateTime.now(BusinessClock.current().clock()).format(CONTRACT_FMT);
         String suffix    = app.getApplicationId().toString().replace("-", "").substring(0, 8).toUpperCase();
         return "CTR-" + yearMonth + "-" + suffix;
     }

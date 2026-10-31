@@ -16,4 +16,6 @@
     <include file="db/changelog/collections/009-create-account-balance-snapshots.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/collections/010-instrument-communications.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/collections/011-queue-indexes.sql"             relativeToChangelogFile="false"/>
+    <include file="db/changelog/collections/012-candado-de-crones.sql" relativeToChangelogFile="false"/>
+
 </databaseChangeLog>

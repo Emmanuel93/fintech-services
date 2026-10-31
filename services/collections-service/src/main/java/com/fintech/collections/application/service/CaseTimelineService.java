@@ -15,10 +15,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /** Sólo lectura: no decide nada, reúne lo que ya se registró sobre un caso. */
 @Service
@@ -51,7 +51,7 @@ public class CaseTimelineService implements CaseTimelineUseCase {
         // intentos de agente. Contar aquí también los automáticos hacía que la pantalla dijera «2 de
         // 3» a un gestor con el cupo intacto, por dos WhatsApps que él no mandó — y ése es el número
         // con el que decide si todavía puede llamar.
-        Instant startOfDay = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant();
+        Instant startOfDay = BusinessClock.current().today().atStartOfDay(BusinessClock.current().zone()).toInstant();
         return attemptRepository.countManualByCaseIdAndAttemptedAtAfter(caseId, startOfDay);
     }
 

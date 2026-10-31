@@ -1,5 +1,8 @@
 package com.fintech.creditproduct.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.math.BigDecimal;
 
 /**
@@ -30,6 +33,7 @@ import java.math.BigDecimal;
  *                             del cliente desde la app, y meterle una llamada síncrona entre
  *                             servicios la vuelve frágil justo donde el cliente está mirando
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record PaymentOptions(
         String installmentPlanMode,
         String deferralCutoffRule,
@@ -52,10 +56,17 @@ public record PaymentOptions(
      *
      * @param nominalRate cero es válido y es exactamente lo que un MSI es
      */
+    /*
+     * `isInterestFree()` es derivado de la tasa: no viaja en el evento. Publicado como `interestFree`,
+     * cartera —que lo replica sin ese componente— rechazaba la activación de la tarjeta y del
+     * revolvente. El lector se vuelve tolerante del otro lado; aquí, el derivado se queda en casa.
+     */
+    @JsonIgnoreProperties(ignoreUnknown = true)
     public record DeferralRateBand(int minTerm, int maxTerm, java.math.BigDecimal nominalRate) {
 
         public boolean covers(int plazo) { return plazo >= minTerm && plazo <= maxTerm; }
 
+        @JsonIgnore
         public boolean isInterestFree() { return nominalRate.signum() == 0; }
     }
 

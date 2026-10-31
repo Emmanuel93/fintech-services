@@ -29,8 +29,13 @@ public class EvaluationNotReady extends RuntimeException {
          */
         PREFETCH_FAILED(false),
 
-        /** Nunca hubo prefetch para este prospecto — no hubo consentimiento, o no se disparó. */
-        NO_PREFETCH(false),
+        /**
+         * No hay prefetch para este prospecto: no hubo consentimiento, no se disparó... o <b>todavía no
+         * llega</b>. El alta y la solicitud viajan por tópicos distintos y la solicitud puede
+         * adelantarse; desde aquí las tres son indistinguibles hasta que pasan unos segundos. Por eso
+         * se reintenta como carrera, y agotado el reintento queda para intervención con este motivo.
+         */
+        NO_PREFETCH(true),
 
         /** Falta la política de scoring del producto. Es configuración, no tiempo. */
         NO_ACTIVE_POLICY(false);

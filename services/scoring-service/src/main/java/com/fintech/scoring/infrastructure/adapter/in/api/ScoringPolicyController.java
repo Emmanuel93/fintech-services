@@ -4,6 +4,8 @@ import com.fintech.scoring.application.service.ScoringPolicyService;
 import com.fintech.scoring.application.service.ScoringPolicyService.RuleSpec;
 import com.fintech.scoring.application.service.ScoringPolicyService.ThresholdSpec;
 import com.fintech.scoring.domain.RuleType;
+import com.fintech.scoring.domain.NoHistoryPolicy;
+import com.fintech.scoring.domain.NoHistoryRequirement;
 import com.fintech.scoring.domain.ScoringPolicy;
 import com.fintech.scoring.infrastructure.adapter.in.api.dto.ScoringPolicyRequest;
 import com.fintech.scoring.infrastructure.adapter.in.api.dto.ScoringPolicyResponse;
@@ -12,6 +14,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +60,20 @@ public class ScoringPolicyController {
         }).toList();
     }
 
+    /**
+     * Qué se le puede pedir a quien no tiene historial en buró, con su etiqueta. Por la misma razón
+     * que {@link #ruleTypes()}: que la consola no lleve el catálogo escrito a mano.
+     */
+    @GetMapping("/no-history-requirements")
+    public List<Map<String, Object>> noHistoryRequirements() {
+        return Arrays.stream(NoHistoryRequirement.values()).map(r -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("code", r.name());
+            m.put("label", r.label());
+            return m;
+        }).toList();
+    }
+
     @GetMapping("/{policyId}")
     public ResponseEntity<ScoringPolicyResponse> getById(@PathVariable UUID policyId) {
         return policyService.findById(policyId)
@@ -78,8 +95,12 @@ public class ScoringPolicyController {
                 .map(t -> new ThresholdSpec(t.riskLevel(), t.minScore(), t.decision()))
                 .toList();
 
+        NoHistoryPolicy noHistory = req.noHistory() == null ? NoHistoryPolicy.DEFAULT
+                : new NoHistoryPolicy(req.noHistory().score() == null ? 0 : req.noHistory().score(),
+                        req.noHistory().requirements());
+
         ScoringPolicy created = policyService.create(req.prospectType(), req.productTypeIntent(),
-                req.name(), req.description(), rules, thresholds);
+                req.name(), req.description(), rules, thresholds, noHistory);
 
         return ScoringPolicyResponse.from(created);
     }

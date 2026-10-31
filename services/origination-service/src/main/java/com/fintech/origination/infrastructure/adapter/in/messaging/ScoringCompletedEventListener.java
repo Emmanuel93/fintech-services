@@ -51,6 +51,7 @@ public class ScoringCompletedEventListener {
                 payload.riskLevel(),
                 payload.totalScore(),
                 payload.evaluationId(),
-                payload.eventId()));
+                payload.eventId(),
+                payload.requirementLabels()));
     }
 }

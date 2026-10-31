@@ -7,6 +7,7 @@ plugins {
 }
 
 extra["springModulithVersion"] = "1.3.5"
+extra["shedlockVersion"] = "5.16.0"
 
 java {
     toolchain {
@@ -44,6 +45,13 @@ dependencies {
     // servicios que declaren `redisson-spring-boot-starter` lo tendrán en runtime. Así `shared` no
     // se lo impone a los 21 servicios, y la autoconfiguración se activa por @ConditionalOnClass.
     compileOnly("org.redisson:redisson-spring-boot-starter:3.40.2")
+
+    // Candado de crones (com.fintech.shared.scheduling): ShedLock sobre la base de cada servicio.
+    // `compileOnly`, como Redisson: sólo los servicios con crones lo declaran, y la autoconfiguración
+    // se activa por @ConditionalOnClass. `spring-jdbc` también: ya llega con JPA en esos servicios.
+    compileOnly("net.javacrumbs.shedlock:shedlock-spring:${property("shedlockVersion")}")
+    compileOnly("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:${property("shedlockVersion")}")
+    compileOnly("org.springframework:spring-jdbc")
 
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")

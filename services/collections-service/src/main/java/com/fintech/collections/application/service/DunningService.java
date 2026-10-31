@@ -14,11 +14,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalTime;
-import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * La cobranza automática: cinco mensajes, uno por día, y se acaba.
@@ -112,7 +112,7 @@ public class DunningService {
 
     /** La misma ventana que se le exige a un agente. */
     private boolean withinWindow() {
-        int hora = LocalTime.now(ZoneId.systemDefault()).getHour();
+        int hora = LocalTime.now(BusinessClock.current().clock()).getHour();
         return hora >= properties.getContactAllowedHoursStart()
             && hora <  properties.getContactAllowedHoursEnd();
     }

@@ -2,9 +2,10 @@ package com.fintech.origination.infrastructure.adapter.in.api;
 
 import org.springframework.data.domain.Sort;
 
+import com.fintech.shared.time.BusinessClock;
+
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.Set;
 
 /**
@@ -40,13 +41,18 @@ final class ApplicationQuerySupport {
         return Sort.by(dir, field);
     }
 
-    /** Inicio del día (UTC) como límite inferior inclusivo; null si no hay fecha. */
+    /**
+     * Inicio del día de negocio como límite inferior inclusivo; null si no hay fecha.
+     *
+     * <p>«Del 30» es el 30 en México: con el día en UTC, una solicitud de las 19:00 quedaba fuera
+     * del filtro de su propio día y dentro del siguiente.
+     */
     static Instant startOfDay(LocalDate date) {
-        return date == null ? null : date.atStartOfDay(ZoneOffset.UTC).toInstant();
+        return date == null ? null : date.atStartOfDay(BusinessClock.current().zone()).toInstant();
     }
 
-    /** Inicio del día siguiente (UTC) como límite superior EXCLUSIVO; null si no hay fecha. */
+    /** Inicio del día de negocio siguiente como límite superior EXCLUSIVO; null si no hay fecha. */
     static Instant startOfNextDay(LocalDate date) {
-        return date == null ? null : date.plusDays(1).atStartOfDay(ZoneOffset.UTC).toInstant();
+        return date == null ? null : date.plusDays(1).atStartOfDay(BusinessClock.current().zone()).toInstant();
     }
 }

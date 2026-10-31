@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Instant;
 import java.util.Optional;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Dispara el re-cruce en la ventana de mantenimiento.
@@ -63,7 +64,8 @@ public class RescreenScheduler {
      * está la operación, no donde está el contenedor. Es el mismo error de huso que ya costó dos
      * pruebas en este repo.
      */
-    @Scheduled(cron = "${fintech.compliance.rescreen.cron:0 0 3 * * *}", zone = "America/Mexico_City")
+    @SchedulerLock(name = "compliance.rescreen", lockAtMostFor = "PT2H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "${fintech.compliance.rescreen.cron:0 0 3 * * *}", zone = "${fintech.business.zone:America/Mexico_City}")
     public void runInMaintenanceWindow() {
         if (!enabled) {
             log.info("[RE-CRUCE] apagado por configuración — no corre");

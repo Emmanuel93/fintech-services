@@ -17,6 +17,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Punto de entrada único para los 7 listeners Kafka (ver infrastructure/adapter/in/messaging) —
@@ -149,7 +150,7 @@ public class NotificationTriggerService {
         NotificationPreference preference = preferenceRepository.findById(obligorPartyId).orElse(null);
 
         long daysPastDue = dueDate == null ? 0
-                : Math.max(0, ChronoUnit.DAYS.between(dueDate, LocalDate.now()));
+                : Math.max(0, ChronoUnit.DAYS.between(dueDate, BusinessClock.current().today()));
 
         Map<String, String> vars = baseVars(contact);
         vars.put("installmentAmount", money(installmentAmount));

@@ -177,7 +177,10 @@ class CreditApplicationAcceptanceTest {
                 .andExpect(status().isUnprocessableEntity())
                 .andExpect(jsonPath("$.type").value("https://fintech.com/errors/ORIGINATION_PERSON_NOT_VERIFIED"))
                 .andExpect(jsonPath("$.reason").value("identidad IN_REVIEW"))
-                .andExpect(jsonPath("$.prospectId").value(prospectId.toString()));
+                .andExpect(jsonPath("$.prospectId").value(prospectId.toString()))
+                // Los estados por separado: la app decide con ellos qué decirle a la persona.
+                .andExpect(jsonPath("$.identityStatus").value("IN_REVIEW"))
+                .andExpect(jsonPath("$.screeningStatus").value("CLEARED"));
 
         // Bloqueada antes de crear nada: ni solicitud ni scoring pedido.
         verify(kafkaTemplate, org.mockito.Mockito.never())

@@ -113,4 +113,26 @@ class BureauMockScenariosTest {
         assertThat(query("RUPA900101HDFXXX01").getFicoScoreValor())
                 .isEqualTo(query("RUPA900101HDFXXX01").getFicoScoreValor());
     }
+
+    @Test
+    @DisplayName("Falla transitoria (ZZRT): dos veces no contesta, a la tercera sí — para ejercitar el reintento")
+    void la_falla_transitoria_se_recupera_al_tercer_intento() throws Exception {
+        Object adapter = mock();
+        var m = adapter.getClass().getDeclaredMethod("query", UUID.class, UUID.class, UUID.class,
+                CirculoQueryRequest.class);
+        m.setAccessible(true);
+        UUID prospecto = UUID.randomUUID();
+        for (int intento = 1; intento <= 2; intento++) {
+            assertThatThrownBy(() -> {
+                try {
+                    m.invoke(adapter, UUID.randomUUID(), UUID.randomUUID(), prospecto, request("ZZRT900101HDFXXX01"));
+                } catch (java.lang.reflect.InvocationTargetException e) {
+                    throw e.getCause();
+                }
+            }).hasMessageContaining("transitoria");
+        }
+        CirculoReport tercero = (CirculoReport) m.invoke(adapter, UUID.randomUUID(), UUID.randomUUID(), prospecto,
+                request("ZZRT900101HDFXXX01"));
+        assertThat(tercero.getStatus()).isEqualTo(CirculoReportStatus.SUCCESS);
+    }
 }

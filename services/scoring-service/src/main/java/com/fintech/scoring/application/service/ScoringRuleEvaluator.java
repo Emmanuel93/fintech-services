@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Evaluador puro de reglas de scoring — sin dependencias de Spring.
@@ -186,7 +187,7 @@ class ScoringRuleEvaluator {
 
     private RuleEvaluationDetail evalInquiryCount(ScoringRule rule, CirculoReport report) {
         LocalDate cutoff = rule.getPeriodMonths() != null
-                ? LocalDate.now().minusMonths(rule.getPeriodMonths())
+                ? BusinessClock.current().today().minusMonths(rule.getPeriodMonths())
                 : LocalDate.MIN;
 
         long count = report.getInquiries().stream()
@@ -240,7 +241,7 @@ class ScoringRuleEvaluator {
                 .orElse(null);
         if (masReciente == null) return null;   // nunca se atrasó: no es cero meses, es sin dato
         return BigDecimal.valueOf(
-                java.time.temporal.ChronoUnit.MONTHS.between(masReciente, LocalDate.now()));
+                java.time.temporal.ChronoUnit.MONTHS.between(masReciente, BusinessClock.current().today()));
     }
 
     /** Saldo usado sobre línea autorizada, en porcentaje. */
@@ -272,14 +273,14 @@ class ScoringRuleEvaluator {
                 .orElse(null);
         if (first == null) return null;
         return BigDecimal.valueOf(
-                java.time.temporal.ChronoUnit.MONTHS.between(first, LocalDate.now()));
+                java.time.temporal.ChronoUnit.MONTHS.between(first, BusinessClock.current().today()));
     }
 
     private BigDecimal ageYears(CirculoReport report) {
         LocalDate nacimiento = report.getPersonaFechaNacimiento();
         if (nacimiento == null) return null;
         return BigDecimal.valueOf(
-                java.time.temporal.ChronoUnit.YEARS.between(nacimiento, LocalDate.now()));
+                java.time.temporal.ChronoUnit.YEARS.between(nacimiento, BusinessClock.current().today()));
     }
 
     /** El sueldo del empleo más reciente que reporta el buró. */
@@ -295,7 +296,7 @@ class ScoringRuleEvaluator {
                 .map(CirculoEmployment::getFechaContratacion)
                 .filter(f -> f != null)
                 .map(f -> BigDecimal.valueOf(
-                        java.time.temporal.ChronoUnit.MONTHS.between(f, LocalDate.now())))
+                        java.time.temporal.ChronoUnit.MONTHS.between(f, BusinessClock.current().today())))
                 .orElse(null);
     }
 

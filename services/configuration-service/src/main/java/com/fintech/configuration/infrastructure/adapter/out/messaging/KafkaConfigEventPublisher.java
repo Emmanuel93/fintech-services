@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.Map;
+import com.fintech.shared.time.BusinessClock;
 
 @Component
 public class KafkaConfigEventPublisher implements ConfigEventPublisher {
@@ -30,7 +31,7 @@ public class KafkaConfigEventPublisher implements ConfigEventPublisher {
                     "newValue", parameter.getValue(),
                     "effectiveDate", parameter.getEffectiveDate() != null
                             ? parameter.getEffectiveDate().toString()
-                            : LocalDate.now().toString(),
+                            : BusinessClock.current().today().toString(),
                     "productType", parameter.getProductType() != null ? parameter.getProductType() : "",
                     "channelType", parameter.getChannelType() != null ? parameter.getChannelType() : ""
             );

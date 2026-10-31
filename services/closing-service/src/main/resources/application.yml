@@ -39,9 +39,16 @@ spring:
       group-id: ${KAFKA_GROUP_ID:closing-service}
       auto-offset-reset: earliest
     producer:
+      # Sin estos dos, Kafka usa StringSerializer y cada evento (un record) revienta al enviarse:
+      # la publicación fallaba siempre y las pruebas no lo veían porque sustituyen el publicador.
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
       acks: all
       retries: 3
       properties:
+        # Los consumidores fijan su tipo local (USE_TYPE_INFO_HEADERS=false): la cabecera sólo filtraría
+        # nombres de clases de este servicio.
+        spring.json.add.type.headers: false
         enable.idempotence: true
         max.in.flight.requests.per.connection: 1
         delivery.timeout.ms: 30000

@@ -24,6 +24,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Otorga un programa de apoyo: corre N vencimientos a cada cuenta del padrón.
@@ -177,7 +178,7 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
      * otorgó.
      */
     private void recalculateDpd(CreditAccount account, List<Installment> calendario) {
-        LocalDate hoy = LocalDate.now();
+        LocalDate hoy = BusinessClock.current().today();
         LocalDate masAntigua = calendario.stream()
                 .map(Installment::getDueDate)
                 .filter(d -> d.isBefore(hoy))

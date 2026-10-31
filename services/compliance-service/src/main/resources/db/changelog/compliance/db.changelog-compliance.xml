@@ -15,4 +15,6 @@
     <include file="db/changelog/compliance/008-bitacora-de-consultas.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/compliance/009-cola-de-identidad.sql" relativeToChangelogFile="false"/>
 
+    <include file="db/changelog/compliance/010-candado-de-crones.sql" relativeToChangelogFile="false"/>
+
 </databaseChangeLog>

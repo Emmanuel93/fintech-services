@@ -3,6 +3,7 @@ package com.fintech.scoring.domain;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
@@ -41,6 +42,16 @@ public class ScoringPolicy {
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
+    /**
+     * Score de quien no tiene historial en buró. Como la versión, se fija al crear la política: es
+     * parte del criterio con que se decidió, y cambiarlo después reescribiría decisiones pasadas.
+     */
+    @Column(name = "no_history_score", nullable = false, updatable = false)
+    private int noHistoryScore;
+
+    @Column(name = "no_history_requirements", nullable = false, updatable = false, columnDefinition = "text[]")
+    private String[] noHistoryRequirements = new String[0];
+
     @OneToMany(mappedBy = "policy", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ScoringRule> rules = new ArrayList<>();
 
@@ -64,6 +75,13 @@ public class ScoringPolicy {
      */
     public static ScoringPolicy create(UUID policyId, String prospectType, String productTypeIntent,
                                        String name, String description, int version) {
+        return create(policyId, prospectType, productTypeIntent, name, description, version, NoHistoryPolicy.DEFAULT);
+    }
+
+    /** Con lo que se hace con quien no tiene historial en buró (ver {@link NoHistoryPolicy}). */
+    public static ScoringPolicy create(UUID policyId, String prospectType, String productTypeIntent,
+                                       String name, String description, int version,
+                                       NoHistoryPolicy noHistory) {
         ScoringPolicy p = new ScoringPolicy();
         p.policyId          = policyId;
         p.prospectType      = prospectType;
@@ -73,6 +91,9 @@ public class ScoringPolicy {
         p.active            = true;
         p.version           = version;
         p.createdAt         = Instant.now();
+        NoHistoryPolicy nh  = noHistory == null ? NoHistoryPolicy.DEFAULT : noHistory;
+        p.noHistoryScore        = nh.score();
+        p.noHistoryRequirements = nh.requirements().stream().map(Enum::name).toArray(String[]::new);
         return p;
     }
 
@@ -97,5 +118,11 @@ public class ScoringPolicy {
     public int getVersion()             { return version; }
     public Instant getCreatedAt()       { return createdAt; }
     public List<ScoringRule>     getRules()      { return Collections.unmodifiableList(rules); }
+
+    public NoHistoryPolicy getNoHistory() {
+        String[] codes = noHistoryRequirements == null ? new String[0] : noHistoryRequirements;
+        return new NoHistoryPolicy(noHistoryScore,
+                Arrays.stream(codes).map(NoHistoryRequirement::valueOf).toList());
+    }
     public List<RiskThreshold>   getThresholds() { return Collections.unmodifiableList(thresholds); }
 }

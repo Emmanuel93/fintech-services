@@ -68,7 +68,7 @@ public class KycSessionService {
 
     private String generateFolio() {
         String date = DateTimeFormatter.ofPattern("yyyyMM")
-                .withZone(java.time.ZoneOffset.UTC)
+                .withZone(com.fintech.shared.time.BusinessClock.current().zone())
                 .format(Instant.now());
         String suffix = UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         return "KYC-" + date + "-" + suffix;

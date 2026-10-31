@@ -69,8 +69,13 @@ class OriginationExceptionHandler {
     ProblemDetail handlePersonNotVerified(PersonNotVerifiedException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
         pd.setType(URI.create("https://fintech.com/errors/ORIGINATION_PERSON_NOT_VERIFIED"));
+        pd.setTitle("La persona aún no está verificada");
         pd.setProperty("prospectId", ex.prospectId());
         pd.setProperty("reason", ex.reason());
+        // Los dos estados por separado: a una identidad en revisión se le dice «espera»; a un
+        // rechazo, otra cosa. Que la app no tenga que leer el texto del motivo para saberlo.
+        pd.setProperty("identityStatus", ex.identityStatus());
+        pd.setProperty("screeningStatus", ex.screeningStatus());
         return pd;
     }
 

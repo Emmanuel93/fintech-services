@@ -93,6 +93,10 @@ springdoc:
   show-actuator: false
 
 fintech:
+  # Candado de crones: la tabla vive en el esquema del servicio (ver SchedulingLockAutoConfiguration).
+  scheduling:
+    lock:
+      table: origination.shedlock
   origination:
     prospect-expiry-days: ${ORIGINATION_PROSPECT_EXPIRY_DAYS:30}
     credit-product-service-url: ${CREDIT_PRODUCT_SERVICE_URL:http://localhost:8084}

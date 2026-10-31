@@ -2,6 +2,7 @@ package com.fintech.scoring.retry;
 
 import com.fintech.scoring.application.EvaluationNotReady;
 import com.fintech.scoring.application.BureauReportPending;
+import com.fintech.scoring.application.service.PendingEvaluationService;
 import com.fintech.scoring.application.service.ScoringEvaluationService;
 import com.fintech.scoring.infrastructure.adapter.in.messaging.ScoreRequestedEventListener;
 import com.fintech.scoring.infrastructure.adapter.in.messaging.ScoreRequestedPayload;
@@ -19,6 +20,7 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -46,13 +48,14 @@ class EvaluationRetryTest {
     @TestConfiguration
     static class Config {
         @Bean
-        ScoreRequestedEventListener listener(ScoringEvaluationService servicio) {
-            return new ScoreRequestedEventListener(servicio);
+        ScoreRequestedEventListener listener(ScoringEvaluationService servicio, PendingEvaluationService pendientes) {
+            return new ScoreRequestedEventListener(servicio, pendientes);
         }
     }
 
     @Autowired ScoreRequestedEventListener listener;
     @MockitoBean ScoringEvaluationService servicio;
+    @MockitoBean PendingEvaluationService pendientes;
 
     private static ScoreRequestedPayload request() {
         return new ScoreRequestedPayload(UUID.randomUUID(), UUID.randomUUID(),
@@ -84,6 +87,8 @@ class EvaluationRetryTest {
 
         // Una sola. Reintentar lo que no va a cambiar sólo retrasa que alguien se entere.
         verify(servicio, times(1)).evaluateForApplication(any(), any(), any(), any());
+        // Y no se estaciona: esperar al prefetch no sirve si el prefetch ya falló.
+        verify(pendientes, never()).park(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -99,15 +104,19 @@ class EvaluationRetryTest {
     }
 
     @Test
-    @DisplayName("Agotada la carrera, el mensaje se consume y queda pendiente de intervención")
-    void agotada_la_carrera_queda_pendiente() {
-        willThrow(new BureauReportPending("nunca llegó"))
+    @DisplayName("🔑 Agotada la carrera, el mensaje se consume y el puntaje se estaciona hasta que llegue el reporte")
+    void agotada_la_carrera_se_estaciona() {
+        willThrow(new BureauReportPending("todavía no llega"))
                 .given(servicio).evaluateForApplication(any(), any(), any(), any());
+        ScoreRequestedPayload solicitud = request();
 
         // No propaga: devolver el mensaje a la cola lo haría rebotar sobre un estado que no
         // cambia, bloqueando la partición para las solicitudes que sí se pueden resolver.
-        listener.onScoreRequested(request());
+        listener.onScoreRequested(solicitud);
 
         verify(servicio, times(5)).evaluateForApplication(any(), any(), any(), any());
+        // Antes se quedaba aquí, con un warning, en PENDING_SCORING para siempre.
+        verify(pendientes).park(solicitud.applicationId(), solicitud.prospectId(), "INDIVIDUAL",
+                "PERSONAL_LOAN", EvaluationNotReady.Reason.BUREAU_REPORT_PENDING);
     }
 }

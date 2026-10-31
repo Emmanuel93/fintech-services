@@ -19,9 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
 import java.util.NoSuchElementException;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Diferir una compra: el titular la saca del exigible del corte y la convierte en compra a plazos.
@@ -102,7 +102,7 @@ public class DispositionDeferralService implements DeferDispositionUseCase {
                 () -> new NoSePuedeDiferirException(
                         "El producto no tiene tasa de diferimiento para " + plazo + " pagos"));
 
-        LocalDate desde = compra.getCreatedAt().atZone(ZoneId.systemDefault()).toLocalDate();
+        LocalDate desde = compra.getCreatedAt().atZone(BusinessClock.current().zone()).toLocalDate();
         compra.defer(plazo);
         dispositions.save(compra);
 
@@ -112,7 +112,7 @@ public class DispositionDeferralService implements DeferDispositionUseCase {
         List<Installment> plan = amortizationEngine.generate(
                 compra.getDispositionId(), compra.getAmount(), rate, plazo,
                 account.getAmortizationType() != null ? account.getAmortizationType() : "FRENCH",
-                cadencia, AmortizationEngine.firstDueDate(LocalDate.now(), cadencia),
+                cadencia, AmortizationEngine.firstDueDate(BusinessClock.current().today(), cadencia),
                 account.getVatRate());
         installments.saveAll(plan);
 
@@ -120,7 +120,7 @@ public class DispositionDeferralService implements DeferDispositionUseCase {
         // calcula cuánto — ese número es de charges, que es quien devengó.
         eventPublisher.publishDispositionDeferred(new DispositionDeferredEvent(
                 compra.getDispositionId(), account.getCreditAccountId(), account.getObligorPartyId(),
-                compra.getAmount(), plazo, rate, desde, LocalDate.now()));
+                compra.getAmount(), plazo, rate, desde, BusinessClock.current().today()));
 
         log.info("Compra DIFERIDA dispositionId={} cuenta={} plazo={} tasa={} cuotas={}{}",
                 compra.getDispositionId(), account.getCreditAccountId(), plazo, rate, plan.size(),

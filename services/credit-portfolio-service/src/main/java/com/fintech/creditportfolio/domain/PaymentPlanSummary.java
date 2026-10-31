@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Comparator;
 import java.util.List;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Resumen del plan de pagos de una cuenta, derivado de su calendario.
@@ -43,7 +44,7 @@ public record PaymentPlanSummary(
      * de aplicación de pagos y la que el cliente espera ver.
      */
     public static PaymentPlanSummary from(List<Installment> schedule) {
-        return from(schedule, LocalDate.now());
+        return from(schedule, BusinessClock.current().today());
     }
 
     /**
@@ -59,7 +60,7 @@ public record PaymentPlanSummary(
      * lleva cubiertas, cuánto debe vencido, qué paga a continuación y cuándo— se conserva.
      */
     public static PaymentPlanSummary fromRevolving(List<Installment> installments) {
-        PaymentPlanSummary base = from(installments, LocalDate.now(), Comparator.comparing(
+        PaymentPlanSummary base = from(installments, BusinessClock.current().today(), Comparator.comparing(
                 Installment::getDueDate, Comparator.nullsLast(Comparator.naturalOrder())));
         return new PaymentPlanSummary(
                 base.paidInstallments(), base.totalInstallments(),

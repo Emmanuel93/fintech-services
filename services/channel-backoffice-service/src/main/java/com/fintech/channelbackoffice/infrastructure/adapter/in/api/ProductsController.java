@@ -82,6 +82,13 @@ class ProductsController {
         return scoringClient.ruleTypes();
     }
 
+    @GetMapping("/scoring/no-history-requirements")
+    @Operation(summary = "Datos que una política puede pedir a quien no tiene historial en buró")
+    List<Map<String, Object>> noHistoryRequirements() {
+        log.info("GET /scoring/no-history-requirements");
+        return scoringClient.noHistoryRequirements();
+    }
+
     @GetMapping("/scoring/policies")
     @Operation(summary = "Políticas de scoring activas")
     List<Map<String, Object>> policies() {

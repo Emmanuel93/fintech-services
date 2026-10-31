@@ -19,6 +19,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Service
 public class InterestAccrualService {
@@ -67,7 +68,7 @@ public class InterestAccrualService {
 
     @Transactional(readOnly = true)
     public List<UUID> findMoratoriumScheduleIds() {
-        return findMoratoriumScheduleIds(LocalDate.now());
+        return findMoratoriumScheduleIds(BusinessClock.current().today());
     }
 
     /** Sólo los que de verdad deben devengar ese día: filtrar aquí evita N transacciones inútiles. */

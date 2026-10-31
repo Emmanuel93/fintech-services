@@ -9,16 +9,33 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import com.fintech.scoring.infrastructure.config.CirculoProperties;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.scoring.application.port.out.BureauUnavailableException;
 
-/** Adaptador real contra Círculo de Crédito. Activo salvo que {@code fintech.circulo.mock-enabled=true}. */
+/**
+ * Adaptador real contra Círculo de Crédito. Activo salvo que {@code fintech.circulo.mock-enabled=true}.
+ *
+ * <h2>Dos clases de falla, dos respuestas</h2>
+ *
+ * <ul>
+ *   <li><b>Transitoria</b> —timeout, conexión rechazada o cortada, 5xx, 429—: el buró no pudo
+ *       contestar <em>ahora</em>. Se lanza {@link BureauUnavailableException} y el prefetch la
+ *       reintenta con backoff. Antes se convertía en un reporte {@code ERROR}, así que nadie podía
+ *       distinguir «el buró está caído» de «el buró dijo que no» y no había nada que reintentar.</li>
+ *   <li><b>Definitiva</b> —un 4xx o una respuesta que no se puede leer—: repetir la misma
+ *       petición da lo mismo. Se devuelve un reporte {@code ERROR} con su código.</li>
+ * </ul>
+ */
 @Component
 @ConditionalOnProperty(name = "fintech.circulo.mock-enabled", havingValue = "false", matchIfMissing = true)
 class CirculoCreditoAdapter implements CirculoGateway {
@@ -27,6 +44,19 @@ class CirculoCreditoAdapter implements CirculoGateway {
     private static final String ENDPOINT = "/v2/rccficoscore";
 
     private final RestClient restClient;
+
+    /**
+     * Sin credencial no se arranca: la API key salía de un valor por defecto en el repo, y un
+     * ambiente sin la suya consultaba el buró con la del sandbox sin que nadie lo notara.
+     */
+    @Autowired
+    CirculoCreditoAdapter(RestClient circuloRestClient, CirculoProperties properties) {
+        this(circuloRestClient);
+        if (properties.getApiKey() == null || properties.getApiKey().isBlank()) {
+            throw new IllegalStateException("Círculo de Crédito real sin credencial: falta CIRCULO_CREDITO_API_KEY "
+                    + "(o SCORING_CIRCULO_MOCK_ENABLED=true en un ambiente bajo)");
+        }
+    }
 
     CirculoCreditoAdapter(RestClient circuloRestClient) {
         this.restClient = circuloRestClient;
@@ -44,13 +74,17 @@ class CirculoCreditoAdapter implements CirculoGateway {
                     .uri(ENDPOINT)
                     .body(request)
                     .retrieve()
+                    .onStatus(status -> status.value() == HttpStatus.TOO_MANY_REQUESTS.value(), (r, res) -> {
+                        log.warn("CDC 429 prospectId={} — límite de tasa del buró", prospectId);
+                        throw new BureauUnavailableException("Círculo de Crédito limitó la tasa (429)");
+                    })
                     .onStatus(HttpStatusCode::is4xxClientError, (r, res) -> {
-                        if (res.getStatusCode() == HttpStatus.NO_CONTENT) return;
                         log.warn("CDC 4xx prospectId={} status={}", prospectId, res.getStatusCode());
+                        throw new BureauRejectedRequestException(res.getStatusCode().value());
                     })
                     .onStatus(HttpStatusCode::is5xxServerError, (r, res) -> {
                         log.error("CDC 5xx prospectId={} status={}", prospectId, res.getStatusCode());
-                        throw new RuntimeException("CDC server error: " + res.getStatusCode());
+                        throw new BureauUnavailableException("Círculo de Crédito respondió " + res.getStatusCode());
                     })
                     .body(CdcRespuesta.class);
 
@@ -63,6 +97,18 @@ class CirculoCreditoAdapter implements CirculoGateway {
 
             return mapSuccess(reportId, prefetchId, prospectId, response);
 
+        } catch (BureauUnavailableException ex) {
+            throw ex;
+        } catch (ResourceAccessException ex) {
+            // I/O: timeout de conexión o de lectura, conexión rechazada o cortada. Transitoria.
+            log.warn("Círculo de Crédito no respondió prospectId={}: {}", prospectId, ex.getMessage());
+            throw new BureauUnavailableException("Círculo de Crédito no respondió: " + ex.getMessage(), ex);
+        } catch (BureauRejectedRequestException ex) {
+            return CirculoReport.builder(reportId, prefetchId, prospectId)
+                    .status(CirculoReportStatus.ERROR)
+                    .errorCode("CDC_HTTP_" + ex.status())
+                    .errorMessage(ex.getMessage())
+                    .build();
         } catch (Exception ex) {
             log.error("Círculo de Crédito call failed prospectId={}", prospectId, ex);
             return CirculoReport.builder(reportId, prefetchId, prospectId)

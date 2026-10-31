@@ -14,8 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.List;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Convierte el corte del ciclo en <b>algo exigible con fecha</b>.
@@ -119,6 +119,6 @@ public class CycleBillingService implements CloseCutoffCycleUseCase {
     }
 
     private static LocalDate date(Disposition d) {
-        return d.getCreatedAt().atZone(ZoneId.systemDefault()).toLocalDate();
+        return d.getCreatedAt().atZone(BusinessClock.current().zone()).toLocalDate();
     }
 }

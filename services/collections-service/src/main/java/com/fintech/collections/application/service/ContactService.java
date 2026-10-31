@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
-import java.time.ZoneId;
+import com.fintech.shared.time.BusinessClock;
 
 /** CT-01..CT-04: CONDUSEF-bound contact recording. */
 @Service
@@ -52,7 +52,7 @@ public class ContactService implements RecordContactAttemptUseCase {
         }
 
         // CT-02: allowed hours only (regulatory window)
-        int hour = LocalTime.now(ZoneId.systemDefault()).getHour();
+        int hour = LocalTime.now(BusinessClock.current().clock()).getHour();
         if (hour < properties.getContactAllowedHoursStart() || hour >= properties.getContactAllowedHoursEnd()) {
             throw new InvalidCaseStateException("Contact attempts only allowed between "
                     + properties.getContactAllowedHoursStart() + ":00 and " + properties.getContactAllowedHoursEnd() + ":00");
@@ -62,7 +62,7 @@ public class ContactService implements RecordContactAttemptUseCase {
         // consumieran el cupo, un agente llegaría a las 10:30 sin intentos disponibles por tres
         // WhatsApps que él no mandó, y el tope dejaría de proteger al cliente para pasar a estorbar
         // la gestión. Ver la decisión regulatoria en la estrategia de cobranza.
-        Instant startOfDay = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant();
+        Instant startOfDay = BusinessClock.current().today().atStartOfDay(BusinessClock.current().zone()).toInstant();
         long todayCount = attemptRepository.countManualByCaseIdAndAttemptedAtAfter(cmd.caseId(), startOfDay);
         if (todayCount >= properties.getMaxContactAttemptsPerDay()) {
             throw new InvalidCaseStateException("Max contact attempts per day (" +

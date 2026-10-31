@@ -16,8 +16,13 @@ public record ScoringPolicyResponse(
         int version,
         Instant createdAt,
         List<RuleResponse> rules,
-        List<ThresholdResponse> thresholds
+        List<ThresholdResponse> thresholds,
+        NoHistoryResponse noHistory
 ) {
+    public record NoHistoryResponse(int score, List<RequirementResponse> requirements) {}
+
+    public record RequirementResponse(String code, String label) {}
+
     public record RuleResponse(
             UUID ruleId, String ruleType, String creditType,
             String operator, double thresholdValue,
@@ -43,6 +48,8 @@ public record ScoringPolicyResponse(
 
         return new ScoringPolicyResponse(p.getPolicyId(), p.getProspectType(),
                 p.getProductTypeIntent(), p.getName(), p.getDescription(),
-                p.isActive(), p.getVersion(), p.getCreatedAt(), rules, thresholds);
+                p.isActive(), p.getVersion(), p.getCreatedAt(), rules, thresholds,
+                new NoHistoryResponse(p.getNoHistory().score(), p.getNoHistory().requirements().stream()
+                        .map(r -> new RequirementResponse(r.name(), r.label())).toList()));
     }
 }

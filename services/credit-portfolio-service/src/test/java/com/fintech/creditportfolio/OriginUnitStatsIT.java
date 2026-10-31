@@ -9,8 +9,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.transaction.annotation.Transactional;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -28,11 +35,39 @@ import static org.assertj.core.api.Assertions.assertThat;
  * —lo que de verdad importa— que <b>la suma de las unidades sea igual al total</b>. Si esa
  * igualdad se rompe, el árbol comercial deja de cuadrar consigo mismo a distintas alturas y nadie
  * sabe cuál cifra llevar a un comité.
+ *
+ * <p>Trae su propio Postgres y su propio broker, como las demás IT del servicio. Sin ellos se
+ * conectaba al {@code localhost:5432} del compose: pasaba con el stack arriba y fallaba con el
+ * stack apagado, que es justo cuando se corre la suite completa.
  */
 @SpringBootTest
+@Testcontainers
+@EmbeddedKafka(
+        partitions = 1,
+        topics = {
+            "origination.credit-product-creation-requested",
+            "credit-portfolio.credit-account-activated"
+        },
+        bootstrapServersProperty = "spring.kafka.bootstrap-servers")
+@DirtiesContext
 @ActiveProfiles("test")
 @Transactional
 class OriginUnitStatsIT {
+
+    @Container
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:16-alpine")
+            .withDatabaseName("fintech")
+            .withUsername("fintech")
+            .withPassword("fintech");
+
+    @DynamicPropertySource
+    static void props(DynamicPropertyRegistry registry) {
+        registry.add("spring.datasource.url", postgres::getJdbcUrl);
+        registry.add("spring.datasource.username", postgres::getUsername);
+        registry.add("spring.datasource.password", postgres::getPassword);
+        registry.add("fintech.credit-portfolio.jwt-secret",
+                () -> "dGVzdC1zZWNyZXQta2V5LWZvci11bml0LXRlc3RzLWxvbmctZW5vdWdo");
+    }
 
     @Autowired CreditAccountRepository repository;
     @Autowired EntityManager em;
@@ -42,7 +77,7 @@ class OriginUnitStatsIT {
 
     @BeforeEach
     void seed() {
-        // Códigos únicos por corrida: la suite comparte contenedor y otras pruebas siembran cuentas.
+        // Códigos únicos por corrida: la base sobrevive entre pruebas y alguna podría sembrar cuentas.
         unitA = "E_TEST_A_" + UUID.randomUUID().toString().substring(0, 8);
         unitB = "E_TEST_B_" + UUID.randomUUID().toString().substring(0, 8);
 

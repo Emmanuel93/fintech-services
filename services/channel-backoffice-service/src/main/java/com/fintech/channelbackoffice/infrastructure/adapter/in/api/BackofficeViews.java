@@ -5,6 +5,7 @@ import com.fintech.channelbackoffice.infrastructure.adapter.out.client.CreditPro
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.OriginationClient.ApplicationDetailResponse;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.OriginationClient.ApplicationResponse;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.PartyClient.PartyResponse;
+import com.fintech.channelbackoffice.infrastructure.adapter.out.client.ScoringClient;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.ScoringClient.RuleView;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.ScoringClient.ScoringPolicyView;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.ScoringClient.ThresholdView;
@@ -276,6 +277,18 @@ final class BackofficeViews {
                 : pol.thresholds().stream()
                     .sorted((a, b) -> Integer.compare(b.minScore(), a.minScore()))
                     .map(BackofficeViews::scoringThreshold).toList());
+        // Una política anterior al campo llega sin él: score 0 y nada que pedir, que es lo que hace.
+        ScoringClient.NoHistoryView nh = pol.noHistory();
+        Map<String, Object> sinHistorial = new LinkedHashMap<>();
+        sinHistorial.put("score", nh == null ? 0 : nh.score());
+        sinHistorial.put("requisitos", nh == null || nh.requirements() == null ? List.of()
+                : nh.requirements().stream().map(r -> {
+                    Map<String, Object> req = new LinkedHashMap<>();
+                    req.put("codigo", r.code());
+                    req.put("etiqueta", r.label());
+                    return req;
+                }).toList());
+        m.put("sinHistorial", sinHistorial);
         return m;
     }
 

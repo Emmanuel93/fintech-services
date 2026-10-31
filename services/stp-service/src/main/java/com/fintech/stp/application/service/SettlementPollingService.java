@@ -33,13 +33,13 @@ import java.security.PublicKey;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Consulta a STP el desenlace de las órdenes en vuelo.
@@ -336,8 +336,13 @@ public class SettlementPollingService implements PollSettlementsUseCase {
 
     private record PollGroup(UUID companyId, LocalDate businessDate) {}
 
-    /** Sólo para el barrido de cierre, que trabaja sobre una fecha explícita. */
+    /**
+     * Sólo para el barrido de cierre, que trabaja sobre una fecha explícita.
+     *
+     * <p>La fecha es la de la operación en México, no la de UTC: una orden enviada a las 19:00 de la
+     * Ciudad de México ya es «mañana» en UTC, y el barrido la habría buscado en el día equivocado.
+     */
     static LocalDate toBusinessDate(Instant instant) {
-        return instant.atZone(ZoneOffset.UTC).toLocalDate();
+        return instant.atZone(BusinessClock.current().zone()).toLocalDate();
     }
 }

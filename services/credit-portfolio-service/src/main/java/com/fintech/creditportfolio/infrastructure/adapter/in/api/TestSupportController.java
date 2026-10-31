@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Dev-only: dispara bajo demanda los mismos beans @Scheduled que corren a medianoche,
@@ -57,22 +58,22 @@ class TestSupportController {
 
     @PostMapping("/run-upcoming-installment-job")
     ResponseEntity<Map<String, Object>> runUpcomingInstallmentJob() {
-        LocalDate target = LocalDate.now().plusDays(properties.getReminderLeadDays());
+        LocalDate target = BusinessClock.current().today().plusDays(properties.getReminderLeadDays());
         int eligible = installmentRepository.findDueOn(target).size();
         log.info("[test-support] Disparando UpcomingInstallmentJob manualmente, targetDate={} eligible={}",
                 target, eligible);
-        upcomingInstallmentJob.run();
+        upcomingInstallmentJob.runFor(BusinessClock.current().today());
         return ResponseEntity.ok(Map.of("targetDate", target.toString(), "eligibleInstallments", eligible));
     }
 
     @PostMapping("/run-installment-due-job")
     ResponseEntity<Map<String, Object>> runInstallmentDueJob() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = BusinessClock.current().today();
         // El mismo criterio que usa el job: si aquí se contara sólo "vence hoy",
         // la respuesta diría 0 mientras el job procesa las ya vencidas.
         int eligible = installmentRepository.findDueOnOrBefore(today).size();
         log.info("[test-support] Disparando InstallmentDueJob manualmente, date={} eligible={}", today, eligible);
-        installmentDueJob.run();
+        installmentDueJob.runFor(today);
         return ResponseEntity.ok(Map.of("date", today.toString(), "eligibleInstallments", eligible));
     }
 
@@ -82,7 +83,7 @@ class TestSupportController {
             @PathVariable UUID creditAccountId,
             @PathVariable int installmentNumber,
             @RequestParam int daysFromToday) {
-        LocalDate newDueDate = LocalDate.now().plusDays(daysFromToday);
+        LocalDate newDueDate = BusinessClock.current().today().plusDays(daysFromToday);
         installmentRepository.shiftDueDate(creditAccountId, installmentNumber, newDueDate);
         log.info("[test-support] installment {}#{} due_date -> {}",
                 creditAccountId, installmentNumber, newDueDate);
@@ -120,10 +121,10 @@ class TestSupportController {
 
     @PostMapping("/run-delinquency-job")
     ResponseEntity<Map<String, Object>> runDelinquencyJob() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = BusinessClock.current().today();
         int eligible = creditAccountRepository.findAllByStatus(CreditAccountStatus.ACTIVE).size();
         log.info("[test-support] Disparando DelinquencyCalculationJob manualmente, date={} eligible={}", today, eligible);
-        delinquencyCalculationJob.run();
+        delinquencyCalculationJob.runFor(today);
         return ResponseEntity.ok(Map.of("date", today.toString(), "eligibleAccounts", eligible));
     }
 }

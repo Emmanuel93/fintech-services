@@ -453,6 +453,36 @@ class CreditApplicationServiceTest {
     }
 
     @Test
+    @org.junit.jupiter.api.DisplayName("🔑 Sin historial con datos que pide la política: la solicitud queda en PENDING_DOCUMENTS con la nota")
+    void apply_manualReviewConRequisitos_pideDocumentos() {
+        CreditApplication app = pendingApplication();
+        UUID appId = app.getApplicationId();
+        given(applicationRepository.findById(appId)).willReturn(Optional.of(app));
+
+        service.apply(new ApplyScoringDecisionCommand(appId, prospectId, ProductType.PERSONAL_LOAN,
+                "MANUAL_REVIEW", "MEDIO", 300, UUID.randomUUID(), "corr",
+                java.util.List.of("Constancia de estudios vigente", "Aval u obligado solidario")));
+
+        assertThat(app.getStatus()).isEqualTo(ApplicationStatus.PENDING_DOCUMENTS);
+        assertThat(app.getDocumentsNote())
+                .isEqualTo("Sin historial en buró: la política del producto pide Constancia de estudios vigente, Aval u obligado solidario");
+        assertThat(app.getDecidedBy()).isEqualTo("politica-de-scoring");
+        assertThat(app.getDocumentsDeadline()).isAfter(java.time.Instant.now());
+        then(applicationEventPublisher).should().publishDocumentsRequested(any());
+    }
+
+    @Test
+    void apply_manualReviewSinRequisitos_quedaEnRevision() {
+        CreditApplication app = pendingApplication();
+        given(applicationRepository.findActiveByProspectIdAndProductType(any(), any())).willReturn(Optional.of(app));
+
+        service.apply(decision("MANUAL_REVIEW", "MEDIO"));
+
+        assertThat(app.getStatus()).isEqualTo(ApplicationStatus.UNDER_MANUAL_REVIEW);
+        then(applicationEventPublisher).should(never()).publishDocumentsRequested(any());
+    }
+
+    @Test
     void apply_unknownDecision_noSave() {
         CreditApplication app = pendingApplication();
         given(applicationRepository.findActiveByProspectIdAndProductType(any(), any()))

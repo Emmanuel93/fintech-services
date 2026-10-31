@@ -5,7 +5,10 @@ import com.fintech.compliance.domain.CsvLayout;
 import com.fintech.compliance.domain.WatchlistKind;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.fintech.shared.simulation.SimulatorGuard;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
@@ -45,6 +48,16 @@ import java.util.Random;
 public class MockGovernmentListAdapter implements GovernmentListPort {
 
     private static final Logger log = LoggerFactory.getLogger(MockGovernmentListAdapter.class);
+
+    /**
+     * Con listas inventadas, el AML de producción cruzaría a cada persona contra nombres que no
+     * existen y daría «sin coincidencias» a todos: no arranca fuera de un ambiente bajo.
+     */
+    @Autowired
+    void refuseToRunInProduction(Environment environment) {
+        SimulatorGuard.requireNonProduction(environment, "MockGovernmentListAdapter (listas de gobierno simuladas)",
+                "COMPLIANCE_LISTS_PROVIDER_MODE=http con las fuentes del proveedor (fintech.compliance.provider.sources)");
+    }
 
     /** Apellidos y nombres mexicanos frecuentes: la homonimia que producen es la del mundo real. */
     private static final List<String> PATERNOS = List.of(

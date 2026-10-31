@@ -39,6 +39,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Config-driven account activation. Behaviour (amortisation, disposition type, credit limit)
@@ -236,7 +237,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                 config.getPaymentFrequency(),
                 account.getAssignedTerm(),
                 // BNPL: charges no devenga antes de esta fecha. Nulo cuando el producto no lo usa.
-                arranqueBnpl.isAfter(LocalDate.now()) ? arranqueBnpl : null));
+                arranqueBnpl.isAfter(BusinessClock.current().today()) ? arranqueBnpl : null));
 
         log.info("CreditAccount activated and event published accountId={}", account.getCreditAccountId());
         return account;
@@ -294,8 +295,8 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
      */
     /** Delega en la configuración, que es quien sabe qué significa cada uno de sus campos. */
     private LocalDate bnplStartDate(PaymentOptions opciones, Integer solicitados) {
-        LocalDate arranque = opciones.bnplStartDate(LocalDate.now(), solicitados);
-        if (solicitados != null && solicitados > 0 && arranque.equals(LocalDate.now())) {
+        LocalDate arranque = opciones.bnplStartDate(BusinessClock.current().today(), solicitados);
+        if (solicitados != null && solicitados > 0 && arranque.equals(BusinessClock.current().today())) {
             log.warn("BNPL pedido ({} días) sobre un producto que no lo admite — se ignora", solicitados);
         }
         return arranque;
@@ -659,7 +660,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                 plazo,
                 account.getAmortizationType() != null ? account.getAmortizationType() : "FRENCH",
                 cadencia,
-                AmortizationEngine.firstDueDate(LocalDate.now(), cadencia),
+                AmortizationEngine.firstDueDate(BusinessClock.current().today(), cadencia),
                 account.getVatRate());
         installmentRepository.saveAll(calendario);
 

@@ -5,6 +5,7 @@ import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.domain.Installment;
 import com.fintech.creditportfolio.domain.event.InstallmentDueEvent;
 import com.fintech.creditportfolio.infrastructure.job.InstallmentDueJob;
+import com.fintech.shared.time.BusinessClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -13,7 +14,10 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
 
@@ -33,6 +37,10 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class InstallmentDueJobTest {
 
+    /** 00:01 del 31 en UTC: en la Ciudad de México todavía son las 18:01 del 30. */
+    private static final BusinessClock CLOCK = new BusinessClock(
+            Clock.fixed(Instant.parse("2026-10-31T00:01:00Z"), ZoneId.of("America/Mexico_City")));
+
     @Mock InstallmentRepository installmentRepository;
     @Mock CreditPortfolioEventPublisher eventPublisher;
 
@@ -40,7 +48,7 @@ class InstallmentDueJobTest {
 
     @BeforeEach
     void setUp() {
-        job = new InstallmentDueJob(installmentRepository, eventPublisher);
+        job = new InstallmentDueJob(installmentRepository, eventPublisher, CLOCK);
     }
 
     // ── ID-01 ──────────────────────────────────────────────────────────────────
@@ -58,7 +66,7 @@ class InstallmentDueJobTest {
 
     @Test
     void id02_singleInstallmentDue_publishesCorrectEvent() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = CLOCK.today();
         UUID creditAccountId = UUID.randomUUID();
         Installment inst = Installment.of(creditAccountId, 3, today,
                 new BigDecimal("4200.00"), new BigDecimal("90.00"));
@@ -82,7 +90,7 @@ class InstallmentDueJobTest {
 
     @Test
     void id03_multipleInstallmentsDue_publishesOneEventEach() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = CLOCK.today();
         Installment inst1 = Installment.of(UUID.randomUUID(), 1, today,
                 new BigDecimal("5000.00"), new BigDecimal("150.00"));
         Installment inst2 = Installment.of(UUID.randomUUID(), 2, today,
@@ -99,7 +107,7 @@ class InstallmentDueJobTest {
 
     @Test
     void id04_publisherThrowsForOneInstallment_continuesWithRemaining() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = CLOCK.today();
         Installment inst1 = Installment.of(UUID.randomUUID(), 1, today,
                 new BigDecimal("5000.00"), new BigDecimal("100.00"));
         Installment inst2 = Installment.of(UUID.randomUUID(), 2, today,
@@ -113,5 +121,16 @@ class InstallmentDueJobTest {
         job.run();   // must not throw
 
         verify(eventPublisher, times(2)).publishInstallmentDue(any());
+    }
+
+    @Test
+    void id05_laFechaEsLaDeMexicoNoLaDelContenedor() {
+        // Antes: LocalDate.now() en un contenedor en UTC daba el 31 y publicaba como vencidas las
+        // cuotas que vencían al día siguiente en México.
+        given(installmentRepository.findDueOnOrBefore(any())).willReturn(List.of());
+
+        job.run();
+
+        verify(installmentRepository).findDueOnOrBefore(LocalDate.of(2026, 10, 30));
     }
 }

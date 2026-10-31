@@ -41,6 +41,13 @@ x-otel-agent: &otel-agent
   OTEL_INSTRUMENTATION_SPRING_KAFKA_EXPERIMENTAL_SPAN_ATTRIBUTES: "true"
   OTEL_INSTRUMENTATION_KAFKA_EXPERIMENTAL_SPAN_ATTRIBUTES: "true"
 
+# Qué ambiente es este. Lo leen las guardas de los simuladores (SimulatorGuard): el stub de STP, el
+# buró simulado, las listas de gobierno simuladas y la firma simulada sólo arrancan si el ambiente
+# se declara bajo. El perfil `docker` ya no basta: dice dónde corre el proceso, no qué ambiente es.
+# Un despliegue real no declara `local`, y entonces ningún simulador arranca.
+x-plataforma: &plataforma
+  FINTECH_ENVIRONMENT: "${FINTECH_ENVIRONMENT:-local}"
+
 x-app-mem: &app-mem
   deploy:
     resources:
@@ -220,7 +227,7 @@ services:
       - ./services/gateway-service/keys/public.pem:/etc/identity/keys/public.pem:ro
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "identity-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -253,7 +260,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "configuration-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -292,7 +299,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "party-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -321,14 +328,16 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "scoring-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
-      CIRCULO_CREDITO_API_KEY: ${CIRCULO_CREDITO_API_KEY:-YfuKKDGcx8DBFLny8gWJVaBcx0xUc5oT}
+      # La credencial sale del ambiente (.env, gestor de secretos), nunca del repo. Con el mock
+      # encendido no se usa; el adaptador real no arranca sin ella.
+      CIRCULO_CREDITO_API_KEY: ${CIRCULO_CREDITO_API_KEY:-}
       # Dev/local: usa el mock de buró (reporte determinista por CURP) para correr el journey
       # sin depender del sandbox externo. Poner en false para pegar al buró real.
       SCORING_CIRCULO_MOCK_ENABLED: ${SCORING_CIRCULO_MOCK_ENABLED:-true}
@@ -354,7 +363,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "credit-product-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -387,7 +396,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "origination-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -426,7 +435,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "credit-portfolio-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -461,7 +470,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "banking-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -497,7 +506,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "compliance-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -528,7 +537,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "closing-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -565,7 +574,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "charges-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -597,7 +606,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "payments-service"
       SPRING_APPLICATION_NAME: "payments-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -635,7 +644,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "channel-mobile-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8085
@@ -699,7 +708,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "channel-backoffice-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8099
@@ -769,7 +778,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "audit-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -798,7 +807,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "channels-service"
       SPRING_PROFILES_ACTIVE: docker
       SERVER_PORT: 8080
@@ -832,7 +841,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "wallet-service"
       SPRING_APPLICATION_NAME: "wallet-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -868,7 +877,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "collections-service"
       SPRING_APPLICATION_NAME: "collections-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -900,7 +909,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "risk-service"
       SPRING_APPLICATION_NAME: "risk-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -935,7 +944,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "accounting-service"
       SPRING_APPLICATION_NAME: "accounting-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -967,7 +976,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "invoicing-service"
       SPRING_APPLICATION_NAME: "invoicing-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -999,7 +1008,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "commission-service"
       SPRING_APPLICATION_NAME: "commission-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -1033,7 +1042,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "beneficiary-service"
       SPRING_APPLICATION_NAME: "beneficiary-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -1081,7 +1090,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "sales-org-service"
       SPRING_APPLICATION_NAME: "sales-org-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -1111,7 +1120,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "notifications-service"
       SPRING_APPLICATION_NAME: "notifications-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -1156,7 +1165,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "disbursement-service"
       SPRING_APPLICATION_NAME: "disbursement-service"
       SPRING_PROFILES_ACTIVE: docker
@@ -1190,7 +1199,7 @@ services:
     volumes:
       - otel-agent-vol:/otel:ro
     environment:
-      <<: *otel-agent
+      <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "stp-service"
       SPRING_APPLICATION_NAME: "stp-service"
       SPRING_PROFILES_ACTIVE: docker

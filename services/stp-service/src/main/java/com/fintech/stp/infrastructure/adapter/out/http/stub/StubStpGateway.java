@@ -15,6 +15,7 @@ import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import com.fintech.shared.simulation.SimulatorGuard;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -27,13 +28,10 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
@@ -83,35 +81,17 @@ public class StubStpGateway implements StpGatewayPort {
     }
 
     /**
-     * Perfiles donde se admite el stub. Es una <strong>lista blanca</strong>, no una lista negra de
-     * nombres de producción.
-     *
-     * <p>La versión anterior sólo rechazaba los perfiles {@code prod}/{@code production}, y el único
-     * despliegue de este repo arranca con {@code SPRING_PROFILES_ACTIVE=docker}: promover ese mismo
-     * compose a producción sin poner {@code STP_GATEWAY_MODE=real} habría dejado el stub corriendo
-     * con dinero real. Con lista blanca, cualquier perfil no contemplado —o ninguno— impide el
-     * arranque, que es el fallo seguro.
-     */
-    private static final Set<String> NON_PRODUCTION_PROFILES =
-            Set.of("local", "dev", "test", "ci", "docker", "qa", "staging");
-
-    /**
      * Guarda de arranque. Un stub de pagos activo en producción es la peor clase de incidente: todo
      * se ve verde y no sale un peso.
+     *
+     * <p>La decide {@link SimulatorGuard}, la misma de todos los simuladores: el ambiente se declara
+     * ({@code FINTECH_ENVIRONMENT}) en una lista blanca de ambientes bajos. El perfil {@code docker}
+     * ya no basta: describe dónde corre el proceso, no qué ambiente es, y promover el compose a
+     * producción sin tocar nada habría dejado el stub corriendo con dinero real.
      */
     @PostConstruct
     void refuseToRunInProduction() {
-        String[] active = environment.getActiveProfiles();
-        boolean allowed = active.length > 0 && Arrays.stream(active)
-                .allMatch(profile -> NON_PRODUCTION_PROFILES.contains(profile.toLowerCase(Locale.ROOT)));
-        if (!allowed) {
-            throw new IllegalStateException(
-                    "fintech.stp.gateway.mode=stub con perfiles activos " + Arrays.toString(active)
-                            + ". El stub de STP sólo arranca con perfiles de ambiente bajo "
-                            + NON_PRODUCTION_PROFILES + ". En producción: STP_GATEWAY_MODE=real.");
-        }
-        log.warn("STP gateway in STUB mode (profiles={}) — no real payments will be dispatched.",
-                Arrays.toString(active));
+        SimulatorGuard.requireNonProduction(environment, "StubStpGateway (STP/SPEI)", "STP_GATEWAY_MODE=real");
     }
 
     /** La pública del stub, para registrarla como llave de verificación en el ambiente. */

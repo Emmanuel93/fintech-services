@@ -15,6 +15,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 
 /**
  * Trae las listas de gobierno: al arrancar y cada madrugada.
@@ -70,7 +71,8 @@ public class WatchlistSyncJob {
         if (enabled && onStartup) syncAll();
     }
 
-    @Scheduled(cron = "${fintech.compliance.watchlist-sync.cron:0 30 2 * * *}", zone = "America/Mexico_City")
+    @SchedulerLock(name = "compliance.watchlist-sync", lockAtMostFor = "PT2H", lockAtLeastFor = "PT30S")
+    @Scheduled(cron = "${fintech.compliance.watchlist-sync.cron:0 30 2 * * *}", zone = "${fintech.business.zone:America/Mexico_City}")
     public void nightly() {
         if (enabled) syncAll();
     }

@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Repository
 class JpaCreditAccountAdapter implements CreditAccountRepository {
@@ -101,7 +102,7 @@ class JpaCreditAccountAdapter implements CreditAccountRepository {
 
         // Cobro por periodo (mes calendario): actual y próximo. Bordes calculados aquí y pasados a la
         // consulta, para no atar la fecha a la base.
-        LocalDate today = LocalDate.now();
+        LocalDate today = BusinessClock.current().today();
         LocalDate curStart = today.withDayOfMonth(1);
         LocalDate curEnd = today.withDayOfMonth(today.lengthOfMonth());
         LocalDate nextStart = curStart.plusMonths(1);
