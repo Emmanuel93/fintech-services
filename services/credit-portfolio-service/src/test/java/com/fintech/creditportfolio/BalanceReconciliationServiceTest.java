@@ -18,6 +18,7 @@ import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.CreditAccountStatus;
 import com.fintech.creditportfolio.domain.Disposition;
 import com.fintech.creditportfolio.domain.Installment;
+import com.fintech.creditportfolio.domain.PaymentFacts;
 import com.fintech.creditportfolio.domain.InstallmentStatus;
 import com.fintech.creditportfolio.domain.event.BalanceUpdatedEvent;
 import org.junit.jupiter.api.BeforeEach;
@@ -479,6 +480,42 @@ class BalanceReconciliationServiceTest {
         assertThat(netting.getDeltaAmount()).isEqualByComparingTo("-180.00");
         assertThat(line.getAccruedInterestBalance()).isEqualByComparingTo("0");
         assertThat(line.getPrincipalBalance()).isEqualByComparingTo("4200");
+    }
+
+    @Test
+    @DisplayName("el cliente paga su cuota con su referencia: queda pagada aunque el estado de su distribuidora siga incompleto")
+    void aClientPayingHisOwnInstallmentIsCurrent_whileHerStatementIsNot() {
+        LocalDate today = BusinessClock.current().today();
+        CreditAccount line = distributorOwingAStatement(today.plusDays(5));
+        UUID lineId = line.getCreditAccountId();
+        // The statement bills two clients: Ana's installment of 1,000 (the fixture's) and Beto's of 1,000.
+        Installment statement = Installment.of(lineId, 1, today.plusDays(5), new BigDecimal("2000.00"), BigDecimal.ZERO);
+        statement.billAsStatement(1, today.minusDays(7), today.plusDays(5));
+        given(installmentRepository.findByScheduleIdOrdered(lineId)).willReturn(List.of(statement));
+        UUID ana = UUID.randomUUID(), beto = UUID.randomUUID();
+        Disposition toAna = Disposition.create(lineId, DispositionType.THIRD_PARTY_CREDIT, new BigDecimal("5000"), ana);
+        Disposition toBeto = Disposition.create(lineId, DispositionType.THIRD_PARTY_CREDIT, new BigDecimal("5000"), beto);
+        given(dispositionRepository.findByCreditAccountId(lineId)).willReturn(List.of(toAna, toBeto));
+        Installment anas = Installment.of(toAna.getDispositionId(), 1, today.plusDays(5), new BigDecimal("800.00"), new BigDecimal("200.00"));
+        anas.billIn(1, today.plusDays(5));
+        Installment betos = Installment.of(toBeto.getDispositionId(), 1, today.plusDays(5), new BigDecimal("800.00"), new BigDecimal("200.00"));
+        betos.billIn(1, today.plusDays(5));
+        given(installmentRepository.findByScheduleIds(any())).willReturn(List.of(anas, betos));
+        // The ledger as it stands after Ana's deposit: her entry names her.
+        BalanceEvent deposit = BalanceEvent.record(lineId, "pay-ana-1", "PAYMENT_APPLIED", new BigDecimal("-1000.00"), line, today)
+                .paidBy(ana);
+        given(balanceEventRepository.paymentsOf(any())).willReturn(List.of(deposit));
+        PaymentFacts byAna = new PaymentFacts(null, today, "SPEI_CREDIT", UUID.randomUUID(), "BENEFICIARY", "SIM-1", ana);
+
+        service.onPaymentApplied("pay-ana-1", accountId, new BigDecimal("1000.00"), byAna);
+
+        assertThat(anas.getStatus()).as("Ana paid hers").isEqualTo(InstallmentStatus.PAID);
+        assertThat(betos.getStatus()).as("Beto's is still on the statement").isEqualTo(InstallmentStatus.PENDING);
+        assertThat(statement.getStatus()).as("half the statement is covered").isEqualTo(InstallmentStatus.PARTIAL);
+        ArgumentCaptor<BalanceEvent> entries = ArgumentCaptor.forClass(BalanceEvent.class);
+        then(balanceEventRepository).should().save(entries.capture());
+        assertThat(entries.getValue().getBeneficiaryPartyId()).isEqualTo(ana);
+        assertThat(line.getTotalDebt()).isEqualByComparingTo("4200");
     }
 
     @Test

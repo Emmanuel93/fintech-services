@@ -9,6 +9,7 @@ import com.fintech.creditportfolio.domain.config.DistributorCommission;
 import com.fintech.creditportfolio.domain.config.DistributorCommission.Tier;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import com.fintech.creditportfolio.application.port.out.BalanceEventRepository;
+import com.fintech.creditportfolio.application.port.out.CollectionAccountProjection;
 import com.fintech.creditportfolio.application.port.out.DispositionRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.domain.BalanceEvent;
@@ -17,6 +18,8 @@ import com.fintech.creditportfolio.domain.Disposition;
 import com.fintech.creditportfolio.domain.DispositionType;
 import com.fintech.creditportfolio.domain.Installment;
 import com.fintech.shared.time.BusinessClock;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -31,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -49,12 +53,17 @@ class StatementViewServiceTest {
     private static final LocalDate DESDE = LocalDate.of(2026, 11, 1);
     private static final LocalDate HASTA = LocalDate.of(2026, 11, 15);
     private static final ZoneId MX = ZoneId.of("America/Mexico_City");
+    /** Where the line's money goes out to (her own bank account): never where she pays. */
+    private static final String DISBURSEMENT_CLABE = "002180151461387922";
+    private static final String COLLECTION_CLABE = "646180378000000032";
 
     private final FindCreditAccountUseCase accounts = mock(FindCreditAccountUseCase.class);
     private final BalanceEventRepository ledger = mock(BalanceEventRepository.class);
     private final InstallmentRepository installments = mock(InstallmentRepository.class);
     private final DispositionRepository dispositions = mock(DispositionRepository.class);
-    private final StatementViewService service = new StatementViewService(accounts, ledger, installments, dispositions, null);
+    private final CollectionAccountProjection collectionAccounts = mock(CollectionAccountProjection.class);
+    private final StatementViewService service =
+            new StatementViewService(accounts, ledger, installments, dispositions, null, collectionAccounts);
 
     private CreditAccount linea;
     private final List<BalanceEvent> libro = new ArrayList<>();
@@ -63,7 +72,7 @@ class StatementViewServiceTest {
     void cuenta() {
         linea = CreditAccount.fromSnapshot(UUID.randomUUID(), "CTR-202611-0001", UUID.randomUUID(), "DL-DIST-STD-V1",
                 1, "DISTRIBUTOR_LINE", "REVOLVING", null, new BigDecimal("50000"), 24, new BigDecimal("0.60"),
-                new BigDecimal("0.90"), "FRENCH", BigDecimal.ZERO, null, "B", null, null);
+                new BigDecimal("0.90"), "FRENCH", BigDecimal.ZERO, DISBURSEMENT_CLABE, "B", null, null);
         when(accounts.getById(linea.getCreditAccountId())).thenReturn(linea);
         when(ledger.findBetween(eq(linea.getCreditAccountId()), any(), any())).thenAnswer(inv -> {
             LocalDate desde = inv.getArgument(1), hasta = inv.getArgument(2);
@@ -97,6 +106,30 @@ class StatementViewServiceTest {
         on(on, () -> d[0] = Disposition.create(account.getCreditAccountId(), DispositionType.THIRD_PARTY_CREDIT,
                 new BigDecimal(amount), UUID.randomUUID()));
         return d[0];
+    }
+
+    @Test
+    @DisplayName("la vista dice pagar a la CLABE de cobro de la titular, nunca a la de desembolso de la cuenta")
+    void theViewCarriesTheCollectionClabe() throws JsonProcessingException {
+        when(collectionAccounts.activeClabes(List.of(linea.getObligorPartyId())))
+                .thenReturn(Map.of(linea.getObligorPartyId(), COLLECTION_CLABE));
+
+        StatementView v = service.view(linea.getCreditAccountId(), DESDE, HASTA, null);
+
+        assertThat(v.account().collectionClabe()).isEqualTo(COLLECTION_CLABE).isNotEqualTo(DISBURSEMENT_CLABE);
+        // The contract statements and receipts read: the key is «collectionClabe», and the disbursement CLABE is not sent.
+        String json = new ObjectMapper().findAndRegisterModules().writeValueAsString(v.account());
+        assertThat(json).contains("\"collectionClabe\":\"" + COLLECTION_CLABE + "\"").doesNotContain(DISBURSEMENT_CLABE);
+    }
+
+    @Test
+    @DisplayName("sin CLABE de cobro activa la vista no inventa una: el estado dice pagar por la app")
+    void withoutAnActiveCollectionClabeTheViewHasNone() {
+        when(collectionAccounts.activeClabes(List.of(linea.getObligorPartyId()))).thenReturn(Map.of());
+
+        StatementView v = service.view(linea.getCreditAccountId(), DESDE, HASTA, null);
+
+        assertThat(v.account().collectionClabe()).isNull();
     }
 
     @Test
@@ -248,7 +281,7 @@ class StatementViewServiceTest {
                 new BigDecimal("0.18"), List.of(new Tier(0, new BigDecimal("0.18")), new Tier(1, new BigDecimal("0.14")),
                         new Tier(2, new BigDecimal("0.11")), new Tier(3, new BigDecimal("0.07"))), DistributorCommission.NETTED));
         when(resolver.resolveForAccount("DL-DIST-STD-V1", 1)).thenReturn(Optional.of(config));
-        StatementViewService conComision = new StatementViewService(accounts, ledger, installments, dispositions, resolver);
+        StatementViewService conComision = new StatementViewService(accounts, ledger, installments, dispositions, resolver, collectionAccounts);
 
         // One placement: 450 of principal and 50 of interest a fortnight, 90 of commission on each; the first one is
         // billed by this statement (due 20 November), the second is December's.

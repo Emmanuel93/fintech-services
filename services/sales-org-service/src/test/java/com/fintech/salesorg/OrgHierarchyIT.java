@@ -1,12 +1,23 @@
 package com.fintech.salesorg;
 
+import com.fintech.salesorg.application.EffectivePlacementPolicy;
 import com.fintech.salesorg.application.port.in.CreateOrgUnitCommand;
 import com.fintech.salesorg.application.port.in.OrgUnitUseCase;
+import com.fintech.salesorg.application.port.in.PlacementPolicyUseCase;
 import com.fintech.salesorg.application.port.out.OrgLevelRepository;
 import com.fintech.salesorg.application.port.out.OrgUnitRepository;
+import com.fintech.salesorg.application.port.out.ProductEnvelopePort;
+import com.fintech.salesorg.domain.ClientLimits;
+import com.fintech.salesorg.domain.ClientType;
 import com.fintech.salesorg.domain.InvalidHierarchyException;
+import com.fintech.salesorg.domain.InvalidPlacementPolicyException;
 import com.fintech.salesorg.domain.OrgLevel;
 import com.fintech.salesorg.domain.OrgUnit;
+import com.fintech.salesorg.domain.PlacementPolicy;
+import com.fintech.salesorg.domain.ProductEnvelope;
+import com.fintech.salesorg.infrastructure.adapter.out.messaging.KafkaPlacementPolicyEventPublisher;
+import com.fintech.salesorg.infrastructure.adapter.out.messaging.PlacementPolicyChangedPayload;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,11 +29,18 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.verify;
 
 /**
  * El árbol contra Postgres real. Prueba lo que un test con mocks no puede: que las migraciones
@@ -49,8 +67,11 @@ class OrgHierarchyIT {
     }
 
     @MockBean KafkaTemplate<String, Object> kafkaTemplate;
+    // The catalog is not part of this container: the line's envelope is what the policy is validated against.
+    @MockBean ProductEnvelopePort products;
 
     @Autowired OrgUnitUseCase orgUnitUseCase;
+    @Autowired PlacementPolicyUseCase placementPolicies;
     @Autowired OrgLevelRepository levelRepository;
     @Autowired OrgUnitRepository unitRepository;
 
@@ -139,6 +160,66 @@ class OrgHierarchyIT {
         // Resolución de promoterCode (DS-4): el código del distribuidor → su partyId; inexistente → vacío.
         assertThat(orgUnitUseCase.resolveDistributorByCode("DDIS" + s)).contains(distPartyId);
         assertThat(orgUnitUseCase.resolveDistributorByCode("NOPE" + s)).isEmpty();
+    }
+
+    @Test
+    void placementPolicy_isInheritedDownTheRealTree_andADistributorOnlyTightensIt() {
+        given(products.distributorLine()).willReturn(Optional.of(
+                new ProductEnvelope("DL-001", new BigDecimal("1000"), new BigDecimal("10000"), 12, 24)));
+        String s = uniq();
+        OrgUnit root   = create(levelId("NATIONAL"), null, "PROOT" + s);
+        OrgUnit region = create(levelId("REGION"), root.getUnitId(), "PREG" + s);
+        OrgUnit zone   = create(levelId("ZONE"), region.getUnitId(), "PZON" + s);
+        OrgUnit branch = create(levelId("BRANCH"), zone.getUnitId(), "PSUC" + s);
+        OrgUnit exec   = createNode(levelId("EXECUTIVE"), branch.getUnitId(), "PEXE" + s, UUID.randomUUID());
+        UUID herParty = UUID.randomUUID();
+        OrgUnit dist   = createNode(levelId("DISTRIBUTOR"), exec.getUnitId(), "PDIS" + s, herParty);
+
+        // The ancestors query: the chain from the root, in order, with one indexed LTREE query.
+        assertThat(unitRepository.findAncestorsInclusive(dist.getPath()))
+                .extracting(OrgUnit::getCode)
+                .containsExactly("PROOT" + s, "PREG" + s, "PZON" + s, "PSUC" + s, "PEXE" + s, "PDIS" + s);
+
+        // Nothing configured yet: the distributor inherits nothing.
+        assertThat(placementPolicies.effective(dist.getCode()).configured()).isFalse();
+
+        // The branch declares; the distributor two levels down receives it resolved.
+        PlacementPolicy branchPolicy = PlacementPolicy.of(
+                new ClientLimits(new BigDecimal("5000.00"), new BigDecimal("5000.00"), 1, 16),
+                new ClientLimits(new BigDecimal("10000.00"), new BigDecimal("15000.00"), 3, 24));
+        placementPolicies.declare(branch.getCode(), branchPolicy, "it");
+        EffectivePlacementPolicy hers = placementPolicies.effective(dist.getCode());
+        assertThat(hers.effective()).isEqualTo(branchPolicy);
+        assertThat(hers.inheritedFrom()).isEqualTo(branch.getCode());
+        assertThat(hers.partyRef()).isEqualTo(herParty);
+        assertThat(hers.levelCode()).isEqualTo("DISTRIBUTOR");
+
+        // She may not widen it; she may tighten it.
+        assertThatThrownBy(() -> placementPolicies.declare(dist.getCode(),
+                PlacementPolicy.of(new ClientLimits(new BigDecimal("8000"), null, null, null), null), "it"))
+                .isInstanceOf(InvalidPlacementPolicyException.class);
+        placementPolicies.declare(dist.getCode(), PlacementPolicy.of(new ClientLimits(new BigDecimal("3000.00"), null, null, 12), null), "it");
+        assertThat(placementPolicies.effective(dist.getCode()).effective().forType(ClientType.NUEVO))
+                .isEqualTo(new ClientLimits(new BigDecimal("3000.00"), new BigDecimal("5000.00"), 1, 12));
+
+        // A distributor created afterwards under the branch gets her copy published on creation.
+        UUID laterParty = UUID.randomUUID();
+        OrgUnit later = createNode(levelId("DISTRIBUTOR"), exec.getUnitId(), "PDI2" + s, laterParty);
+        ArgumentCaptor<Object> payloads = ArgumentCaptor.forClass(Object.class);
+        verify(kafkaTemplate, atLeastOnce()).send(eq(KafkaPlacementPolicyEventPublisher.TOPIC), eq(later.getCode()), payloads.capture());
+        PlacementPolicyChangedPayload published = (PlacementPolicyChangedPayload) payloads.getValue();
+        assertThat(published.configured()).isTrue();
+        assertThat(published.partyRef()).isEqualTo(laterParty);
+        assertThat(published.inheritedFrom()).isEqualTo(branch.getCode());
+        assertThat(published.nuevo().maxLoanAmount()).isEqualByComparingTo("5000");
+        assertThat(published.revolvente().maxTerm()).isEqualTo(24);
+
+        // Clearing the branch leaves the tree without a policy again, and says so to every unit below.
+        placementPolicies.clear(branch.getCode(), "it");
+        assertThat(placementPolicies.effective(later.getCode()).configured()).isFalse();
+        // Her own declaration survives the branch's clearing: it is hers.
+        assertThat(placementPolicies.effective(dist.getCode()).effective().forType(ClientType.NUEVO))
+                .isEqualTo(new ClientLimits(new BigDecimal("3000.00"), null, null, 12));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

@@ -44,6 +44,7 @@ import static org.mockito.Mockito.times;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -440,6 +441,47 @@ class CreditAccountServiceTest {
         service.process(placementOf(account, "5000", 12));
         then(eventPublisher).should().publishDispositionAuthorized(any());
         assertThat(account.getPrincipalBalance()).isEqualByComparingTo("5000");
+    }
+
+    @Test
+    @DisplayName("una colocación que el lado del cliente rechaza (lista roja, límites de la sucursal) sale con su motivo y no toca la línea")
+    void aPlacementTheClientChecksRefuseIsRejectedWithTheirReason() {
+        CreditAccount account = commissionedDistributorLine();
+        stubRejectable(account);
+        AtomicReference<UUID> asked = new AtomicReference<>();
+        CreditAccountService withChecks = new CreditAccountService(accountRepository, dispositionRepository,
+                installmentRepository, balanceEventRepository, new AmortizationEngine(),
+                eventPublisher, configResolver, partyVerifications,
+                (line, beneficiary, amount, term) -> {
+                    asked.set(beneficiary);
+                    return "CLIENT_RED_LISTED: DISTRIBUTOR_REPORT";
+                }, 12);
+        ProcessDispositionCommand cmd = placementOf(account, "5000", 12);
+
+        withChecks.process(cmd);
+
+        assertThat(rejectionReason()).isEqualTo("CLIENT_RED_LISTED: DISTRIBUTOR_REPORT");
+        assertThat(asked.get()).isEqualTo(cmd.beneficiaryPartyId());
+        assertThat(account.getPrincipalBalance()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("un crédito directo nunca consulta los límites de cliente: su monto lo define el score")
+    void aDirectCreditNeverAsksTheClientChecks() {
+        CreditAccount account = activeRevolvingAccount();
+        given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
+        given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
+        lenient().when(accountRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(dispositionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        CreditAccountService withChecks = new CreditAccountService(accountRepository, dispositionRepository,
+                installmentRepository, balanceEventRepository, new AmortizationEngine(),
+                eventPublisher, configResolver, partyVerifications,
+                (line, beneficiary, amount, term) -> { throw new AssertionError("a direct credit must not ask"); }, 12);
+
+        withChecks.process(new ProcessDispositionCommand("evt-" + UUID.randomUUID(), account.getCreditAccountId(),
+                account.getObligorPartyId(), new BigDecimal("1000"), null, null, null, null, null));
+
+        then(eventPublisher).should(never()).publishDispositionRejected(any());
     }
 
     @Test

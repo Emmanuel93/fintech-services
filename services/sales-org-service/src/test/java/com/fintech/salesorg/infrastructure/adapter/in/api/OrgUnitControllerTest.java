@@ -3,9 +3,13 @@ package com.fintech.salesorg.infrastructure.adapter.in.api;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fintech.salesorg.application.port.in.CreateOrgUnitCommand;
 import com.fintech.salesorg.application.port.in.OrgUnitUseCase;
+import com.fintech.salesorg.application.port.in.PlacementPolicyUseCase;
+import com.fintech.salesorg.application.port.out.OrgUnitRepository;
+import com.fintech.salesorg.domain.ClientType;
 import com.fintech.salesorg.domain.InvalidHierarchyException;
 import com.fintech.salesorg.domain.OrgUnit;
 import com.fintech.salesorg.domain.OrgUnitNotFoundException;
+import com.fintech.salesorg.domain.PlacementPolicy;
 import com.fintech.salesorg.infrastructure.adapter.in.api.dto.CreateOrgUnitRequest;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -21,6 +25,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -36,7 +41,8 @@ class OrgUnitControllerTest {
     @MockBean OrgUnitUseCase orgUnitUseCase;
     // El controlador consulta el IVA efectivo de una unidad directo al repositorio: la resolución
     // por herencia es una consulta sobre el path materializado, no una regla de negocio.
-    @MockBean com.fintech.salesorg.application.port.out.OrgUnitRepository orgUnitRepository;
+    @MockBean OrgUnitRepository orgUnitRepository;
+    @MockBean PlacementPolicyUseCase placementPolicies;
 
     private final ObjectMapper json = new ObjectMapper();
 
@@ -59,6 +65,26 @@ class OrgUnitControllerTest {
         ArgumentCaptor<CreateOrgUnitCommand> cmd = ArgumentCaptor.forClass(CreateOrgUnitCommand.class);
         verify(orgUnitUseCase).create(cmd.capture());
         assertThat(cmd.getValue().createdBy()).isEqualTo("staff-9");
+    }
+
+    @Test
+    void create_withAPlacementPolicy_declaresItOnTheNewUnit() throws Exception {
+        given(orgUnitUseCase.create(any())).willReturn(
+                OrgUnit.create(levelId, UUID.randomUUID(), "S_TIJ", "Tijuana", "MX.R.Z.S_TIJ", null, "staff-9"));
+
+        mockMvc.perform(post("/api/v1/sales-org/units")
+                        .header("X-User-Id", "staff-9")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"levelId": "%s", "parentUnitId": "%s", "code": "S_TIJ", "name": "Tijuana",
+                                 "placementPolicy": {"nuevo": {"maxLoanAmount": 5000, "maxOutstanding": 5000, "maxActiveLoans": 1, "maxTerm": 16}}}
+                                """.formatted(levelId, UUID.randomUUID())))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.code").value("S_TIJ"));
+
+        ArgumentCaptor<PlacementPolicy> policy = ArgumentCaptor.forClass(PlacementPolicy.class);
+        verify(placementPolicies).declare(eq("S_TIJ"), policy.capture(), eq("staff-9"));
+        assertThat(policy.getValue().forType(ClientType.NUEVO).maxLoanAmount()).isEqualByComparingTo("5000");
     }
 
     @Test

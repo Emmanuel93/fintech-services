@@ -1,11 +1,13 @@
 package com.fintech.statement.application.service.assembly;
 
+import com.fintech.documents.DocumentModel;
 import com.fintech.statement.application.StatementProperties;
 import com.fintech.statement.application.port.out.StatementSource.DistributorCommission;
 import com.fintech.statement.application.port.out.StatementSource.EarnedCommission;
 import com.fintech.statement.application.port.out.StatementSource.InstallmentLine;
 import com.fintech.statement.application.port.out.StatementSource.LadderStep;
 import com.fintech.statement.application.port.out.StatementSource.Movement;
+import com.fintech.statement.application.port.out.StatementSource.PartySummary;
 import com.fintech.statement.application.port.out.StatementSource.PlacementLine;
 import com.fintech.statement.application.port.out.StatementSource.SourceView;
 import com.fintech.statement.domain.CutoffFacts;
@@ -263,5 +265,29 @@ class DistributorNettedStatementTest {
         }
         long ms = (System.nanoTime() - start) / 1_000_000;
         assertThat(ms).as("200 statements took %d ms", ms).isLessThan(2_000);
+    }
+
+    @Test
+    @DisplayName("el pago que su cliente hizo con su referencia aparece en sus movimientos como «Pago directo de …»")
+    void aClientsOwnPaymentIsNamedInHerMovements() {
+        UUID client = UUID.randomUUID();
+        SourceView base = nettedView(placements(), "0");
+        SourceView v = new SourceView(base.account(), base.from(), base.to(), base.dueUntil(), base.opening(), base.closing(),
+                base.totals(), List.of(
+                        new Movement(Instant.parse("2026-11-25T18:00:00Z"), "PAYMENT_APPLIED", new BigDecimal("-487.60"), null, client),
+                        new Movement(Instant.parse("2026-11-26T18:00:00Z"), "PAYMENT_APPLIED", new BigDecimal("-1000.00"), null)),
+                base.installments(), base.placements(), base.plansOutstanding(), base.plansDue(), base.plansPrincipalDue(),
+                base.periodCharges(), base.arrears(), base.purchasePlans(), base.ladder(), base.commissionSettlement());
+        AssemblyContext withClient = new AssemblyContext(UUID.randomUUID(), ctx(v, new DistributorCommission(SHARE, List.of()), 0).facts(), v,
+                Samples.persona(party, "Distribuidora"), Map.of(client, new PartySummary(client, "Rosa Elena Ibarra Salgado", null)),
+                Optional.empty(), new StatementProperties(), MX, Instant.parse("2026-12-01T06:05:00Z"), new DistributorCommission(SHARE, List.of()));
+
+        DocumentModel m = new DistributorStatementAssembler().assemble(withClient).model();
+
+        assertThat(rows(m, "MOV")).extracting(r -> r.get("c2"))
+                .contains("Pago directo de Rosa Elena Ibarra Salgado")
+                .doesNotContain("Pago directo de tu cliente");
+        assertThat(rows(m, "MOV").stream().filter(r -> "Pago directo de Rosa Elena Ibarra Salgado".equals(r.get("c2"))).findFirst()
+                .orElseThrow().get("c4")).isEqualTo("$487.60");
     }
 }

@@ -141,4 +141,22 @@ class SeniorityAllocationStrategyTest {
         }
         assertThat((System.nanoTime() - began) / 1_000_000).isLessThan(1_000);
     }
+
+    @Test
+    @DisplayName("el depósito del cliente va a la línea de su distribuidora hasta lo que debe; el resto, a favor de ella")
+    void aClientsDepositToHerLine() {
+        UUID line = UUID.randomUUID(), client = UUID.randomUUID();
+        SeniorityAllocationStrategy s = new SeniorityAllocationStrategy();
+        AllocationPlan plan = s.allocateForClient(new BigDecimal("700.00"),
+                new LoanDebt(line, 1234566L, null, new BigDecimal("500.00")), client);
+        assertThat(plan.lines()).containsExactly(
+                new AllocationLine(1, line, new BigDecimal("500.00"), AllocationMode.BENEFICIARY, client),
+                new AllocationLine(2, null, new BigDecimal("200.00"), AllocationMode.CREDIT_BALANCE));
+        assertThat(plan.referenceStatus()).isEqualTo(ReferenceStatus.MATCHED);
+
+        AllocationPlan nothingOwed = s.allocateForClient(new BigDecimal("300.00"),
+                new LoanDebt(line, 1234566L, null, BigDecimal.ZERO), client);
+        assertThat(nothingOwed.lines()).containsExactly(
+                new AllocationLine(1, null, new BigDecimal("300.00"), AllocationMode.CREDIT_BALANCE));
+    }
 }

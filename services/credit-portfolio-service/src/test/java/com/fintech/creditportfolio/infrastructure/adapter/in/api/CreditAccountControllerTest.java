@@ -8,6 +8,9 @@ import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.application.port.out.PortfolioStat;
 import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.CreditAccountNotFoundException;
+import com.fintech.creditportfolio.application.service.BeneficiaryProfileService;
+import com.fintech.creditportfolio.domain.beneficiary.ClientLimits;
+import com.fintech.creditportfolio.domain.beneficiary.ClientType;
 import com.fintech.creditportfolio.infrastructure.config.SecurityConfig;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,6 +27,7 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.IntStream;
 
+import static org.hamcrest.Matchers.startsWith;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -43,6 +47,7 @@ class CreditAccountControllerTest {
     @MockitoBean DispositionRepository dispositionRepository;
     @MockitoBean InstallmentRepository installmentRepository;
     @MockitoBean CollectionAccountProjection collectionAccounts;
+    @MockitoBean BeneficiaryProfileService beneficiaries;
 
     // fromSnapshot generates its own creditAccountId internally; capture it from the built object
     private final CreditAccount account = buildAccount();
@@ -57,6 +62,29 @@ class CreditAccountControllerTest {
                 "FRENCH", BigDecimal.ZERO, "032180000118359719", "BAJO", null, null);
         a.activate(new BigDecimal("50000"));
         return a;
+    }
+
+    // ── GET /accounts/{id}/placement-limits ─────────────────────────────────────────
+
+    @Test
+    void placementLimits_answersTypeLimitsHeadroomAndWhyNot() throws Exception {
+        UUID client = UUID.randomUUID();
+        given(findUseCase.getById(accountId)).willReturn(account);
+        given(beneficiaries.limitsFor(account, client, new BigDecimal("8000"), 12)).willReturn(
+                new BeneficiaryProfileService.PlacementLimitsView(client, ClientType.NUEVO, true, "S_TIJ",
+                        new ClientLimits(new BigDecimal("5000"), new BigDecimal("5000"), 1, 16), 0, BigDecimal.ZERO,
+                        new BigDecimal("5000"), 1, List.of(), false,
+                        "AMOUNT_ABOVE_CLIENT_LIMIT: cliente NUEVO hasta 5000 por préstamo, pidió 8000"));
+
+        mockMvc.perform(get("/api/v1/portfolio/accounts/{id}/placement-limits", accountId)
+                        .param("beneficiaryPartyId", client.toString()).param("amount", "8000").param("termPeriods", "12")
+                        .header("X-User-Id", UUID.randomUUID().toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.clientType").value("NUEVO"))
+                .andExpect(jsonPath("$.limits.maxLoanAmount").value(5000))
+                .andExpect(jsonPath("$.amountAvailable").value(5000))
+                .andExpect(jsonPath("$.canPlace").value(false))
+                .andExpect(jsonPath("$.reason").value(startsWith("AMOUNT_ABOVE_CLIENT_LIMIT")));
     }
 
     // ── GET /accounts/{id} ────────────────────────────────────────────────────────

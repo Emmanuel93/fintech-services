@@ -1,4 +1,4 @@
-package com.fintech.statement.application.service.assembly;
+package com.fintech.documents;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

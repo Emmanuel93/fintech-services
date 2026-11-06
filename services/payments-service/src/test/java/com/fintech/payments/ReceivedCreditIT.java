@@ -3,6 +3,7 @@ package com.fintech.payments;
 import com.fintech.payments.application.port.in.ApplyReceivedCreditUseCase;
 import com.fintech.payments.application.port.in.ApplyReceivedCreditUseCase.ReceivedCreditCommand;
 import com.fintech.payments.application.port.out.AccountBalanceSnapshotRepository;
+import com.fintech.payments.application.port.out.ClientReferenceDirectory;
 import com.fintech.payments.application.port.out.PaymentOrderRepository;
 import com.fintech.payments.application.port.out.ReceivedCreditRepository;
 import com.fintech.payments.application.service.BalanceSnapshotService;
@@ -67,6 +68,7 @@ class ReceivedCreditIT {
     @Autowired CustomerBalanceService balances;
     @Autowired PaymentService payments;
     @Autowired JdbcTemplate jdbc;
+    @Autowired ClientReferenceDirectory clientReferences;
 
     /** A payer with two loans: an old one (ref 1000001, owes 1,500) and a newer one (ref 2000002, owes 2,500). */
     private record Payer(UUID party, UUID oldLoan, UUID newLoan) {}
@@ -120,6 +122,37 @@ class ReceivedCreditIT {
         assertThat(balances.balanceOf(p.party())).isEqualByComparingTo("1000.00");
         assertThat(balances.movementsOf(p.party())).extracting(m -> m.type().name(), m -> m.getAmount())
                 .containsExactly(tuple("EXCESS_FROM_CREDIT", new BigDecimal("1000.00")));
+    }
+
+    @Test
+    @DisplayName("el cliente deposita a la CLABE de su distribuidora con su referencia: a la línea de ella como BENEFICIARY, lo que sobre a favor de ella")
+    void aClientsDepositGoesToHerLineInHisName() {
+        Payer her = payerWithTwoLoans();
+        UUID client = UUID.randomUUID();
+        // His reference on her line (the newer loan plays her distributor line), and another client's on a stranger's line.
+        clientReferences.record(9876545L, her.newLoan(), her.party(), client);
+        clientReferences.record(9876553L, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
+
+        ReceivedCreditCommand c = credit(her, "3000.00", 9876545L);
+        applyCredit.apply(c);
+
+        List<CreditAllocation> lines = credits.allocationsOf(c.inboundCreditId());
+        assertThat(lines).extracting(CreditAllocation::getSeq, CreditAllocation::getCreditAccountId,
+                        CreditAllocation::getAmount, a -> a.mode().name(), CreditAllocation::getBeneficiaryPartyId)
+                .containsExactly(tuple(1, her.newLoan(), new BigDecimal("2500.00"), "BENEFICIARY", client),
+                        tuple(2, null, new BigDecimal("500.00"), "CREDIT_BALANCE", null));
+        PaymentOrder order = orders.findById(lines.get(0).getPaymentOrderId()).orElseThrow();
+        assertThat(order.getBeneficiaryPartyId()).isEqualTo(client);
+        assertThat(order.getAllocationMode()).isEqualTo("BENEFICIARY");
+        // It never pays her other loan: it is his payment for his loans with her.
+        assertThat(lines).noneMatch(l -> her.oldLoan().equals(l.getCreditAccountId()));
+        assertThat(balances.balanceOf(her.party())).isEqualByComparingTo("500.00");
+
+        // A client's reference of someone else's line on her CLABE is not her client's: the usual rule applies.
+        ReceivedCreditCommand stranger = credit(her, "100.00", 9876553L);
+        applyCredit.apply(stranger);
+        assertThat(credits.allocationsOf(stranger.inboundCreditId())).extracting(a -> a.mode().name()).containsExactly("BY_RULE");
+        assertThat(credits.findById(stranger.inboundCreditId()).orElseThrow().referenceStatus().name()).isEqualTo("NOT_FOUND");
     }
 
     @Test

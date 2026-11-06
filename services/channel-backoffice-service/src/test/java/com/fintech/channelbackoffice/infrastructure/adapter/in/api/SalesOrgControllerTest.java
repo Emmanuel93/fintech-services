@@ -99,6 +99,28 @@ class SalesOrgControllerTest {
     }
 
     @Test
+    void placementPolicy_readOpenToAnyEmployee_writesGatedToAdmin() {
+        when(client.placementPolicy("S_TIJ")).thenReturn(Map.of("code", "S_TIJ", "configured", true));
+        assertThat(controller.placementPolicy("S_TIJ")).containsEntry("configured", true);
+
+        authenticateAs("SUPPORT");
+        Map<String, Object> body = Map.of("nuevo", Map.of("maxLoanAmount", 5000));
+        assertThatThrownBy(() -> controller.setPlacementPolicy("S_TIJ", body))
+                .isInstanceOf(ResponseStatusException.class)
+                .satisfies(ex -> assertThat(((ResponseStatusException) ex).getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN));
+        assertThatThrownBy(() -> controller.clearPlacementPolicy("S_TIJ"))
+                .isInstanceOf(ResponseStatusException.class);
+        verify(client, never()).setPlacementPolicy(any(), any());
+        verify(client, never()).clearPlacementPolicy(any());
+
+        authenticateAs("ADMIN");
+        when(client.setPlacementPolicy("S_TIJ", body)).thenReturn(Map.of("code", "S_TIJ", "configured", true, "inheritedFrom", "S_TIJ"));
+        when(client.clearPlacementPolicy("S_TIJ")).thenReturn(Map.of("code", "S_TIJ", "configured", false));
+        assertThat(controller.setPlacementPolicy("S_TIJ", body)).containsEntry("inheritedFrom", "S_TIJ");
+        assertThat(controller.clearPlacementPolicy("S_TIJ")).containsEntry("configured", false);
+    }
+
+    @Test
     void assign_allowedForOpsSupervisor() {
         authenticateAs("OPS_SUPERVISOR");
         UUID unitId = UUID.randomUUID();

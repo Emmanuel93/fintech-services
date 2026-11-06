@@ -1,5 +1,6 @@
 package com.fintech.statement.application.service.assembly;
 
+import com.fintech.documents.DocumentModel;
 import com.fintech.statement.application.StatementProperties;
 import com.fintech.statement.application.port.out.StatementSource.Account;
 import com.fintech.statement.application.port.out.StatementSource.Balances;

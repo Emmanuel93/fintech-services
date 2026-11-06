@@ -106,4 +106,18 @@ class DispositionRejectedListenerTest {
         long ms = (System.nanoTime() - start) / 1_000_000;
         assertThat(ms).as("10,000 rejections took %d ms", ms).isLessThan(1_000);
     }
+
+    @Test
+    @DisplayName("los motivos del lado del cliente se dicen en sus palabras, antes que los del producto")
+    void clientSideReasonsInHerWords() {
+        assertThat(DispositionRejectedListener.reasonFor("AMOUNT_ABOVE_CLIENT_LIMIT: cliente NUEVO hasta 5000 por préstamo, pidió 8000"))
+                .isEqualTo("A un cliente nuevo le puedes prestar hasta $5,000.00 por préstamo");
+        assertThat(DispositionRejectedListener.reasonFor("TERM_ABOVE_CLIENT_LIMIT: cliente REVOLVENTE hasta 20 quincenas, pidió 24"))
+                .isEqualTo("A un cliente revolvente le puedes prestar a lo más a 20 quincenas");
+        assertThat(DispositionRejectedListener.reasonFor("CLIENT_RED_LISTED: DISTRIBUTOR_REPORT"))
+                .isEqualTo("Por ahora Kredius no puede prestarle a este cliente");
+        // The product's own codes keep their words.
+        assertThat(DispositionRejectedListener.reasonFor("AMOUNT_ABOVE_MAXIMUM: 12000 > 10000"))
+                .isEqualTo("El monto no está dentro de lo que permite el producto");
+    }
 }
