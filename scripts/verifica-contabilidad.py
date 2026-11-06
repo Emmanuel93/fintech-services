@@ -32,47 +32,16 @@ PG = ["docker", "exec", "fintech-services-postgres-1",
 # produce falsos negativos que enseñan a ignorar el aviso.
 TOLERANCIA = 1.0
 
-# ── Créditos incorporados a media vida ───────────────────────────────────────
+# ── Ninguna cuenta se incorpora ──────────────────────────────────────────────
 #
-# Cuando contabilidad conoce una cuenta *después* de que ya se le cobró algo, el primer delta que ve
-# no es el importe de ese hecho: es el saldo acumulado. `PostingService` lo detecta y asienta una
-# **incorporación** (`trigger_event = 'OPENING_BALANCE'`) contra capital, porque incorporar un saldo
-# preexistente no es ganarlo. Es correcto y es deliberado: sin eso, un préstamo de $20,000 con 1% de
-# comisión producía una póliza de «comisión de apertura» de $20,200 e inflaba el ingreso cien veces.
-#
-# La consecuencia para estas comprobaciones es que los cargos anteriores a la incorporación **no
-# aparecen** en su cuenta de resultados, y no deben aparecer. Compararlos contra `charges` sin
-# excluirlos produce un falso negativo que además es intermitente —depende de una carrera entre el
-# evento de activación y el del cargo—, y que en la última corrida hizo salir con código 1 a una
-# siembra que estaba bien, abortando el respaldo del final.
-#
-# Se excluyen del lado del **origen**, que es donde sobran.
+# Toda cuenta nace en la plataforma: contabilidad presencia su activación y desde ahí asienta cada hecho.
+# Antes, si un cargo se procesaba antes que la activación (viajan por dos tópicos, en paralelo), contabilidad
+# lo tomaba por un crédito «incorporado a media vida» y lo asentaba contra capital (3901): la comisión de
+# apertura acababa como «moratorios incorporados» y el ingreso por comisiones quedaba corto. Este script
+# excluía esos créditos del origen para que la comparación pasara, y con eso escondía el defecto (E2E 3-nov:
+# $245 en dos cuentas). Ahora el cargo espera a la activación, y aquí una incorporación es una falla.
 
 fallos: list[str] = []
-
-
-def incorporados() -> list[tuple[str, str]]:
-    """Los créditos que contabilidad tomó a media vida, con el instante de su asiento de apertura."""
-    filas = q("select credit_account_id::text, min(posting_date)::text "
-              "  from accounting.journal_entries "
-              " where trigger_event = 'OPENING_BALANCE' and credit_account_id is not null "
-              " group by 1")
-    return [(f[0], f[1]) for f in filas if f[0]]
-
-
-def salvo_incorporados(ids: list[tuple[str, str]]) -> str:
-    """Predicado SQL para el lado del origen. Vacío si no hubo ninguna incorporación.
-
-    Acota **por crédito y por fecha**, no por crédito a secas. Lo que la incorporación se tragó son
-    los cargos *anteriores* a ella; a partir de ahí la cuenta asienta como cualquier otra y sus
-    devengos sí llegan a 4101 y a 2110. Excluir el crédito entero descuadraba el interés y el IVA en
-    sentido contrario — el error opuesto y del mismo tamaño.
-    """
-    if not ids:
-        return ""
-    return "".join(
-        f" and not (credit_account_id = '{cid}' and created_at < timestamptz '{t}')"
-        for cid, t in ids)
 
 
 def q(sql):
@@ -109,45 +78,58 @@ def compara(titulo, sql_origen, sql_contable, cuenta):
 def main():
     print("\n  Contabilidad contra la fuente de cada hecho")
 
-    # Los créditos que contabilidad incorporó con saldo previo no asientan como resultado los
-    # cargos anteriores a esa incorporación — por diseño. Se sacan del lado del origen para no
-    # comparar contra algo que nunca debió estar ahí.
-    tomados = incorporados()
-    salvo = salvo_incorporados(tomados)
-    if tomados:
-        print(f"\n  ({len(tomados)} crédito(s) incorporados con saldo previo: sus cargos previos "
-              f"entraron como asiento de apertura, no como resultado — se excluyen del origen)")
+    # ── Ninguna incorporación: cada cuenta nació aquí ────────────────────────
+    print("\n  0 · Ninguna cuenta incorporada con saldo previo (3901)")
+    filas = q("select count(*), coalesce(sum(amount),0) from accounting.journal_entries "
+              "where trigger_event = 'OPENING_BALANCE' or credit_account = '3901' or debit_account = '3901'")
+    n, importe = (filas[0] if filas else ("0", "0"))
+    if int(n) == 0:
+        print("    ✓ ninguna: toda cuenta asentó desde su activación")
+    else:
+        msg = f"0 · {n} asiento(s) de incorporación por ${float(importe):,.2f}: hechos asentados contra capital en vez de resultados"
+        print(f"    ✗ {msg}")
+        fallos.append(msg)
 
     # ── Interés ordinario: charges es quien lo calcula ───────────────────────
     compara(
         "1 · Interés ordinario devengado",
         "select coalesce(sum(amount),0) from charges.charge_records "
-        f"where charge_type='ORDINARY_INTEREST' and status<>'REVERSED'{salvo}",
-        "select coalesce(sum(amount),0) from accounting.journal_entries where credit_account='4101'",
-        "4101")
+        "where charge_type='ORDINARY_INTEREST' and status<>'REVERSED'",
+        # Stage 3 interest is revenue only on the amortised cost (IFRS 9 net basis): the part not recognized went to
+        # the loss allowance (1290) with the same trigger. Revenue plus that part is what charges accrued.
+        # A reversed charge is out of the source, and the ledger undoes it with its own entry, which debits the
+        # account the charge credited (D63: a loan cancelled because its money never left gives back what it was
+        # charged). Only the gross credits were summed before, so the first reversal looked like extra revenue.
+        "select coalesce(sum(amount) filter (where credit_account='4101' "
+        "                                       or (credit_account='1290' and trigger_event='CHARGE_ORDINARY_INTEREST')),0) "
+        "     - coalesce(sum(amount) filter (where debit_account='4101' and trigger_event='CHARGE_REVERSED'),0) "
+        "  from accounting.journal_entries",
+        "4101 + no reconocido de etapa 3 − reversas")
 
     # ── Comisiones ───────────────────────────────────────────────────────────
     compara(
         "2 · Comisiones cobradas al acreditado",
         "select coalesce(sum(amount),0) from charges.charge_records "
         "where charge_type in ('OPENING_FEE','ADMIN_FEE','PREPAYMENT_FEE','INSURANCE_PREMIUM') "
-        f"and status<>'REVERSED'{salvo}",
-        "select coalesce(sum(amount),0) from accounting.journal_entries where credit_account='4103'",
-        "4103")
+        "and status<>'REVERSED'",
+        # The opening fee is deferred over the loan's life (IFRS 9): what is not yet revenue is still in 2150, and
+        # what was recognized is effective-rate interest revenue (4106, from 2150), not fee income.
+        "select coalesce(sum(amount) filter (where credit_account in ('4103','2150') "
+        "                                       or (credit_account='4106' and debit_account='2150')),0) "
+        "     - coalesce(sum(amount) filter (where debit_account='2150'),0) from accounting.journal_entries",
+        "4103 + 4106 desde 2150 + 2150 por devengar")
 
     # ── IVA ──────────────────────────────────────────────────────────────────
     compara(
         "3 · IVA trasladado",
-        # **Sin** la exclusión de los incorporados, y no por descuido. La incorporación absorbe
-        # *saldo* —capital, interés devengado, moratorios—, que es lo que compone el delta contra
-        # cero. El IVA no entra en ese delta: es un pasivo que se asienta desde su propio evento
-        # `CHARGE_IVA`, y sigue asentándose con normalidad aunque el cargo que lo originó se haya
-        # incorporado. Comprobado en la corrida de esta siembra: de los dos créditos incorporados,
-        # sus $1,225 de comisión no llegaron a 4103 y sus $196 de IVA sí llegaron a 2110.
         "select coalesce(sum(total_amount),0) from charges.charge_records "
         "where charge_type='IVA' and status<>'REVERSED'",
-        "select coalesce(sum(amount),0) from accounting.journal_entries where credit_account='2110'",
-        "2110")
+        # Same as the interest: a reversed IVA leaves 2110 by its own debit. A waived one stays in the source and in
+        # the gross credits, so its debit is not subtracted.
+        "select coalesce(sum(amount) filter (where credit_account='2110'),0) "
+        "     - coalesce(sum(amount) filter (where debit_account='2110' and trigger_event='CHARGE_REVERSED'),0) "
+        "  from accounting.journal_entries",
+        "2110 − reversas")
 
     # ── Capital colocado: lo sabe cartera ────────────────────────────────────
     compara(
@@ -176,6 +158,48 @@ def main():
     print("\n  6 · Ninguna póliza descuadrada")
     filas = q("select count(*) from accounting.vouchers where total_debit <> total_credit")
     revisa(int(filas[0][0]) == 0, f"todas las pólizas cuadran ({filas[0][0]} descuadradas)")
+
+    # ── El dinero se mueve en centavos ───────────────────────────────────────
+    # Un asiento con fracción de centavo no lo liquida ningún pago: la comisión del distribuidor se
+    # devengaba como base × tasa sin redondear (126.924) y 2120/5104 cargaban milésimas (E2E 3-nov).
+    print("\n  7 · Todo importe asentado está en centavos")
+    filas = q("select count(*), coalesce(string_agg(distinct trigger_event, ', '), '') from accounting.journal_entries "
+              "where amount <> round(amount, 2)")
+    revisa(int(filas[0][0]) == 0,
+           f"todos los asientos en centavos ({filas[0][0]} con fracción de centavo{': ' + filas[0][1] if filas[0][1] else ''})")
+
+    # ── Cada mes terminado se cerró conciliado ───────────────────────────────
+    # El cierre de mes concilia antes de publicar: cartera completa al último día, reserva medida a esa fecha y el
+    # mayor igual a cartera, reservas y calendarios de comisiones, crédito por crédito. Un mes anterior al último que
+    # siga abierto, o cerrado sin cierre conciliado, es un mes cuyos números nadie comprobó.
+    print("\n  8 · Cada mes terminado se cerró conciliado")
+    filas = q("select count(*), coalesce(string_agg(p.period || ' ' || case when p.status = 'OPEN' then 'abierto' "
+              "else coalesce(c.outcome, 'sin conciliación') end, ', ' order by p.period), '') "
+              "  from accounting.accounting_periods p left join accounting.period_closes c on c.period = p.period "
+              " where p.period < (select max(period) from accounting.accounting_periods) "
+              "   and (p.status = 'OPEN' or c.outcome is distinct from 'RECONCILED')")
+    revisa(int(filas[0][0]) == 0,
+           f"todos los meses terminados cerrados y conciliados{' (fuera: ' + filas[0][1] + ')' if filas[0][1] else ''}")
+
+    # ── De dónde viene el dinero que se presta ───────────────────────────────
+    # El fondeo (capital aportado y líneas dispuestas) lo registra tesorería y contabilidad lo asienta: los saldos del
+    # mayor son los de tesorería, y Bancos nunca queda en negativo al cerrar un mes.
+    print("\n  9 · El fondeo del mayor es el de tesorería y Bancos nunca cierra un mes en negativo")
+    compara("9a · Capital social aportado",
+            "select coalesce(sum(contributed),0) from banking.funding_sources",
+            "select coalesce(sum(amount) filter (where credit_account='3101'),0) "
+            "     - coalesce(sum(amount) filter (where debit_account='3101'),0) from accounting.journal_entries", "3101")
+    compara("9b · Líneas de fondeo dispuestas",
+            "select coalesce(sum(principal),0) from banking.funding_sources",
+            "select coalesce(sum(amount) filter (where credit_account='2201'),0) "
+            "     - coalesce(sum(amount) filter (where debit_account='2201'),0) from accounting.journal_entries", "2201")
+    filas = q("with m as (select period, sum(case when debit_account='1101' then amount else 0 end) "
+              "                - sum(case when credit_account='1101' then amount else 0 end) neto "
+              "             from accounting.journal_entries where '1101' in (debit_account, credit_account) group by period) "
+              "select count(*) filter (where saldo < -0.005), coalesce(string_agg(period, ', ') filter (where saldo < -0.005), '') "
+              "  from (select period, sum(neto) over (order by period) saldo from m) s")
+    revisa(int(filas[0][0]) == 0,
+           f"Bancos (1101) no cierra ningún mes en negativo{' (en negativo: ' + filas[0][1] + ')' if filas[0][1] else ''}")
 
     print()
     if fallos:

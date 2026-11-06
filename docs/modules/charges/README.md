@@ -56,10 +56,17 @@ Accrual Job
 
 | Tipo | Base cálculo | Trigger | Bucket en portfolio |
 |---|---|---|---|
-| Interés ordinario | `principalBalance` × tasa diaria | `DailyAccrualJob` (23:00) | `accruedInterestBalance` |
-| Interés moratorio | `principalBalance` × tasa mora diaria | `MoratoriumAccrualJob` (23:30), solo cuando `moratoriumActive=true` | `penaltyBalance` |
+| Interés ordinario, modo `DAILY` | capital de la foto de D (sin las cuotas por vencer de compras a meses sin intereses) × tasa / 360 | `DayCloseAccrualJob` (00:05 de D+1, sobre D) | `accruedInterestBalance` |
+| Interés ordinario, modo `PER_PERIOD` | el interés que el plan de cada colocación fija para el periodo que **termina** en D (`scheduledInterest` de la foto de cartera); cero los demás días y cuando ya no se debe capital | `DayCloseAccrualJob`, misma unidad del día | `accruedInterestBalance` |
+| Interés moratorio | capital vencido × tasa mora diaria | `DayCloseAccrualJob`, después del ordinario, solo cuando `moratoriumActive=true` | `penaltyBalance` |
 | Comisión apertura | `approvedAmount` × tasa | Una vez en activación | `penaltyBalance` |
 | IVA 16% | Sobre cada cargo | Automático, vinculado por `linkedChargeId` | Mismo bucket que cargo padre |
+
+El modo lo declara el producto en su ciclo de facturación (`billingCycle.interestAccrual`) y se fija a la
+cuenta al activarla (`accrual_schedules.interest_accrual`): una cuenta abierta antes de que existiera
+devenga diario. Hoy sólo la línea de distribuidora es `PER_PERIOD`: cada colocación nace con su plan
+francés quincenal, y cobrar tasa / 360 diaria sobre la línea pedía 14 × tasa / 360 por un periodo de
+14 días en lugar de la tasa / 26 del plan, y lo cobraba día a día antes de que el periodo se debiera.
 
 ---
 
@@ -91,8 +98,7 @@ Ambas operaciones cascadean al `ChargeRecord` de IVA vinculado (`linkedChargeId`
 
 | Job | Cron | Aislamiento transaccional |
 |---|---|---|
-| `DailyAccrualJob` | `0 0 23 * * *` | Cada `AccrualSchedule` en su propia `@Transactional` — fallo de uno no aborta los demás |
-| `MoratoriumAccrualJob` | `0 30 23 * * *` | Mismo patrón — solo schedules con `moratoriumActive=true` |
+| `DayCloseAccrualJob` | `0 5/15 * * * *` | Cierra los días pendientes en orden, desde las 00:05 de D+1 y sólo si abren sus compuertas (D-1 cerrado aquí, en cartera y en closing; saldos de cartera consumidos): ordinario, moratorio y `charges.day-accrued` con cifras de control. Cada `AccrualSchedule` en su propia `@Transactional`; si alguno falla, el día queda `FAILED` y no se avisa |
 
 ---
 

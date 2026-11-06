@@ -409,7 +409,7 @@ caso1() {
   [ -n "$cuenta" ] && ok "Cuenta en cartera: $cuenta" || err "no apareció la cuenta en cartera"
 
   # ── Reloj ────────────────────────────────────────────────────────────────
-  devengar_quincenas "$QUINCENAS"
+  devengar_quincenas "$QUINCENAS" "$cuenta"
   svc GET "$PORTFOLIO/api/v1/portfolio/accounts/$cuenta" "" "X-User-Id: regresion" \
     > "$dir/estado-tras-devengo.json"
 
@@ -626,7 +626,7 @@ caso_distribuidora() { # $1 = liquidar | mora
     || err "el depósito no se confirmó en 4 min: $(svc GET "$BENEFICIARY/api/v1/backoffice/placements/$placement" | jq -r '.placement.status')"
 
   # ── Reloj y desenlace ───────────────────────────────────────────────────
-  devengar_quincenas "$QUINCENAS"
+  devengar_quincenas "$QUINCENAS" "$linea"
   if [ "$desenlace" = "liquidar" ]; then
     liquidar_linea "$tok_mov" "$linea"
   fi

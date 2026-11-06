@@ -138,7 +138,7 @@ def http(method, url, body=None, token=None, timeout=60, reintentos=6):
     return None
 
 
-def interno(servicio, ruta, method="POST", body=None):
+def interno(servicio, ruta, method="POST", body=None, roles=None):
     """
     Llama a un servicio por la red de Docker, saltándose el gateway.
 
@@ -151,10 +151,13 @@ def interno(servicio, ruta, method="POST", body=None):
     # este helper se traga los errores para no tumbar la siembra, la consulta habría fallado en
     # silencio y las distribuidoras habrían salido todas al corriente. party no lo exige y lo
     # ignora, así que mandarlo siempre sale gratis y evita tener que acordarse de cuál es cuál.
-    cmd = ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:latest",
+    cmd = ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:8.10.1",
            "-s", "-w", "\n%{http_code}", "-X", method,
            "-H", f"X-User-Id: {SEED_USER_ID}",
            f"http://{servicio}:8080{ruta}"]
+    # A role only where the endpoint asks for one (commission's payout account is finance's).
+    if roles:
+        cmd += ["-H", f"X-Roles: {roles}"]
     if body is not None:
         cmd += ["-H", "Content-Type: application/json", "-d", json.dumps(body)]
     r = subprocess.run(cmd, capture_output=True)
@@ -330,6 +333,7 @@ class Distribuidora:
         self.unit_id = None
         self.application_id = None
         self.credit_account_id = None
+        self.clabe = None
         self.linea = 0
         self.clientes = []
         self.colocaciones = 0
@@ -382,6 +386,19 @@ def da_de_alta_distribuidora(d: Distribuidora, token, ejecutivo, nivel_distribui
     return bool(d.unit_id)
 
 
+def registra_cuenta_de_comisiones(d: Distribuidora) -> bool:
+    """
+    The account commission pays the distributor's commission lots to by SPEI: the one she signed her line with.
+    Without it her commissions stay accrued and her lots wait ("sin cuenta de pago"). Her fiscal profile, which
+    decides what is withheld, is seeded by seed-perfiles-fiscales.py.
+    """
+    r = interno("commission-service", f"/api/v1/commissions/beneficiaries/{d.p.prospect_id}/payout-account",
+                method="PUT", body={"clabe": d.clabe, "holderName": d.p.nombre_completo}, roles="FINANCE")
+    if r is None:
+        print(f"      ✗ {d.codigo}: commission no registró la CLABE de pago de comisiones")
+    return r is not None
+
+
 def solicita_linea(d: Distribuidora, token_admin) -> bool:
     """
     Solicitud → comité → oferta → contrato → firma.
@@ -428,8 +445,9 @@ def solicita_linea(d: Distribuidora, token_admin) -> bool:
         http("POST", f"{MOBILE}/credit/applications/{d.application_id}/offer", None, token=d.p.token)
         http("POST", f"{MOBILE}/credit/applications/{d.application_id}/offer/accept", None, token=d.p.token)
         http("POST", f"{MOBILE}/credit/applications/{d.application_id}/contract", None, token=d.p.token)
+        d.clabe = clabe()
         http("POST", f"{MOBILE}/credit/applications/{d.application_id}/contract/sign", {
-            "clabeAccount": clabe(),
+            "clabeAccount": d.clabe,
             "signatureProof": f"OTP-{random.randint(100000, 999999)}",
             "documentRef": f"linea-{d.application_id[:8]}.pdf"}, token=d.p.token)
     except Exception as e:
@@ -565,7 +583,13 @@ def main():
     ap.add_argument("--distribuidoras", type=int, default=10)
     ap.add_argument("--clientes", type=int, default=5,
                     help="Beneficiarios por distribuidora")
-    ap.add_argument("--semilla", type=int, default=None)
+    # Not the portfolio seeder's seed: the same seed produces the same people and origination rejects them.
+    ap.add_argument("--semilla", type=int, default=20260812)
+    # The demo now ages the portfolio by running the business clock day by day (tools/ciclo-credito):
+    # delinquency comes from not paying, not from rewinding a schedule. The old aging stays for the
+    # quick, standalone seed.
+    ap.add_argument("--sin-envejecer", action="store_true",
+                    help="no retrocede calendarios; la mora la produce el ciclo de vida al correr el reloj")
     args = ap.parse_args()
 
     rnd = random.Random(args.semilla)
@@ -596,12 +620,18 @@ def main():
             distribuidoras.append(d)
             continue
         print(f"      línea activa: ${d.linea:,.0f}")
+        if registra_cuenta_de_comisiones(d):
+            print("      CLABE de pago de comisiones registrada")
 
         # Sus beneficiarios: todos reciben expediente y evaluación; sólo algunos, colocación.
         for j in range(args.clientes):
-            b = Persona(rnd, f"ben{i}", j)
-            if da_de_alta_beneficiario(d, b):
-                d.clientes.append(b)
+            # A random phone or CURP can collide with someone already seeded (origination answers 409 to a
+            # duplicate prospect): try again with another identity before giving the client up.
+            for intento in range(3):
+                b = Persona(rnd, f"ben{i}" if intento == 0 else f"ben{i}r{intento}", j)
+                if da_de_alta_beneficiario(d, b):
+                    d.clientes.append(b)
+                    break
         print(f"      {len(d.clientes)} beneficiarios con expediente")
 
         # Las colocaciones. El monto se acota para que la suma quepa en la línea; la distribuidora
@@ -618,7 +648,7 @@ def main():
             print(f"      {d.colocaciones} colocaciones de ${monto:,.0f}, cada una con su calendario")
 
         # Y la mora: se envejece el calendario de una colocación y el envejecido cuenta los días.
-        if d.perfil["atraso"]:
+        if d.perfil["atraso"] and not args.sin_envejecer:
             time.sleep(2)   # que la disposición haya aterrizado y su calendario exista
             if envejece_una_colocacion(d, token):
                 print(f"      una colocación envejecida {d.perfil['atraso']} días")

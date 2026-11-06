@@ -183,7 +183,19 @@ def main():
             revisa("1290" in movidas or "5101" in movidas,
                    "la estimación preventiva (1290/5101) tuvo movimiento")
 
-            muertas = sorted({"4101", "4103", "1201", "1101"} - movidas)
+            # A young open period may hold no origination at all (a history that ends on the 1st): whether the
+            # consumer posts each kind of fact is answered by every period, not by the current one alone.
+            for p in periodos:
+                if p.get("period") and p.get("period") != abierto:
+                    otra = http("GET", f"{BACKOFFICE}/accounting/trial-balance?period={p['period']}",
+                                token=token) or []
+                    movidas |= {r["accountCode"] for r in otra
+                                if float(r.get("totalDebit") or 0) or float(r.get("totalCredit") or 0)}
+            # The opening fee is effective-rate interest (4106), not fee income: a portfolio whose only fees are
+            # opening fees moves 4106 and never 4103. Either one shows the fees reach revenue.
+            muertas = sorted({"4101", "1201", "1101"} - movidas)
+            if not movidas & {"4103", "4106"}:
+                muertas.append("4103/4106")
             revisa(not muertas,
                    f"las cuentas del ciclo básico se movieron (sin movimiento: {muertas or 'ninguna'})")
     except urllib.error.HTTPError as e:

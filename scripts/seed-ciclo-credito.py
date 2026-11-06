@@ -1,653 +1,242 @@
 #!/usr/bin/env python3
-"""Hace avanzar el ciclo de vida de la cartera **mes a mes**: devenga, cobra, deteriora, factura y cierra.
+"""Hace avanzar el ciclo de vida de la cartera sembrada **día por día**, con la cadena nocturna real.
 
-`seed-portfolio.py` deja créditos vivos y sanos. Eso alcanza para ver cartera y no alcanza para ver
-**contabilidad**: sin devengo no hay ingreso, sin pagos no baja el auxiliar de intereses, sin
-deterioro no hay estimación preventiva, sin quebranto no se consume la reserva y sin corrida de
-facturación no existe una sola factura.
+`seed-portfolio.py`, `seed-distribuidoras.py` y `seed-revolventes.py` dejan créditos vivos, originados
+en la fecha en la que estaba el reloj de negocio (la demo los origina meses atrás). Esto los hace
+vivir: cada día de negocio, con el reloj puesto en ese día, una parte de la cartera paga su cuota,
+otra liquida, otra se atrasa y se recupera, otra nunca paga; y cada noche corre la misma cadena que
+el cron de las 00:05: foto → devengo → cierre de cartera → corte → estados de cuenta → riesgo →
+cobranza; fin de mes: facturación y cierre contable; día 5: liquidación de comisiones.
 
-**No inserta filas: orquesta llamadas.** Cada paso entra por el mismo endpoint que usaría una
-persona —el job de devengo, el canal de pagos, la mesa de cobranza, la corrida de facturación— así
-que si algo no pasa por aquí, tampoco pasaría en producción.
+**No inserta filas ni retrocede calendarios.** La mora nace de no pagar; el interés, de la foto de cada
+día; la reserva, del recálculo de riesgo de cada noche; las pólizas, de los hechos con su fecha. Es el
+mismo motor de las pruebas E2E (`tools/ciclo-credito/motor.py`), con un plan aleatorio de semilla fija
+en vez del plan escrito.
 
-## Por qué el reloj se corre día a día
+    python3 scripts/seed-ciclo-credito.py --desde 2026-04-01            # hasta ayer (fecha de negocio)
+    python3 scripts/seed-ciclo-credito.py --desde 2026-04-01 --hasta 2026-10-31 --semilla 7
 
-El devengo es **idempotente por día**: `AccrualSchedule.needsAccrual(fecha)` sólo deja devengar una
-vez por fecha. La versión anterior llamaba treinta veces al job sin fecha y creía estar acumulando un
-mes; acumulaba **un día**, y la cartera entera quedaba con un interés de 24 horas apilado en el mes
-corriente. De ahí salía la sensación de que la contabilidad no cuadraba: cuadraba, pero contaba un
-día de una cartera de doce millones.
-
-Ahora se retrocede el reloj de los calendarios (`rewind-accrual-schedules`) y se devenga fecha por
-fecha (`run-daily-accrual?date=`). Cada día produce sus pólizas con **su** fecha, así que el interés
-cae en el período al que pertenece y junio, julio y agosto tienen cifras distintas y comparables.
-
-## Lo que este script NO puede backdatear
-
-El **alta y la disposición** de cada crédito se asientan cuando origination los crea, que es hoy. Un
-crédito originado en el mes en curso con intereses devengados desde junio es la única costura que
-queda a la vista, y se prefiere dejarla visible antes que escribir pólizas a mano. Cerrarla del todo
-exige que el flujo de originación acepte una fecha valor y la propague hasta
-`CreditAccountActivatedEvent` — el evento ya toma su `occurredOn` de `activatedAt`, así que falta
-sólo el tramo de origination.
-
-    python3 scripts/seed-ciclo-credito.py                  # tres meses de historia
-    python3 scripts/seed-ciclo-credito.py --meses 5
-    python3 scripts/seed-ciclo-credito.py --sin-historia   # comportamiento viejo: sólo hoy
+`--desde` es la fecha en la que se puso el reloj antes de originar (`corre.py reloj`): el ciclo
+empieza ahí. Al terminar, el reloj vuelve a ser el real.
 """
 from __future__ import annotations
 
 import argparse
 import datetime
-import json
+import pathlib
 import random
-import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
+from zoneinfo import ZoneInfo
 
-BACKOFFICE = "http://backoffice.localhost:8090"
-ADMIN = ("admin@kredius.mx", "Backoffice#2026")
-RED = "fintech-services_fintech-network"
+RAIZ = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RAIZ / "tools" / "ciclo-credito"))
 
-CABECERAS_INTERNAS = [
-    "-H", "X-User-Id: 00000000-0000-0000-0000-0000000000e2",
-    "-H", "X-Roles: ADMIN",
-    "-H", "X-Channel: SERVICE",
-]
+import motor   # noqa: E402
+import puente  # noqa: E402
+
+REVOLVENTES = {"CREDIT_CARD", "REVOLVING_LINE", "BUSINESS_REVOLVING_LINE"}
+DISTRIBUIDORA = "DISTRIBUTOR_LINE"
 
 
-def http(method, url, body=None, token=None, timeout=90):
-    req = urllib.request.Request(
-        url, method=method,
-        data=json.dumps(body).encode() if body is not None else None,
-        headers={"Content-Type": "application/json",
-                 **({"Authorization": f"Bearer {token}"} if token else {})})
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as e:
-        detalle = e.read().decode()[:160]
-        raise RuntimeError(f"{e.code} {method} {url.split('/')[-1]}: {detalle}") from None
+def cuentas_activas(token):
+    r = motor.bo(token, "GET", "/portfolio?status=ACTIVE&size=1000") or {}
+    filas = r.get("content", r) if isinstance(r, dict) else r
+    return [c for c in filas if c.get("creditAccountId") or c.get("id")]
 
 
-def interno(servicio, ruta, method="POST", esperar_cuerpo=False):
+def beneficiarios_de(obligor):
+    """A distributor's clients (their prospect ids, which is what a placement names), from its party relationships."""
+    filas = motor.psql(f"""
+        SELECT b.prospect_id, coalesce(b.first_name, 'cliente')
+          FROM party.parties d
+          JOIN party.party_relationships r ON r.party_id = d.party_id AND r.relationship_type = 'BENEFICIARY'
+          JOIN party.parties b ON b.party_id = r.related_party_id
+         WHERE d.prospect_id = '{obligor}' ORDER BY b.prospect_id""")
+    return [{"prospect": f[0], "persona": f[1]} for f in filas if f and f[0]]
+
+
+def _redondea(x, paso=100):
+    return max(paso, int(round(x / paso)) * paso)
+
+
+def actividad_revolvente(producto, limite, rnd: random.Random, dias: int, beneficiarios, hasta_dia=None):
     """
-    Llama a un servicio de dominio por dentro de la red de Docker.
-
-    Los jobs de devengo, riesgo y morosidad no salen por el gateway a propósito: no son operaciones
-    de usuario, son el reloj de la institución. Se disparan desde dentro, que es de donde los
-    dispararía el planificador.
+    What a card, a line or a distributor does with its credit over the history: purchases every few weeks (a card
+    defers one of them to months), placements to the distributor's clients. Without this the lines sat at zero from
+    the first cutoff and no statement of the demo had a purchase, a deferred plan or a placement on it.
     """
-    salida = ["-s"] if esperar_cuerpo else ["-s", "-o", "/dev/null", "-w", "%{http_code}"]
-    r = subprocess.run(
-        ["docker", "run", "--rm", "--network", RED, "curlimages/curl:latest",
-         *salida, "-X", method, f"http://{servicio}:8080{ruta}"],
-        capture_output=True, text=True)
-    return r.stdout.strip()
+    fin = min(dias - 5, hasta_dia if hasta_dia is not None else dias)
+    limite = float(limite or 20_000)
+    e = {}
+    if producto == DISTRIBUIDORA:
+        if beneficiarios:
+            colocaciones, d = {}, rnd.randint(1, 10)
+            while d < fin:
+                colocaciones.setdefault(d, []).append(
+                    (rnd.randrange(len(beneficiarios)), _redondea(limite * rnd.uniform(0.04, 0.10), 500), rnd.choice([6, 8, 12])))
+                d += rnd.randint(25, 50)
+            e["colocaciones"] = colocaciones
+        return e
+    compras, d = {}, rnd.randint(1, 8)
+    while d < fin:
+        compras[d] = (_redondea(limite * rnd.uniform(0.03, 0.10)), None)
+        d += rnd.randint(14, 35)
+    e["compras"] = compras
+    if producto == "CREDIT_CARD" and compras and rnd.random() < 0.6:
+        dia = rnd.choice(sorted(compras)[:max(1, len(compras) // 2)])
+        e["difiere"] = {dia: (compras[dia][0], rnd.choice([3, 6, 12]))}
+    return e
 
 
-def login():
-    r = http("POST", f"{BACKOFFICE}/auth/staff/login",
-             {"email": ADMIN[0], "password": ADMIN[1]})
-    return r["accessToken"]
-
-
-def paso(texto):
-    print(f"\n\033[1m▸ {texto}\033[0m")
-
-
-def periodo_de(fecha):
-    return f"{fecha.year}{fecha.month:02d}"
-
-
-# ── 1 · El reloj ───────────────────────────────────────────────────────────
-
-def retroceder_reloj(desde):
+def plan_para(cuentas, rnd: random.Random, dias: int):
     """
-    Pone el último devengo de todos los calendarios en `desde`, para poder correr el reloj desde ahí.
-
-    Sin esto, `needsAccrual` rechaza cualquier fecha anterior a hoy y la historia es inalcanzable:
-    el job está diseñado para no devengar dos veces el mismo día, y esa misma guarda impide sembrar
-    hacia atrás.
+    Reparte la cartera en desenlaces, por cupos y no al azar puro, para que cada caso exista aunque
+    la cartera sea chica: liquidan, pagan con algún atraso, se atrasan y se recuperan, se atrasan y
+    negocian, nunca pagan. El resto queda al corriente, que es lo que le pasa a la mayoría.
     """
-    salida = interno("charges-service",
-                     f"/internal/test-support/rewind-accrual-schedules?date={desde.isoformat()}",
-                     esperar_cuerpo=True)
-    try:
-        return json.loads(salida).get("schedulesRewound", 0)
-    except Exception:
-        print(f"    ! no se pudo retroceder el reloj: {salida[:120]}", file=sys.stderr)
-        return 0
+    cuentas = list(cuentas)
+    rnd.shuffle(cuentas)
+    cortes = [("liquida", 0.12), ("atrasa_y_paga", 0.15), ("recupera", 0.12), ("negocia", 0.10),
+              ("cae_en_mora", 0.10), ("nunca_paga", 0.08)]
 
+    # The quotas are drawn per family (loans, cards and lines, distributors), not over the whole book: drawn
+    # together, the ten distributors of a demo could all land on outcomes that end current, and the demo had no
+    # distributor in arrears to show.
+    def familia(c):
+        producto = c.get("productType")
+        return "distribuidora" if producto == DISTRIBUIDORA else "revolvente" if producto in REVOLVENTES else "prestamo"
 
-def devengar_dia(fecha):
-    """Un día de devengo ordinario y su moratorio, con la fecha del hecho."""
-    d = fecha.isoformat()
-    interno("charges-service", f"/internal/test-support/run-daily-accrual?date={d}")
-    interno("charges-service", f"/internal/test-support/run-moratorium-accrual?date={d}")
+    asignadas = []
+    for fam in ("prestamo", "revolvente", "distribuidora"):
+        grupo = [c for c in cuentas if familia(c) == fam]
+        n, i = len(grupo), 0
+        for nombre, prop in cortes + [("puntual", 1.0)]:
+            cupo = n - i if nombre == "puntual" else (max(1, round(n * prop)) if n >= 8 else round(n * prop))
+            cupo = max(0, min(cupo, n - i))
+            asignadas += [(c, nombre) for c in grupo[i:i + cupo]]
+            i += cupo
 
-
-def correr_mes(inicio, fin):
-    """
-    Devenga día por día entre dos fechas. Es el corazón de la historia contable.
-
-    Se hace en serie y no en paralelo: cada día publica cargos que contabilidad tiene que consumir
-    antes de que llegue el siguiente, y adelantarse produce pólizas fuera de orden en la misma serie
-    de folios.
-    """
-    dias = 0
-    fecha = inicio
-    while fecha <= fin:
-        devengar_dia(fecha)
-        dias += 1
-        # Cada tanto se le da aire a los consumidores: contabilidad, cartera y facturación van
-        # detrás por Kafka, y saturar la cola hace que el mes siguiente empiece sobre saldos viejos.
-        if dias % 7 == 0:
-            time.sleep(2)
-        fecha += datetime.timedelta(days=1)
-    return dias
-
-
-# ── 2 · Pagos ──────────────────────────────────────────────────────────────
-
-def cuentas_activas(token, size=200):
-    r = http("GET", f"{BACKOFFICE}/portfolio?status=ACTIVE&size={size}", token=token) or {}
-    return r.get("content", r) if isinstance(r, dict) else r
-
-
-def pagar(cuenta, obligado, monto, ref):
-    """
-    Registra un pago contra payments-service.
-
-    **Por la red interna, no por el gateway.** El BFF no expone ningún endpoint de pago y no debe:
-    registrar un pago es una operación del dominio, y que no se pueda hacer desde fuera es la
-    garantía que sostiene la topología.
-    """
-    cuerpo = json.dumps({"creditAccountId": cuenta, "obligorPartyId": obligado,
-                         "amount": monto, "paymentMethod": "SPEI", "externalRef": ref})
-    r = subprocess.run(
-        ["docker", "run", "--rm", "--network", RED, "curlimages/curl:latest",
-         "-s", "-o", "/dev/null", "-w", "%{http_code}",
-         "-X", "POST", "http://payments-service:8080/api/v1/payments",
-         "-H", "Content-Type: application/json", *CABECERAS_INTERNAS,
-         "-d", cuerpo],
-        capture_output=True, text=True, timeout=120)
-    return r.stdout.strip() in ("200", "201", "202")
-
-
-def liquidar(cuentas):
-    """
-    Liquida pagando el adeudo completo, no marcando la cuenta.
-
-    `settleIfClear()` mueve la cuenta a SETTLED cuando el saldo llega a cero, así que esto comprueba
-    de paso esa transición. Forzar el estatus dejaría cuentas «liquidadas» con saldo — un estado que
-    el dominio no produce y contra el que nadie debería programar.
-    """
-    liquidadas = 0
-    for c in cuentas:
+    plan, estado = {}, {}
+    for c, nombre in asignadas:
         cid = c.get("creditAccountId") or c.get("id")
-        deuda = float(c.get("totalDebt") or 0)
-        if not cid or deuda <= 0:
-            continue
-        # Exacto, no de más: pagar un peso extra hacía que cartera lo devolviera acto seguido y cada
-        # liquidación dejaba una póliza de «devolución de pago» de $1.00 que no significa nada.
-        if pagar(cid, c.get("obligorPartyId"), round(deuda, 2), f"LIQ-{cid[:8]}"):
-            liquidadas += 1
-    return liquidadas
+        producto = c.get("productType")
+        clave = f"{nombre[:3].upper()}-{cid[:8]}"
+        e = {"titulo": nombre, "producto": producto, "puntual": True}
+        revolvente = producto in REVOLVENTES or producto == DISTRIBUIDORA
+        beneficiarios = beneficiarios_de(c.get("obligorPartyId")) if producto == DISTRIBUIDORA else []
+        if revolvente:
+            # A distributor line has no minimum: «pays the minimum» would be «never pays».
+            e["paga"] = [rnd.choice(["exigible", "total"] if producto == DISTRIBUIDORA else ["minimo", "exigible", "total"])]
+            # Who never pays stops using the line too (its purchases would be rejected against the limit).
+            e.update(actividad_revolvente(producto, c.get("creditLimit"), rnd, dias, beneficiarios,
+                                          hasta_dia=30 if nombre == "nunca_paga" else None))
+        if nombre == "liquida":
+            e["liquida_en"] = rnd.randint(min(40, dias - 1), max(min(40, dias - 1), dias - 10))
+        elif nombre == "atrasa_y_paga":
+            if revolvente:
+                # A statement or two paid late: stops for 20-40 days and pays everything it skipped.
+                e["deja_de_pagar_desde_dia"] = rnd.randint(30, max(31, dias - 60))
+                e["reanuda_en"] = e["deja_de_pagar_desde_dia"] + rnd.randint(20, 40)
+            else:
+                e["retrasos"] = {k: rnd.randint(4, 25) for k in rnd.sample(range(1, 7), 2)}
+        elif nombre == "cae_en_mora":
+            # Pays until 50-100 days before the end and then stops: it ends the history in arrears (Stage 2 or 3,
+            # with a collections case), short of the write-off.
+            desde = max(10, dias - rnd.randint(50, 100))
+            if revolvente:
+                e["deja_de_pagar_desde_dia"] = desde
+            else:
+                dias_por_cuota = {"MICRO_LOAN": 7, "PAYROLL_LOAN": 15}.get(producto, 30)
+                e["desde_cuota_no_paga"] = max(1, desde // dias_por_cuota)
+        elif nombre == "recupera":
+            if revolvente:
+                # Stops, falls 30 to 90 days behind, and pays every statement it skipped: the line is current again.
+                e["deja_de_pagar_desde_dia"] = rnd.randint(20, 60)
+                e["reanuda_en"] = min(dias - 5, e["deja_de_pagar_desde_dia"] + rnd.randint(40, 90))
+            else:
+                e["desde_cuota_no_paga"] = rnd.choice([1, 2])
+                e["al_dia_en"] = [rnd.randint(70, max(71, dias - 15))]
+        elif nombre == "negocia":
+            if revolvente:
+                # Stops paying, promises, restructures (rate) and goes on paying from the agreement.
+                e["deja_de_pagar_desde_dia"] = rnd.randint(15, 30)
+                e["promesa_en"] = e["deja_de_pagar_desde_dia"] + rnd.randint(35, 50)
+                e["convenio_en"] = e["deja_de_pagar_desde_dia"] + rnd.randint(65, 85)
+                e["reanuda_en"] = e["convenio_en"] + 3
+            else:
+                e["desde_cuota_no_paga"] = 1
+                e["promesa_en"] = rnd.randint(45, 70)
+                e["convenio_en"] = rnd.randint(95, 125)
+                e["al_dia_en"] = [e["convenio_en"] + 3]
+        elif nombre == "nunca_paga":
+            e["puntual"] = False
+            if revolvente:
+                e["deja_de_pagar_desde_dia"] = 0
+            # Written off as soon as its own delinquency passes the collections threshold (181 days):
+            # with seven or more months of history, the oldest of these get there.
+            e["quebranto_en"] = 0
+        plan[clave] = e
+        estado[clave] = {"tipo": "distribuidora" if producto == DISTRIBUIDORA else "persona", "cuenta": cid,
+                         "obligor": c.get("obligorPartyId"), "prospect": c.get("obligorPartyId"), "producto": producto,
+                         "persona": c.get("holderName") or c.get("obligorName"), "contrato": c.get("contractNumber"),
+                         "beneficiarios": beneficiarios, "pagos": [], "compras": []}
+    return plan, estado
 
-
-def abonar_parcial(cuentas, fraccion, etiqueta):
-    """Pagos parciales: mueven el auxiliar sin cerrar la cuenta, que es el caso más común."""
-    hechos = 0
-    for c in cuentas:
-        cid = c.get("creditAccountId") or c.get("id")
-        deuda = float(c.get("totalDebt") or 0)
-        if not cid or deuda <= 0:
-            continue
-        if pagar(cid, c.get("obligorPartyId"), round(deuda * fraccion, 2), f"{etiqueta}-{cid[:8]}"):
-            hechos += 1
-    return hechos
-
-
-# ── 3 · Mora ───────────────────────────────────────────────────────────────
-
-def calendario(cuenta):
-    """
-    El calendario de una cuenta, leído del dominio.
-
-    **No por el BFF**: `/portfolio/{id}/amortization-schedule` no existe ahí y devuelve 404. Pedirlo
-    igual dejaba la lista de mensualidades siempre vacía, así que todas las cuentas parecían «sin
-    pendientes» y no se atrasaba ninguna — un 404 tragado que se manifestaba tres pasos después como
-    «cobranza no abre casos».
-    """
-    r = subprocess.run(
-        ["docker", "run", "--rm", "--network", RED, "curlimages/curl:latest", "-s",
-         f"http://credit-portfolio-service:8080/api/v1/portfolio/accounts/{cuenta}/amortization-schedule",
-         *CABECERAS_INTERNAS],
-        capture_output=True, text=True, timeout=60)
-    try:
-        datos = json.loads(r.stdout)
-        return datos if isinstance(datos, list) else []
-    except Exception:
-        return []
-
-
-# Cupos por tramo de mora, como **proporción de las cuentas que se van a atrasar**. El último tramo
-# cruza los 181 días a propósito: es el umbral de quebranto del dominio, y sin cuentas por encima no
-# hay nada que castigar — la estimación preventiva sólo crece y el otro lado nunca se ve.
-TRAMOS = [
-    ("DPD 30",   0.30, (25, 34)),
-    ("DPD 60",   0.25, (55, 68)),
-    ("DPD 90",   0.25, (88, 105)),
-    ("DPD 180+", 0.20, (185, 240)),
-]
-
-
-def atrasar(cuentas, rnd):
-    """
-    Reparte el atraso por **cupos explícitos**, no al azar.
-
-    Elegir la profundidad al azar por cuenta dejaba tramos enteros vacíos con pocas cuentas, y sin
-    el tramo de 181+ no hay quebrantos que sembrar. El síntoma llegaba tres pasos después, como
-    «cobranza no produce nada», y no señalaba aquí.
-    """
-    aptas, sin_pendientes = [], 0
-    for c in cuentas:
-        cid = c.get("creditAccountId") or c.get("id")
-        if not cid:
-            continue
-        plan = calendario(cid)
-        pendientes = [i["installmentNumber"] for i in plan
-                      if str(i.get("status", "")).upper() not in ("PAID", "WAIVED")]
-        if pendientes:
-            aptas.append((cid, pendientes))
-        else:
-            sin_pendientes += 1
-
-    if sin_pendientes:
-        print(f"    {sin_pendientes} cuentas sin mensualidades pendientes: no se pueden atrasar")
-    if not aptas:
-        return {}
-
-    rnd.shuffle(aptas)
-    repartidas, i = {}, 0
-    # Se reparte del tramo MÁS PROFUNDO al más superficial.
-    #
-    # El cupo es proporcional, y con pocas cuentas los primeros tramos se llevan todas: en una
-    # siembra chica quedaba «DPD 180+: 0 cuentas» y sin cuentas por encima del umbral no hay
-    # quebrantos que sembrar — que es justo el caso más difícil de producir y el que más falta hace
-    # para revisar el ciclo completo. Los tramos superficiales, en cambio, salen solos con cualquier
-    # cartera. Cuando sobran cuentas el orden da igual; cuando faltan, decide qué caso existe.
-    for nombre, proporcion, (lo, hi) in reversed(TRAMOS):
-        cupo = max(1, round(len(aptas) * proporcion)) if i < len(aptas) else 0
-        lote = aptas[i:i + cupo]
-        i += len(lote)
-        for cid, pendientes in lote:
-            dias = rnd.randint(lo, hi)
-            for numero in pendientes[:3]:
-                subprocess.run(
-                    ["docker", "run", "--rm", "--network", RED, "curlimages/curl:latest",
-                     "-s", "-o", "/dev/null", "-X", "POST",
-                     f"http://credit-portfolio-service:8080/internal/test-support/accounts/{cid}"
-                     # El parámetro se llama `daysFromToday` y es **relativo a hoy**: para que una
-                     # cuota quede vencida hay que mandarlo NEGATIVO. Con `?days=` —el nombre que
-                     # tenía— Spring contestaba 400 y `subprocess.run` lo ignoraba, así que este paso
-                     # nunca atrasó nada: la mora que aparecía venía del envejecido de
-                     # seed-portfolio, y el tramo de 181+ días no se alcanzaba jamás. Sin él no hay
-                     # quebrantos que sembrar, que era la mitad de lo que este script existe para
-                     # producir.
-                     f"/installments/{numero}/shift-due-date?daysFromToday=-{dias}"],
-                    capture_output=True, text=True)
-        repartidas[nombre] = len(lote)
-        print(f"    {nombre:>9}: {len(lote)} cuentas")
-
-    interno("credit-portfolio-service", "/internal/test-support/run-delinquency-job")
-    return repartidas
-
-
-def verificar_mora(token):
-    """
-    Comprueba que el envejecido produjo mora de verdad.
-
-    Existe porque el fallo anterior fue silencioso: se movieron fechas, el job corrió, todo devolvió
-    200 y la cartera siguió con cero días de atraso.
-    """
-    filas = cuentas_activas(token, size=1000)
-    dias = [c.get("daysDelinquent") or 0 for c in filas]
-    con_mora = [d for d in dias if d > 0]
-    print(f"    {len(con_mora)} de {len(filas)} cuentas activas quedaron con atraso")
-
-    cubos = {"1-30": 0, "31-60": 0, "61-90": 0, "91-180": 0, "181+": 0}
-    for d in con_mora:
-        clave = ("1-30" if d <= 30 else "31-60" if d <= 60 else
-                 "61-90" if d <= 90 else "91-180" if d <= 180 else "181+")
-        cubos[clave] += 1
-    print("    " + " · ".join(f"{k}={v}" for k, v in cubos.items()))
-
-    if cubos["181+"] == 0:
-        print("    ! ningún caso por encima de 181 días: NO habrá quebrantos", file=sys.stderr)
-    if not con_mora:
-        print("    ! el envejecido no produjo mora: cobranza no tendrá casos que abrir",
-              file=sys.stderr)
-    return len(con_mora)
-
-
-# ── 4 · Riesgo: la estimación preventiva ───────────────────────────────────
-
-def recalcular_riesgo():
-    """
-    Recalcula el riesgo de toda la cartera y publica `risk.assessment-updated`.
-
-    Es **lo único** que hace que contabilidad constituya estimación preventiva. Mientras este paso no
-    existió, las cuentas 1290 y 5101 salían siempre en cero y un quebranto golpeaba resultados
-    entero: no había reserva que consumir porque nadie la había constituido.
-    """
-    salida = interno("risk-service", "/internal/test-support/run-risk-assessment", esperar_cuerpo=True)
-    try:
-        r = json.loads(salida)
-        if r.get("skippedNoPolicy"):
-            # Fallo silencioso clásico: contesta 200 y no publica nada porque falta la política.
-            print(f"    ! {r['skippedNoPolicy']} cuentas sin política de provisión vigente",
-                  file=sys.stderr)
-        return r.get("assessed", 0)
-    except Exception:
-        print(f"    ! riesgo no recalculó: {salida[:120]}", file=sys.stderr)
-        return 0
-
-
-# ── 5 · Cobranza ───────────────────────────────────────────────────────────
-
-def casos(token, size=200):
-    r = http("GET", f"{BACKOFFICE}/collections/cases?size={size}", token=token) or {}
-    return r.get("content", r) if isinstance(r, dict) else r
-
-
-def prometer(token, lista, rnd):
-    """Una promesa de pago: el compromiso que frena la cobranza automática mientras vive."""
-    hechas, rechazos = 0, []
-    for caso in lista:
-        deuda = float(caso.get("totalDebt") or 0) or 1500.0
-        # La fecha tiene que ser futura: el backend no lo valida y una promesa para ayer nace rota,
-        # porque el job de la mañana siguiente la marca incumplida.
-        fecha = (datetime.date.today() + datetime.timedelta(days=rnd.randint(3, 20))).isoformat()
-        try:
-            http("POST", f"{BACKOFFICE}/collections/cases/{caso['caseId']}/payment-promises",
-                 {"amount": round(deuda * rnd.uniform(0.2, 0.6), 2), "promisedDate": fecha},
-                 token=token)
-            hechas += 1
-        except Exception as e:
-            rechazos.append(str(e)[:90])
-    if rechazos:
-        print(f"    {len(rechazos)} rechazadas por el dominio; la primera: {rechazos[0]}", file=sys.stderr)
-    return hechas
-
-
-# Extensión de plazo que la política de cobranza admite (`max-term-extension-months`, 12 por
-# defecto). El campo es la **extensión**, no el plazo nuevo total.
-#
-# La siembra pedía 18, 24 o 36 meses y el dominio rechazaba las tres con 422. El resultado era «0
-# convenios autorizados» en todas las corridas, que se lee como que la reestructura está rota
-# cuando lo que estaba mal era pedir más de lo que la política permite.
-EXTENSIONES = [6, 9, 12]
-
-
-def reestructurar(token, lista, rnd):
-    """Reestructura: proponer → aceptar → autorizar. Los tres pasos, para ejercitar el segundo par de ojos.
-
-    Uno de cada tres se queda **aceptado y sin autorizar**, a propósito.
-
-    Antes se autorizaban todos, y la consecuencia era que `GET /collections/agreements/
-    awaiting-authorization` devolvía siempre una lista vacía: la pantalla «Convenios por autorizar»
-    —que existe justo para el segundo par de ojos— no tenía nunca nada que enseñar, y no había forma
-    de distinguir «no hay trabajo pendiente» de «esta pantalla no funciona».
-
-    Es el sobrecorrectivo del arreglo anterior: se venía de «0 convenios autorizados» por pedir
-    extensiones que la política rechazaba, se arregló autorizando, y con eso se perdió el estado
-    intermedio. Los dos estados tienen que existir en la base sembrada porque los dos existen en la
-    operación.
-    """
-    completadas, pendientes, rechazos = 0, 0, []
-    for i, caso in enumerate(lista):
-        try:
-            conv = http("POST", f"{BACKOFFICE}/collections/cases/{caso['caseId']}/agreements",
-                        {"type": "RESTRUCTURE",
-                         "newTerms": {"newNominalRate": round(rnd.uniform(0.18, 0.28), 4),
-                                      "newTermMonths": rnd.choice(EXTENSIONES)}},
-                        token=token)
-            aid = conv["agreementId"]
-            http("PUT", f"{BACKOFFICE}/collections/agreements/{aid}/accept", token=token)
-
-            # Determinista por posición y no al azar: la siembra tiene que producir el mismo
-            # reparto en cada corrida, o «hay 3 por autorizar» deja de ser una afirmación
-            # comprobable sobre el entorno.
-            if i % 3 == 2:
-                pendientes += 1
-                continue
-
-            http("PUT", f"{BACKOFFICE}/collections/agreements/{aid}/authorize",
-                 {"authorizedBy": "comite@kredius.mx",
-                  "authorizationRef": f"ACTA-{rnd.randint(1000, 9999)}"}, token=token)
-            completadas += 1
-        except Exception as e:
-            rechazos.append(str(e)[:90])
-    if rechazos:
-        print(f"    {len(rechazos)} rechazados; el primero: {rechazos[0]}", file=sys.stderr)
-    if pendientes:
-        print(f"    {pendientes} quedan aceptados y esperando autorización, a propósito")
-    return completadas
-
-
-def quebrantar(token, lista, rnd):
-    """Quebranto sobre los casos más profundos: lo único que consume la estimación preventiva."""
-    hechos, rechazos = 0, []
-    for caso in lista:
-        cid = caso["caseId"]
-        try:
-            http("POST", f"{BACKOFFICE}/collections/cases/{cid}/request-write-off",
-                 {"reason": "UNRECOVERABLE"}, token=token)
-            http("POST", f"{BACKOFFICE}/collections/cases/{cid}/write-offs",
-                 {"reason": "UNRECOVERABLE", "authorizedBy": "comite@kredius.mx",
-                  "authorizationRef": f"QUEBRANTO-{rnd.randint(1000, 9999)}"}, token=token)
-            hechos += 1
-        except Exception as e:
-            rechazos.append(str(e)[:90])
-    if rechazos:
-        print(f"    {len(rechazos)} rechazados; el primero: {rechazos[0]}", file=sys.stderr)
-    return hechos
-
-
-# ── 6 · Facturación y cierre ───────────────────────────────────────────────
-
-def facturar(token, periodo):
-    """
-    Corre la facturación del período: consolida lo devengado en **un CFDI por cliente**.
-
-    Este paso no existía en ninguna siembra, y por eso no había ni una factura en la base: los
-    `invoiceable_items` se acumulaban en PENDING y el `BillingRunJob` sólo corre el día 1 a las 03:00
-    sobre el mes anterior. La consola enseñaba una pestaña de facturas vacía sobre una contabilidad
-    llena, que es la forma más cara de parecer roto sin estarlo.
-    """
-    try:
-        r = http("POST", f"{BACKOFFICE}/accounting/billing-runs?period={periodo}", token=token) or {}
-        return int(r.get("invoicesRequested") or 0)
-    except Exception as e:
-        print(f"    ! la corrida de {periodo} falló: {str(e)[:120]}", file=sys.stderr)
-        return 0
-
-
-def cerrar(token, periodo):
-    """
-    Cierra el período: «estos números ya se publicaron».
-
-    No levanta un muro —un hecho que llegue después se asienta en el primer período abierto y queda
-    marcado como extemporáneo— y por eso se puede cerrar sin miedo a perder movimientos.
-    """
-    try:
-        http("POST", f"{BACKOFFICE}/accounting/periods/{periodo}/close", token=token)
-        return True
-    except Exception as e:
-        print(f"    ! no se pudo cerrar {periodo}: {str(e)[:120]}", file=sys.stderr)
-        return False
-
-
-# ── Orquestación ───────────────────────────────────────────────────────────
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--meses", type=int, default=3,
-                    help="meses de historia contable a construir, contando el actual")
-    ap.add_argument("--sin-historia", action="store_true",
-                    help="no retrocede el reloj: sólo devenga hoy (comportamiento viejo)")
+    ap.add_argument("--desde", required=True, help="la fecha en la que estaba el reloj al originar (AAAA-MM-DD)")
+    ap.add_argument("--hasta", help="último día a cerrar; por omisión, ayer en la zona de negocio")
     ap.add_argument("--semilla", type=int, default=7)
+    ap.add_argument("--evidencia", help="carpeta de bitácora; por omisión ~/Documents/material-kredius/siembra/<fecha>")
     args = ap.parse_args()
+
+    desde = datetime.date.fromisoformat(args.desde)
+    hoy = datetime.datetime.now(ZoneInfo("America/Mexico_City")).date()
+    hasta = datetime.date.fromisoformat(args.hasta) if args.hasta else hoy - datetime.timedelta(days=1)
+    dias = (hasta - desde).days + 1
+    if dias < 1:
+        sys.exit(f"nada que correr: {desde} → {hasta}")
+    evidencia = pathlib.Path(args.evidencia).expanduser() if args.evidencia else \
+        pathlib.Path.home() / "Documents" / "material-kredius" / "siembra" / f"ciclo-{time.strftime('%Y%m%d-%H%M%S')}"
+
+    puente.up()
+    token = motor.login_admin()
+    cuentas = cuentas_activas(token)
+    print(f"  {len(cuentas)} cuentas activas · {dias} días de historia ({desde} → {hasta}) · semilla {args.semilla}")
+    if not cuentas:
+        sys.exit("  ! sin cartera activa: nada que hacer avanzar")
+
     rnd = random.Random(args.semilla)
+    plan, estado = plan_para(cuentas, rnd, dias)
+    por_desenlace = {}
+    for e in plan.values():
+        por_desenlace[e["titulo"]] = por_desenlace.get(e["titulo"], 0) + 1
+    print("  desenlaces: " + " · ".join(f"{k}={v}" for k, v in sorted(por_desenlace.items())))
 
-    token = login()
-    hoy = datetime.date.today()
+    # The demo's book with the demo's staff: the engine is the E2E's, the people and decisions here are the demo's.
+    corrida = motor.Corrida(desde, hasta, args.semilla, evidencia, plan, verbose=False, personal=motor.PERSONAL_DEMO,
+                            fondeo=motor.FONDEO_DEMO)
+    corrida.estado = estado
+    try:
+        corrida.correr()
+    finally:
+        motor.reloj_real()
+        print("  reloj real restablecido")
 
-    activas = cuentas_activas(token)
-    print(f"  {len(activas)} cuentas activas")
-    if not activas:
-        print("  ! sin cartera activa: nada que hacer avanzar", file=sys.stderr)
-        return 1
-
-    # El primer día del mes que arranca la historia. Con --meses 3 y hoy en agosto: 1 de junio.
-    primer_mes = hoy.replace(day=1)
-    for _ in range(args.meses - 1):
-        primer_mes = (primer_mes - datetime.timedelta(days=1)).replace(day=1)
-
-    if args.sin_historia:
-        paso("Devengando sólo el día de hoy (--sin-historia)")
-        devengar_dia(hoy)
-        meses = [(hoy.replace(day=1), hoy)]
-    else:
-        paso(f"Retrocediendo el reloj del devengo a {primer_mes}")
-        print(f"  {retroceder_reloj(primer_mes - datetime.timedelta(days=1))} calendarios retrocedidos")
-
-        # Los tramos de cada mes: del día 1 al último día, y el mes corriente hasta hoy.
-        meses = []
-        cursor = primer_mes
-        while cursor <= hoy:
-            siguiente = (cursor + datetime.timedelta(days=32)).replace(day=1)
-            fin = min(siguiente - datetime.timedelta(days=1), hoy)
-            meses.append((cursor, fin))
-            cursor = siguiente
-
-    rnd.shuffle(activas)
-    n = len(activas)
-    # Los cortes reparten la cartera en desenlaces distintos. Que sumen menos del total es a
-    # propósito: el resto se queda al corriente, que es lo que le pasa a la mayoría.
-    liquidan   = activas[: max(1, int(n * 0.15))]
-    abonan     = activas[max(1, int(n * 0.15)): int(n * 0.40)]
-    se_atrasan = activas[int(n * 0.40): int(n * 0.75)]
-
-    # ── El recorrido mes a mes ─────────────────────────────────────────────
-    for i, (inicio, fin) in enumerate(meses):
-        periodo = periodo_de(inicio)
-        ultimo = i == len(meses) - 1
-        paso(f"Período {periodo} · devengando del {inicio} al {fin}")
-        print(f"  {correr_mes(inicio, fin)} días devengados")
-
-        # Que contabilidad termine de consumir antes de leer saldos para cobrar.
-        time.sleep(6)
-
-        # Los abonos parciales ocurren todos los meses; es lo que hace que el auxiliar de intereses
-        # suba y baje en vez de crecer siempre.
-        frescas = cuentas_activas(token, size=1000)
-        por_id = {c.get("creditAccountId") or c.get("id"): c for c in frescas}
-        vigentes = [por_id[c.get("creditAccountId") or c.get("id")]
-                    for c in abonan if (c.get("creditAccountId") or c.get("id")) in por_id]
-        print(f"  {abonar_parcial(vigentes, rnd.uniform(0.25, 0.5), f'ABN{periodo}')} abonos parciales")
-
-        # La estimación preventiva se recalcula cada cierre, como en la vida real.
-        paso(f"Período {periodo} · recalculando riesgo (estimación preventiva)")
-        print(f"  {recalcular_riesgo()} cuentas evaluadas")
-        time.sleep(5)
-
-        paso(f"Período {periodo} · corrida de facturación")
-        print(f"  {facturar(token, periodo)} CFDI solicitados")
-        time.sleep(4)
-
-        # El mes corriente se queda ABIERTO: es el que se está trabajando y el que la consola abre
-        # por defecto. Cerrar todo dejaría la pantalla en un mes que ya nadie toca.
-        if not ultimo:
-            paso(f"Período {periodo} · cierre contable")
-            print(f"  {'cerrado' if cerrar(token, periodo) else 'no se pudo cerrar'}")
-
-    # ── Desenlaces, ya con toda la historia devengada ──────────────────────
-    frescas = cuentas_activas(token, size=1000)
-    por_id = {c.get("creditAccountId") or c.get("id"): c for c in frescas}
-
-    paso("Liquidando cuentas por el canal de pagos")
-    vivas = [por_id[k] for k in
-             [(c.get("creditAccountId") or c.get("id")) for c in liquidan] if k in por_id]
-    print(f"  {liquidar(vivas)} cuentas liquidadas de {len(vivas)}")
-
-    paso("Atrasando cartera para que exista mora real")
-    atrasar(se_atrasan, rnd)
-    print("  job de morosidad disparado")
-    time.sleep(8)
-    verificar_mora(token)
-
-    # Con la mora ya calculada, el riesgo vuelve a correr: es lo que constituye la reserva que el
-    # quebranto de más abajo va a consumir. Sin esta segunda pasada, los créditos que acaban de caer
-    # en mora se castigan sin reserva y todo el quebranto golpea resultados.
-    paso("Recalculando riesgo con la mora ya reconocida")
-    print(f"  {recalcular_riesgo()} cuentas evaluadas")
-    time.sleep(6)
-
-    print("  esperando a que cobranza abra los casos…")
-    time.sleep(20)
-
-    lista = casos(token)
-    print(f"  {len(lista)} casos de cobranza abiertos")
-    if not lista:
-        print("  ! cobranza no abrió casos: revisar el consumidor de morosidad", file=sys.stderr)
-    else:
-        # Los candidatos se eligen por **estado del caso**, no sólo por días de atraso.
-        #
-        # El dominio sólo negocia sobre casos vivos: un convenio exige MANAGED o LEGAL, y un caso
-        # CLOSED —porque la cuenta se liquidó— o recién abierto en OPEN lo rechaza con 422. Elegir
-        # sólo por mora metía casos cerrados en el lote y la corrida terminaba con «0 convenios
-        # autorizados» y seis rechazos, que se lee como que la reestructura está rota cuando lo que
-        # estaba mal era a quién se le proponía.
-        vivos = [c for c in lista if str(c.get("status", "")).upper() not in ("CLOSED", "WRITTEN_OFF")]
-        negociables = [c for c in vivos if str(c.get("status", "")).upper() in ("MANAGED", "LEGAL")]
-        cerrados = len(lista) - len(vivos)
-        if cerrados:
-            print(f"  {cerrados} casos ya cerrados o castigados: no admiten gestión")
-
-        por_mora = sorted(vivos, key=lambda c: c.get("daysDelinquent") or 0, reverse=True)
-        profundos = [c for c in por_mora if (c.get("daysDelinquent") or 0) >= 181][:4]
-        medios    = [c for c in sorted(negociables, key=lambda c: c.get("daysDelinquent") or 0, reverse=True)
-                     if 60 <= (c.get("daysDelinquent") or 0) < 181][:6]
-        tempranos = [c for c in por_mora if (c.get("daysDelinquent") or 0) < 60][:8]
-        print(f"  tramos: {len(tempranos)} tempranos · {len(medios)} negociables · {len(profundos)} de 181+ días")
-
-        paso("Promesas de pago")
-        print(f"  {prometer(token, tempranos, rnd)} promesas registradas")
-
-        paso("Reestructuras (proponer → aceptar → autorizar)")
-        print(f"  {reestructurar(token, medios, rnd)} convenios autorizados")
-
-        paso("Quebrantos")
-        print(f"  {quebrantar(token, profundos, rnd)} quebrantos aplicados")
-
-    # La facturación del mes corriente se vuelve a correr al final: los pagos, quebrantos y
-    # devengos de este último tramo generaron conceptos facturables que la corrida de arriba,
-    # hecha antes de todo esto, no podía haber visto.
-    paso("Corrida de facturación final del período abierto")
-    print(f"  {facturar(token, periodo_de(hoy))} CFDI solicitados")
-
-    paso("Reconciliando la sucursal de origen en contabilidad")
-    r = http("POST", f"{BACKOFFICE}/accounting/backfill-origin-units", token=token)
-    print(f"  {r.get('sellados', 0)} créditos sellados · {r.get('polizasAtribuidas', 0)} pólizas atribuidas"
-          f" · {r.get('sinEjecutivoAsignado', 0)} sin ejecutivo")
-
-    print("\n\033[1m✓ ciclo de vida sembrado\033[0m")
+    # The open month is billed too: the payments and charges of the last stretch created invoiceable
+    # items that the month-end run of the previous period could not have seen.
+    periodo = f"{hasta.year}{hasta.month:02d}"
+    try:
+        r = motor.svc("accounting-service", "POST", f"/api/v1/accounting/billing-runs?period={periodo}", timeout=300) or {}
+        print(f"  facturación del período abierto {periodo}: {r.get('invoicesRequested', 0)} CFDI")
+    except motor.HttpError as e:
+        print(f"  ! la facturación de {periodo} falló: {e}")
+    # A fresh login: the token taken before the eight months of nights expired long ago (15 minutes).
+    r = motor.bo(motor.login_admin(), "POST", "/accounting/backfill-origin-units") or {}
+    print(f"  sucursal de origen: {r.get('sellados', 0)} créditos sellados · {r.get('polizasAtribuidas', 0)} pólizas atribuidas")
+    print(f"\n\033[1m✓ ciclo de vida sembrado\033[0m · bitácora en {evidencia}")
     return 0
 
 

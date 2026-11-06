@@ -65,7 +65,7 @@ necesita la definición viva para armar la oferta y calcular el CAT. Todo lo dem
 | `BUSINESS_REVOLVING_LINE` | REVOLVING | **B2B** | SELF_USE |
 
 **AmortizationType:** `FRENCH` · `GERMAN` · `BULLET` (solo INSTALLMENT)  
-**PaymentFrequency:** `WEEKLY` · `BIWEEKLY` · `MONTHLY`  
+**PaymentFrequency:** `WEEKLY` · `BIWEEKLY` (cada 14 días, 26 al año) · `SEMI_MONTHLY` (dos cortes al mes en días fijos, 24 al año; la usa la línea de distribuidora: corta el 6 y el 21 y se paga el 18 y el 3, `cutoffDays` y `paymentDueDays` del ciclo de facturación) · `MONTHLY`  
 **ApprovalFlow:** `AUTOMATIC` · `MANUAL` · `COMMITTEE`  
 **TargetAudience:** `B2C` · `B2B2C` · `B2B`
 
@@ -182,6 +182,36 @@ Si `amountStep` es null → sin restricción (acepta cualquier monto).
 **Uso desde origination:** antes de presentar la oferta, validar con `isValidAmount(amount)` y redondear con `roundDownToStep(amount)`.
 
 ---
+
+## Ciclo de facturación — cuándo corta y cuándo paga una cuenta
+
+El producto declara **todo su ciclo**, no sólo la frecuencia de pago: `billing_cycle` (JSONB, `BillingCycle`).
+
+| Campo | Qué es | Ejemplo |
+|---|---|---|
+| `cutoffRule` | `INSTALLMENT_DUE_DATE` (corta en cada vencimiento del plan), `CYCLE_FROM_ACTIVATION` (un periodo después del alta y luego cada periodo), `DAY_OF_MONTH` (día fijo, mensual), `DAY_OF_WEEK` (día fijo de la semana, semanal o quincenal según `defaultPaymentFrequency`), `NONE` | `DAY_OF_WEEK` |
+| `cutoffDay` | 1–28 para `DAY_OF_MONTH`; 1 (lunes) … 7 (domingo) para `DAY_OF_WEEK` | `5` (viernes) |
+| `paymentDueOffsetDays` | días naturales del corte a la fecha límite de pago | `3` |
+| `graceDays` | días después de un vencimiento antes de que corra la mora (cargos) | `3` |
+| `minimumPaymentRate` | pago mínimo como fracción del saldo (revolventes); `null` = sin mínimo | `0.05` |
+| `nonBusinessDayShift` | `NEXT` · `PREV` · `NONE` si la fecha cae en inhábil | `NEXT` |
+
+Si la solicitud no lo trae, aplica el default del tipo de producto (`BillingCycle.defaultFor`), que reproduce lo
+que closing aplicaba con sus políticas: préstamos a plazo cortan en cada vencimiento y pagan en 3 días; tarjetas
+y líneas revolventes 20 días después del corte con mínimo del 5 %; líneas de distribuidora, cortes el 6 y el 21 pagados el 18 y el 3.
+
+**La comisión de la distribuidora** (`distributorCommission`, sólo en `DISTRIBUTOR_LINE`) también es configuración
+del producto: `basis` (`COLLECTED_TOTAL`: su parte de todo lo que paga el cliente, IVA incluido, o
+`COLLECTED_PRINCIPAL_AND_INTEREST`), `rate` (0.18), `tiers` (por días tarde desde la fecha límite del estado: 0 →
+0.18, 1 → 0.14, 2 → 0.11, 3 → 0.07; después nada) y `settlement` (`NETTED`: se descuenta de lo que entrega; `PAYOUT`:
+se le paga por lote). `DistributorCommission.inconsistency()` rechaza una escalera que no empiece en el día 0, que
+suba o que no coincida con la tasa. La línea coloca de 12 a 24 quincenas (`minTerm`/`maxTerm`/`termStep`): abajo de
+12 el 18 % de lo cobrado rebasa el interés del plan.
+
+Viaja en `product-catalog.product-activated` (junto con `paymentFrequency`, `amortizationType`, `openingFeeRate`
+y `amountStep`, que antes no salían del catálogo), cartera lo fija a cada cuenta al activarla y lo republica en
+`credit-account-activated`; closing deriva el calendario de cortes y el pago mínimo con él y cargos toma la
+gracia. Cambiarlo es versionar el producto: las cuentas abiertas conservan el ciclo con el que nacieron.
 
 ## Versionado (PD-01 / PD-02)
 
@@ -477,7 +507,7 @@ Seed de referencia: `SME-LOAN-STD-V1` ([012](src/main/resources/db/changelog/cre
 | `targetAudience` | `B2C` · `B2B2C` · `B2B` |
 | `eligiblePartyTypes` | `INDIVIDUAL` · `BUSINESS` · `DISTRIBUTOR` · `GUARANTOR` · `BENEFICIARY` |
 | `amortizationType` | `FRENCH` · `GERMAN` · `BULLET` · `null` (REVOLVING) |
-| `defaultPaymentFrequency` / `allowedPaymentFrequencies` | `WEEKLY` · `BIWEEKLY` · `MONTHLY` |
+| `defaultPaymentFrequency` / `allowedPaymentFrequencies` | `WEEKLY` · `BIWEEKLY` · `SEMI_MONTHLY` · `MONTHLY` |
 | `defaultApprovalFlow` | `AUTOMATIC` · `MANUAL` · `COMMITTEE` |
 | `dispositionType` (capability) | `SELF_USE` · `PAYROLL` · `THIRD_PARTY_CREDIT` |
 | `nominalRateAnnual` / `moratoriumRateAnnual` | decimal `> 0` y `< 1` (0.32 = 32%) |

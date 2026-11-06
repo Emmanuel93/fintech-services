@@ -69,7 +69,7 @@ def documento(titulo: str, color, tam, nombre: str, curp: str) -> bytes:
 def put_interno(network: str, url: str, payload: dict) -> tuple[int, str]:
     """PUT a un servicio interno, desde dentro de la red de Docker."""
     r = subprocess.run(
-        ["docker", "run", "--rm", "-i", "--network", network, "curlimages/curl:latest",
+        ["docker", "run", "--rm", "-i", "--network", network, "curlimages/curl:8.10.1",
          "-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "PUT",
          "-H", "Content-Type: application/json",
          # Los servicios de dominio confían en la identidad que propaga el canal; aquí se

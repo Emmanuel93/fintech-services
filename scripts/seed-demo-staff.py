@@ -51,6 +51,12 @@ ROSTER = [
      ["UNDERWRITER", "COMMITTEE"], None),
     ("producto@kredius.mx", "Pablo Vela Ontiveros",
      ["PRODUCT_MANAGER"], None),
+    # Cobranza gestiona (contacto, promesa, propone convenio, pide quebranto); el comité autoriza.
+    ("cobranza@kredius.mx", "Gestión de Cobranza",
+     ["COLLECTIONS_AGENT"], None),
+    # Cumplimiento resuelve la identidad y las posibles coincidencias en listas.
+    ("cumplimiento@kredius.mx", "Oficialía de Cumplimiento",
+     ["OPS_SUPERVISOR"], None),
 ]
 
 

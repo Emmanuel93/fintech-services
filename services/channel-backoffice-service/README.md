@@ -53,6 +53,7 @@ flowchart LR
 | `DashboardController` | Tablero: capital colocado, cartera vencida (CNBV/IFRS-9), cobranza del periodo. |
 | `PortfolioController` | Cartera con avance del plan de pagos (resuelve nombres en **lote**). |
 | `ClientsController` | Búsqueda y expediente del cliente. |
+| `StatementsController` | **Estados de cuenta** desde el expediente de un cliente o distribuidor: lista de todos sus cortes y PDF (`GET /clients/{id}/statements`, `…/{statementId}/pdf?download=true`). Capacidad `clients.view`; sólo entrega un estado desde el expediente de su titular (si no, 404); el colaborador de un distribuidor no los descarga (llevan RFC y domicilio). El id puede ser el `partyId` o, en distribuidores, el `prospectId` del nodo comercial. |
 | `OriginationController` | Bandeja, **mesa de análisis** y **dictamen de documentos** del expediente. |
 | `ProductsController` | Catálogo; detalle producto = **condiciones + scoring por tipo de prospecto** (`GET /products/{id}`); alta de políticas de riesgo. |
 | `SalesOrgController` / `ExecutivesController` | Estructura comercial y alcance por subárbol. |
@@ -61,13 +62,13 @@ flowchart LR
 | `CollectionsController` | Casos de cobranza + **bandejas transversales** de promesas y contactos. |
 | `BeneficiariesController` | **Mesa de KYC** de la colocación B2B2C (bandeja + ficha). |
 | `NotificationsController` | Campana: buzón del empleado en sesión. |
-| `AccountingController` | Mayor, períodos y facturación. |
+| `AccountingController` | Mayor, períodos y facturación. El cierre de mes (`POST /accounting/periods/{p}/close`, capacidad `accounting.close`) concilia antes de publicar: si no concilia, el 409 de contabilidad pasa tal cual con el reporte, no como error de pasarela, para que la pantalla liste lo que no cuadra. `GET /accounting/periods/{p}/reconciliation` (`accounting.view`) da la conciliación del mes: la de su cierre o, abierto, una corrida en seco. La balanza se acota por sucursal (`unitId`/`unitCode`) y por producto (`productTypes`); `GET /accounting/products` da el movimiento de cada producto con su nombre del catálogo (credit-product; `Institución` para lo que no es de ninguno) y `GET /accounting/products/{p}/scheme` su esquema contable. `GET /accounting/self-checks` junta lo que cada servicio dice de sí mismo (comisiones, tesorería, cartera, estados de cuenta), con el mismo contrato que el cierre; uno que no contesta sale `UNREACHABLE`, nunca en orden. |
 
 ## Clientes de dominio (REST)
 
 `Identity`, `Party`, `Origination`, `Scoring`, `CreditProduct`, `CreditPortfolio`, `Payments`,
 `Charges`, `Wallet`, `Collections`, `Commission`, `SalesOrg`, `Audit`, `Accounting`, `Invoicing`,
-`Beneficiary`, `Notifications`.
+`Beneficiary`, `Notifications`, `Statement` (estados de cuenta y su PDF).
 
 ## Autorización por capacidad, no por rol
 
@@ -160,8 +161,10 @@ java -classpath gradle/wrapper/gradle-wrapper.jar org.gradle.wrapper.GradleWrapp
 
 ## Convención de idioma
 
-**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, enums, pruebas
-y claves de configuración. Los **comentarios van en español**, que es donde vive el razonamiento.
+**Todo el código de este servicio se escribe en inglés** — clases, métodos, campos, variables, enums,
+pruebas, claves de configuración **y comentarios**. Los mensajes de log y los textos que ve el usuario
+(errores de la API, la consola) van en español. Los comentarios en español que quedan son anteriores
+a esta regla: se pasan a inglés al tocar el archivo.
 
 Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
 regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en

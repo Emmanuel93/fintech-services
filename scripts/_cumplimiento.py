@@ -46,7 +46,7 @@ def _llama(method, ruta, body=None):
     El 404 entra por aquí como None y es un caso **normal**: la verificación la crea un listener de
     Kafka y durante unos cientos de milisegundos todavía no existe.
     """
-    cmd = ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:latest",
+    cmd = ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:8.10.1",
            "-s", "-w", "\n%{http_code}", "-X", method,
            f"http://compliance-service:8080{RUTA}{ruta}"]
     if body is not None:

@@ -95,7 +95,7 @@ flowchart LR
 
 ## Eventos Kafka
 
-### Los doce tópicos que consume, y qué avisa cada uno
+### Los trece tópicos que consume, y qué avisa cada uno
 
 **Este servicio es un consumidor maestro:** se suscribe a los hechos que los dominios ya publican
 por sus propias razones e **interpreta** cuáles merecen un aviso, para quién y con qué texto.
@@ -112,6 +112,7 @@ consumir sin acoplarse al código ajeno: **cada payload se redeclara aquí**, no
 | `origination.offer-presented` | se le presentó una oferta | `OFFER_PRESENTED` — «tienes una oferta» | prospecto |
 | `credit-portfolio.credit-account-activated` | el crédito nació | `WELCOME_ACTIVATED` — bienvenida | titular |
 | `credit-portfolio.disposition-completed` | salió el dinero | `DISBURSEMENT_COMPLETED` — «ya se depositó» | titular |
+| `credit-portfolio.disposition-failed` | el depósito no pudo hacerse y se compensó (D63) | `DISBURSEMENT_FAILED` — «no pudimos depositar» y, según el caso, «Cancelamos tu crédito sin costo.» o «Tu línea sigue disponible.» (016) | titular |
 | `credit-portfolio.installment-due` | vence una cuota | `PAYMENT_REMINDER` o `PAYMENT_OVERDUE` según el DPD | titular |
 | `credit-portfolio.balance-updated` | cambió el saldo | `INSTALLMENT_PAID` · `LOAN_SETTLED` si llegó a cero | titular |
 | `payments.payment-applied` | se aplicó un pago | `INSTALLMENT_PAID` | titular |
@@ -127,7 +128,7 @@ consumir sin acoplarse al código ajeno: **cada payload se redeclara aquí**, no
 
 ### El carril genérico — `notifications.notification-requested`
 
-El único consumidor que no sabe nada de nadie, y **no sustituye a los otros once**: es la entrada
+El único consumidor que no sabe nada de nadie, y **no sustituye a los otros doce**: es la entrada
 para lo que **no es un hecho de dominio** — el backoffice pidiendo un aviso, o un sistema externo.
 Mismo contrato que el `POST`, en asíncrono.
 

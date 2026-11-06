@@ -23,6 +23,7 @@ flowchart LR
         A1["CreditAccountActivatedListener"]
         A2["DispositionAuthorizedListener"]
         A3["WalletWithdrawalCompletedListener"]
+        A4["CommissionLotPayoutListener"]
     end
     subgraph in["Otras entradas"]
         REST["DisbursementController<br/>POST /api/v1/disbursements"]
@@ -87,9 +88,10 @@ o `Wallet*` fuera del ACL, si el dominio importa Spring, o si la aplicación imp
 | `credit-portfolio.credit-account-activated` | Hecho: se activó un crédito. Si trae bloque `disbursementInstruction`, hay algo que pagar | `dispositionId` |
 | `credit-portfolio.disposition-authorized` | Disposición sobre una línea ya activa (camino de wallet) | `dispositionId` |
 | `wallet.withdrawal-completed` | Retiro de saldo a favor | `withdrawalId` |
+| `commission.lot-payout-requested` | Lote de comisiones: el neto a la CLABE de la beneficiaria (origen `COMMISSION`, referencia `LOTE:<id>`, empresa por el comodín `commission`) | `batchId:intento` — un lote cuyo SPEI falló se pide con el siguiente intento |
 | `POST /api/v1/disbursements` | Alta directa — la puerta que no es Kafka | Cabecera `Idempotency-Key` |
 
-Los tres topics de entrada son **configurables**: un comprador apunta el servicio a su propia
+Los cuatro topics de entrada son **configurables**: un comprador apunta el servicio a su propia
 nomenclatura sin tocar código.
 
 ## Salidas
@@ -102,6 +104,19 @@ nomenclatura sin tocar código.
 | `disbursement.returned` | Llegó y el banco receptor lo devolvió |
 
 Los cuatro devuelven en eco `sourceSystem`, `sourceReference`, `sourceEventId` y `sourceMetadata`.
+
+`disbursement.failed` dice además si **otro intento puede servir** (`retryable`, de
+`FailureCode.anotherAttemptMayWork()`: una falla técnica o de configuración sí, una regla no) y **qué
+intento** fue (`attempt`). Un rechazo técnico del conector (`technical` en `stp.order-rejected`: el
+enlace agotado, una orden que nunca registró) termina con `PROVIDER_TECHNICAL_FAILURE`; uno por regla,
+con `REJECTED_BY_PROVIDER`. Cada intento de una disposición es su propia orden: el primero con la llave
+de siempre, los siguientes con `<disposición>:<intento>`, y la espera que pide cartera viaja como
+`scheduledFor` (D63).
+
+**D67.** Una solicitud que la instrucción misma hace imposible (CLABE inválida, dato faltante, empresa
+sin resolver) llegaba a la cola de muertos y la disposición esperaba para siempre. Por las entradas de
+eventos se responde `disbursement.failed` sin orden (`disbursementId` nulo), con las llaves del que la
+pidió; por REST sigue siendo un 4xx.
 
 ---
 
@@ -173,11 +188,18 @@ despliegue de por medio.
 ## Ventana operativa
 
 Configurable por rail. Es **envolvente**: `start > end` significa que abre un día y cierra al
-siguiente — para SPEI, la franja cerrada es el corte diario de Banxico. Fuera de ventana la orden
-queda `REQUESTED` con `scheduledFor`; **no se rechaza**. El estado vive en la base de datos, así que
-reiniciar un pod no cambia nada.
+siguiente. Fuera de ventana la orden queda `REQUESTED` con `scheduledFor`; **no se rechaza**. El
+estado vive en la base de datos, así que reiniciar un pod no cambia nada.
 
-`start == end` significa 24 h (así se configura un rail sin corte).
+`start == end` significa 24 h, y así va SPEI: **el corte es del conector**. STP retiene la orden
+registrada alrededor del corte y la fecha con el siguiente día hábil (`SpeiOperatingDay`,
+`STP_SPEI_CUTOFF`), así que la regla vive en un solo lugar. La franja que esta ventana cerraba
+(16:50–17:10) era un segundo corte, una hora antes que el del conector (D66).
+
+La ventana, el vencimiento de un reintento y las marcas de tiempo de la orden son **hora de
+negocio** (`BusinessClock`, como el conector). Con el reloj del sistema dependían de la hora real:
+en una corrida con el reloj de negocio desplazado, una orden caía dentro o fuera de la ventana
+según la hora en que se lanzó la corrida (D66).
 
 ---
 
@@ -186,6 +208,13 @@ reiniciar un pod no cambia nada.
 Un job cada 5 s toma un lote con `SELECT ... FOR UPDATE SKIP LOCKED`. Varias réplicas corren a la
 vez sin pisarse y **sin coordinador externo** — el legado resolvía esto con dos crons y cuatro
 réplicas descoordinadas.
+
+Con el soporte de pruebas encendido, la cola se declara como **trabajo pendiente** (`PendingWork`,
+de `shared`): las órdenes que el despacho tomaría ahora, más una mientras un ciclo entrega lo que
+reclamó. `GET /internal/test-support/quiescence` la suma al rezago de Kafka. El rezago sólo dice que
+la petición se consumió, no que la orden salió: un lote de comisiones liquidado la noche del 4
+esperó el tick del despacho mientras la corrida movía el reloj al sábado, y STP lo fechó el lunes 8;
+la otra corrida alcanzó el tick el viernes 5 (D65).
 
 **La entrega ocurre fuera de la transacción**: una transacción corta reclama el lote, la entrega va
 fuera, y cada fallo se registra en otra transacción corta. Hacerlo dentro mantendría los locks de

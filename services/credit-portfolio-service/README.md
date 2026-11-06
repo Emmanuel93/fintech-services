@@ -126,7 +126,73 @@ sequenceDiagram
 | `commissionsEnabled` · `requiresBeneficiaryPartyId` | Línea de distribuidor (T6) |
 
 **Amortización config-driven:** métodos `FRENCH` (cuota fija), `GERMAN` (capital fijo) y `BULLET`
-(interés periódico + capital al vencimiento), cruzados con frecuencias `WEEKLY` / `BIWEEKLY` / `MONTHLY`.
+(interés periódico + capital al vencimiento), cruzados con frecuencias `WEEKLY` / `BIWEEKLY` / `SEMI_MONTHLY` / `MONTHLY`.
+`SEMI_MONTHLY` es la quincena del producto: las cuotas vencen en sus dos días de corte (`cutoffDays` del ciclo de
+facturación; la línea de distribuidora corta el 6 y el 21), en los cortes de la línea. La primera cuota de una colocación
+cae en el primer corte después del día en que se coloca y lleva la parte de la quincena en que se tuvo el dinero
+(colocada el 10, 11 de los 15 días que terminan el 21); la anualidad se resuelve sobre ese primer periodo, así que las
+cuotas son iguales (12 pagos son 12 quincenas). Diferimientos, saltos de pago y apoyos mueven las cuotas por los mismos días.
+
+**CAT de cada colocación (`PlanCost`, Circular 21/2009).** La vista del estado de cuenta trae el CAT del plan de cada
+colocación: la tasa anual a la que sus pagos (capital e interés, sin IVA) valen lo que se entregó, en periodos uniformes
+(24 quincenas al año). El primer pago se cuenta a la fracción de quincena que de verdad pasó: contarlo a una quincena
+entera hacía ver una colocación del día anterior al corte más barata de lo que es ($1,000 a 6 quincenas leía 96.7 %).
+Así, toda colocación al 95 % cuesta lo de su tasa, 153.9 %–154.3 %.
+
+**IVA del periodo.** La foto diaria trae, junto al interés de los periodos que vencen el día, su IVA (`scheduled_tax`),
+cuota por cuota y redondeado como lo paga cada cliente. charges cobra ese IVA: el 16 % del interés total redondeado una
+vez quedaba a un centavo o dos de lo que pagan los clientes, y las filas del estado de cuenta no sumaban su total.
+
+**La comisión de la distribuidora, neteada de su entrega.** Es configuración del producto (`distributorCommission`,
+publicada con la versión): su parte de **todo lo que pagan sus clientes** (capital, interés e IVA de cada cuota;
+18 %), la misma cada quincena, si entrega el estado a más tardar su fecha límite; menos cada día después (14 %, 11 %,
+7 %) y nada desde el cuarto. Se escribe en el plan de cada colocación al colocar (`installments.scheduled_commission`,
+`DistributorCommissionSchedule`): plana por cuota y **topada al interés del plan** —sale del interés, nunca del
+capital—; como el interés francés viene cargado al principio, el interés acumulado de la colocación siempre alcanza
+para la comisión acumulada, y la primera quincena corta (colocó la víspera del corte) carga sólo lo que su día de
+interés permite y difiere el resto a la siguiente. Abajo de 12 quincenas el 18 % de lo cobrado rebasa el interés
+(155 % a 6), por eso el producto coloca de 12 a 24. Al pagar un estado, la cartera lo netea
+(`BalanceReconciliationService` → `CommissionNetting`): la comisión del estado al escalón del día en que entró el
+dinero se aplica primero, al interés y luego al capital, como asiento `COMMISSION_NETTED` con su propia llave
+(`COMMISSION_NETTED:<orden>:<ciclo>`), y después el efectivo paga IVA, moratorio, interés restante y capital; un
+pago parcial no gana nada hasta que el estado se completa, y el que lo completa fija el escalón; una devolución del
+pago revierte el neteo (`COMMISSION_NETTED_REVERSED`). El neteo cubre el estado como cubre el efectivo
+(`StatementCoverage`, la foto diaria y el atraso lo cuentan). El evento `balance-updated` lleva `commissionSettlement`
+y, en el neteo, `commission` (ciclo, fecha límite, días tarde, tasa, base, importe) para commission-service y
+contabilidad. La vista del estado trae la escalera (`commissionLadder`) y los dos números de cada colocación: su
+comisión por pago y lo que el total de la comisión es del interés del plan (`commissionShareOfInterest`, 86 % a 12
+quincenas, 51 % a 24).
+
+**Bloqueo en mora y rangos del producto.** Una línea que paga comisión a una distribuidora no coloca mientras un
+estado de cuenta esté vencido sin pagar: desde el primer día de atraso hasta que paga lo vencido, el mismo día
+(`PlacementGate`, calculado al momento sobre los estados y los pagos, no un estatus). La cuenta lo expone
+(`placementBlocked`, `placementBlockReason`, `overdueStatementsAmount`), el canal lo niega en la puerta y la cartera
+lo rechaza al autorizar (`LINE_BLOCKED_IN_ARREARS`). Una **quita** es la salida de la distribuidora: desde ese día
+la compuerta rechaza toda colocación, al corriente o no (`LINE_CLOSED_AFTER_QUITA`), y al liquidar lo que resta la
+cuenta pasa a `CLOSED` (`closure_reason = QUITA`, `closed_at`; migración 049), con lo que riesgo, cobranza, cargos y
+cierre la dan por terminada. Monto y plazo se validan contra los límites del producto (`AMOUNT_BELOW/ABOVE_*`,
+`TERM_*`): $1,000–$10,000 y 12–24 quincenas en pasos de 2; el paso de $500 del monto es del selector de la app, no
+de cartera. La vista del estado (`statement-view`) trae la comisión de cada cuota (`InstallmentLine.commission`) y el
+día en que una quita cerró la línea (`lineClosedOn`).
+
+**La base del moratorio es el capital vencido.** En la línea de distribuidora el estado pide capital, interés e IVA;
+la foto diaria toma como `overdue_principal` sólo el capital de las cuotas que ese estado facturó y sigue sin pagar
+(proporcional si lo pagó en parte), y charges cobra el moratorio sobre eso. Cobrar sobre el importe del estado era
+cobrar interés sobre interés.
+
+**Lo que factura cada estado de cuenta.** Un estado factura una vez las cuotas de los planes que vencen hasta su fecha
+límite, y desde entonces vencen en esa fecha. En la quincena, nunca una fechada en el corte siguiente aunque los días
+inhábiles muevan la fecha límite hasta él: es del estado siguiente (`BillingCycle.lastBillableDay`). En Semana Santa el
+estado del 6 de abril de 2025 se paga el 21, día del corte siguiente. Facturar hasta la fecha límite le pedía a la
+distribuidora el capital de la cuota del 21 una quincena antes de que existiera su interés, y las filas del estado no
+sumaban su total (E2E «dist2»). La facturación del corte (`CycleBillingService`) y la vista del estado
+(`StatementViewService`) aplican la misma regla.
+
+**Lo que paga una liquidación anticipada.** Pagar toda la deuda de una línea marca pagadas las cuotas de sus planes que
+ningún estado facturó: se pagó su capital, no el interés de periodos que no corrieron. La foto no cuenta su interés en
+su fecha. Contarlo le cobró a una distribuidora que liquidó en diciembre el interés de sus colocaciones viejas en enero,
+en cuanto una colocación nueva le dio capital (D06). En un préstamo a plazo, una cuota adelantada sí pagó su interés y
+lo sigue debiendo en su fecha: la regla es sólo de productos revolventes.
 
 ---
 
@@ -199,7 +265,8 @@ stateDiagram-v2
     CLOSED --> [*]
 ```
 
-`SETTLED`, `WRITTEN_OFF` y `CLOSED` son **terminales** (`CreditAccountStatus.isTerminal()`).
+`SETTLED`, `WRITTEN_OFF`, `CLOSED` y `CANCELLED` son **terminales** (`CreditAccountStatus.isTerminal()`).
+`CANCELLED` es el crédito a plazos cuyo único desembolso no pudo hacerse (D63): nunca prestó nada.
 
 ### Máquina de estados — `Disposition`
 
@@ -208,7 +275,9 @@ stateDiagram-v2
     [*] --> PENDING
     PENDING --> PROCESSING : orden enviada a disbursement
     PROCESSING --> COMPLETED : disbursement.completed (externalRef real)
-    PROCESSING --> FAILED : disbursement.failed
+    PROCESSING --> PROCESSING : disbursement.failed técnico (siguiente intento)
+    PROCESSING --> FAILED : disbursement.failed por regla, o intentos agotados
+    PROCESSING --> REVERSED : devolución del banco receptor
     COMPLETED --> REVERSED : devolución del rail
     COMPLETED --> [*]
     FAILED --> [*]
@@ -217,6 +286,29 @@ stateDiagram-v2
 
 > Una línea revolvente que se paga **no** se liquida: vuelve a quedar disponible. El cierre a
 > `SETTLED` sólo aplica cuando el producto no permite disposiciones múltiples.
+
+### Desembolso que no se realiza (D63)
+
+`DisbursementOutcomeService` lleva la saga. Dispersión dice si otro intento puede servir (`retryable`,
+de su `FailureCode`):
+
+- **Falla técnica** (enlace, orden que STP nunca registró, ruta o empresa sin configurar): se pide el
+  siguiente intento, una orden nueva con la misma instrucción (el beneficiario queda guardado en la
+  disposición), después de su espera (`credit-portfolio.disbursement.retry`: 3 intentos, el segundo a
+  la hora y el tercero seis horas después: el acreditado sabe el mismo día si llega el dinero). El
+  desenlace de un intento viejo se ignora.
+- **Falla por regla** (PLD, cuenta inválida, cancelada), intentos agotados o **devolución** del banco
+  receptor: se compensa de inmediato. El capital y el cupo vuelven (`DISPOSITION_FAILED` /
+  `DISPOSITION_RETURNED`, con su desglose y su llave), el plan se cancela (cuotas `CANCELLED`) y un
+  crédito a plazos queda `CANCELLED`. Publica `credit-portfolio.disposition-failed` (notificaciones,
+  colocaciones) y, si canceló el crédito, `credit-portfolio.credit-account-cancelled`: cargos reversa
+  lo que cobró, contabilidad reversa las cuentas de orden y deja la comisión fuera del CFDI, originación
+  cierra la solicitud como desembolso fallido. Riesgo cierra el perfil y libera la reserva.
+
+Una cuenta `CANCELLED` sólo acepta la reversa de sus cargos; un pago se rechaza (queda como saldo a favor)
+y un cargo tardío también. La reversa de un cargo que nunca entró no se asienta: cargos puede mandarla al
+compensar antes de oír el rechazo, y aplicada sacaba de contabilidad un ingreso que nunca se registró. La autoverificación `CANCELADAS_EN_CERO` exige que quede en cero y sin cuotas
+vivas. D68: la guarda de disposición única cuenta también la que está en vuelo.
 
 ---
 
@@ -315,7 +407,8 @@ Apagados salvo `TEST_SUPPORT_ENABLED=true`; el gateway **no** enruta `/internal/
 
 | Método | Ruta | Para qué |
 |---|---|---|
-| `POST` | `/run-delinquency-job` | Recalcular mora sin esperar a las 23:59 |
+| `POST` | `/run-day-close?date=` | La parte de cartera en el cierre de un día, por las mismas compuertas: `CLOSED`, o `WAITING` con el motivo |
+| `POST` | `/run-delinquency-job` | Sólo recalcular la mora al día de hoy |
 | `POST` | `/run-upcoming-installment-job` | Disparar el aviso de cuota próxima |
 | `POST` | `/run-installment-due-job` | Marcar cuotas vencidas |
 | `POST` | `/accounts/{id}/installments/{n}/shift-due-date` | Mover la fecha de una mensualidad |
@@ -375,21 +468,123 @@ desde `credit-account-activated`.
 
 ---
 
-## 9. Jobs programados
+## 9. El cierre del día
 
-| Job | Cron | Qué hace |
-|---|---|---|
-| `DelinquencyCalculationJob` | `0 59 23 * * *` | Calcula `daysDelinquent` → `delinquency-status-updated` |
-| `UpcomingInstallmentJob` | `0 0 0 * * *` | Avisa cuotas por vencer → `installment-upcoming` |
-| `InstallmentDueJob` | `0 1 0 * * *` | Marca cuotas vencidas → `installment-due` |
+La mora y las cuotas ya no tienen cron propio: corren en el **cierre del día**, que empieza a las 00:05
+del día siguiente en charges y sigue aquí cuando llega su aviso —y sólo si el interés del día ya está
+completo—.
 
-Cada job aísla el fallo **por cuenta**: una cuenta que revienta no detiene el barrido.
+**Antes de todo, la foto del día.** Cartera es la dueña de los saldos y las cuotas, así que el primer paso
+de la noche es suyo: `DaySnapshotRunner` escribe cómo quedó cada cuenta **al terminar D**
+(`credit_portfolio.account_day_snapshots`: capital, interés, IVA, mora, capital vencido, cuota más vieja sin
+pagar y días de atraso al día D; `day_snapshots` es la bitácora). Lo aplicado con fecha valor posterior a D
+se resta, reconstruyendo el delta de cada movimiento contra el anterior (`balance_events` guarda saldos
+después, no deltas por rubro), así que la foto es la misma a las 00:05 que a las 03:00. Sus compuertas: D
+terminó, D-1 cerrado aquí y los consumidores de pagos y cargos al día. La pide cargos
+(`POST /api/v1/portfolio/day-snapshots/{date}`; 200 con la foto, 202 con el motivo), la lee por páginas
+(`GET …/day-snapshots/{date}/accounts?after&size`) y closing busca las suyas
+(`POST …/day-snapshots/{date}/accounts/lookup`). El cierre de D no pasa sin ella. Para contabilidad y
+finanzas, la historia de una cuenta día por día: `GET /api/v1/portfolio/accounts/{id}/day-snapshots?from&to`.
+Una foto de 5 000 cuentas con historia y cuotas tarda 79 ms (`DaySnapshotIT`).
+
+**Lo que vence el mismo día va aparte.** Lo que vence en D no es atraso en D (lo es desde D+1), así que la foto de
+D no lo cuenta como vencido. Pero un estado de cuenta cortado en D se emite cuando D ya terminó, y lo que el estado
+anterior pedía pagar a más tardar ese día y no se pagó ya es atraso en él. En la línea de distribuidora la fecha límite
+(el 18 o el 3) queda antes del corte siguiente; coincide con él sólo cuando los días inhábiles la empujan hasta ahí
+(Semana Santa), y entonces pasa si la distribuidora no paga ese día.
+La foto lo guarda en `statement_due_unpaid` (productos facturados por estado de cuenta, con la misma
+`StatementCoverage`): el atraso del estado es `overdue_principal + statement_due_unpaid`, y la conciliación de la
+cadena lo coteja (06b).
+
+**La foto comprueba el libro.** Cada fila trae `ledger_total` (la suma de `balance_events` de la cuenta al día D) y
+`ledger_gap` (libro menos deuda al día D); el resumen del día cuenta cuántas cuentas no cuadran (`ledger_gaps`) y
+el runner lo avisa en WARN. Debe ser cero: el libro tiene que explicar cada saldo. Dos defectos lo rompían antes
+del 2 de noviembre de 2026 —el alta no asentaba el capital prestado y la escritura de saldos no tenía candado—;
+hoy el alta asienta `ACTIVATION_DISBURSEMENT` y `apply()` toma `SELECT … FOR UPDATE` sobre la cuenta.
+
+El soporte de pruebas puede aplicar un pago sin pasar por payments
+(`POST /internal/test-support/accounts/{id}/payments?amount=&reference=`) y desplazar el reloj de negocio
+(`/internal/test-support/clock`), que es lo que usa el laboratorio (`tools/lab`).
+
+```mermaid
+sequenceDiagram
+    participant CH as charges
+    participant CP as credit-portfolio
+    participant CL as closing
+    Note over CH: 00:05 de D+1
+    CH-->>CP: charges.charge-applied × N (interés de D)
+    CH-->>CP: charges.day-accrued (D, cifras de control)
+    CP->>CP: anota las cifras
+    CP->>CP: ¿consumí todo lo de charges?<br/>¿cuadran las cifras?
+    alt no
+        CP->>CP: day_closes WAITING con el motivo
+    else sí
+        CP->>CP: mora al D+1 · cuotas próximas · cuotas vencidas
+        CP-->>CL: credit-portfolio.day-closed (D)
+        CL->>CL: corta D
+    end
+```
+
+**Las compuertas.** Se revisan siempre, venga el disparo del aviso, de la reanudación o del soporte de
+pruebas:
+
+| Compuerta | Por qué |
+|---|---|
+| Cargos avisó que devengó D | Sin el aviso no hay cifras de control: cerrar sería cerrar sin interés |
+| D-1 está cerrado | Los días se cierran en orden |
+| La foto de D existe | Cargos devenga sobre ella; si no está, lo que avisó no salió de ella |
+| Cartera consumió todo lo que cargos publicó (`charge-applied`, `charge-reversed`) | El aviso y los intereses viajan por tópicos distintos: el aviso puede llegar primero |
+| Los intereses ordinarios y moratorios **del lote del cierre de D** (`day_close_date`) aplicados, más los rechazados, son los que cargos dijo, en número y en importe, **sin las cuentas que cargos dejó fuera** (`heldAccounts`) | Si un mensaje se descartó, aquí se nota y el día espera a que cargos lo reenvíe. Se cuenta el lote y no la fecha valor: un interés del mismo día sembrado a mano no es parte del cierre |
+
+**Cuentas fuera del lote.** Cargos cierra por cuenta: una cuenta que no pudo devengar queda en cuarentena
+(o retenida, si le falta un día anterior) y viaja en `heldAccounts` del aviso. Cartera cuadra sin ellas,
+las guarda (`charges_day_accruals.held_accounts`) y se las pasa a closing en `day-closed`, que retiene su
+corte. Cuando una devenga tarde, cargos avisa `charges.account-accrued` con sus cifras; `AccountDayReleaser`
+la suelta con las mismas compuertas en pequeño —el día ya cerró aquí, cartera consumió los cargos, y los
+intereses de esa cuenta en el lote cuadran— y avisa `credit-portfolio.account-day-closed` después de
+`flush()`. Si todavía no cuadra, queda en `account_day_releases` con el motivo y la retoma la reanudación.
+
+**Compras diferidas: sólo el día de la compra.** Una compra que ya devengó no se parcializa:
+`DispositionDeferralService` rechaza diferir una compra de un día anterior. Así nunca hay interés que
+reversar, y la reversa parcial —la parte de un cargo diario de la línea que le toca a una compra, que
+cargos guardaba con monto negativo y la tabla rechazaba— desapareció.
+
+Si una no abre, el día queda `WAITING` en `day_closes` con el motivo (`waiting_for`). La reanudación
+(`DayCloseRetryJob`, `0 10/15 * * * *`, `CREDIT_PORTFOLIO_DAY_CLOSE_RETRY_CRON`) vuelve a intentar los días
+avisados y no cerrados, en orden. **Nunca cierra un día que cargos no avisó**; si a las 02:00 cargos sigue
+sin avisar ayer, lo dice en el log.
+
+**Los rechazos también cuentan.** Un interés para una cuenta castigada o cerrada se rechaza y se avisa a
+cargos, como antes, y además queda en `charge_rejections`: llegó, y cuenta para cuadrar el día. Un reenvío
+del mismo cargo no se vuelve a rechazar.
+
+| Paso | Qué hace |
+|---|---|
+| `DelinquencyCalculationJob.runFor(D+1)` | `daysDelinquent` → `delinquency-status-updated`. **La mora corre desde las 00:00**: la cuota que vencía el 10 y no se pagó amanece el 11 con un día de atraso |
+| `UpcomingInstallmentJob.runFor(D+1)` | Cuotas por vencer → `installment-upcoming` |
+| `InstallmentDueJob.runFor(D+1)` | Cuotas que vencen hoy o ya vencieron → `installment-due` |
+| aviso | `flush()` de todo lo publicado —saldos y mora— y después `credit-portfolio.day-closed` con el día, la fecha de la mora y cuántas cuentas |
+
+**Una vez por día.** `day_closes` toma el día antes de empezar: si el aviso de cargos llega dos veces, la
+segunda sólo vuelve a avisar a closing (y cargos lo toma como confirmación), sin recalcular la mora ni
+republicar miles de eventos. Un cierre que falló o que se quedó a medias (más de `stale-after`, 2 h) se
+retoma.
+
+**Fecha valor.** Cada movimiento del libro (`balance_events.value_date`) lleva el día de negocio al que
+pertenece: el devengo de D se aplica pasada la medianoche y es de D. El estado de cuenta arma su periodo
+por esta fecha.
+
+**`balance-updated` lleva la fecha valor** (`valueDate`). Con ella closing sella el corte de D con el saldo
+al cierre de D, aunque corra después de un pago de las 00:07 de D+1.
+
+Medido (`DayCloseIT`, Postgres y Kafka reales): **~300 cuentas en 0.5 s**, compuertas incluidas. Cada
+cuenta en su propia transacción: una que revienta no detiene el barrido.
 
 ---
 
 ## 10. Persistencia
 
-Schema `credit_portfolio`, 14 changesets Liquibase bajo `db/changelog/creditportfolio/`
+Schema `credit_portfolio`, 39 changesets Liquibase bajo `db/changelog/creditportfolio/`
 (master YAML + SQL; nunca XML). Tabla adicional `event_publication` — outbox de Spring Modulith.
 
 ---
@@ -439,6 +634,21 @@ límite con un valor.
 
 Verificado vivo: el que no pide paga a **30 días**; el que pide 30 paga a **61** —treinta más un
 período—, que es la regla del plan escrita tal cual.
+
+### 🔴 El apoyo dejaba vencimientos en sábado, domingo y feriado
+
+El programa de apoyo corría N períodos la fecha de pago que encontraba, ya movida al día hábil, y no volvía a pasar
+el resultado por el calendario. El 1 de mayo de 2026 es feriado: un plan del día 1 vence el lunes 4, y dos meses
+después del 4 es el **sábado 4 de julio**. La demo, con un apoyo de dos meses al préstamo personal, dejó 336 cuotas
+en días inhábiles; quien pagaba el lunes siguiente quedaba en atraso, con mora y llamada de cobranza, que es lo que
+la convención de día hábil siguiente evita. Además el día del plan se iba corriendo (del 1 al 4), y los cortes, que
+salen de la cadencia del plan, dejaban de coincidir con los vencimientos.
+
+Ahora hay **una sola forma** de mover cuotas por períodos del plan, `PlanDeferral`, y la usan el apoyo y el salto de
+pago: cada cuota se mueve desde **la fecha de su plan** (la original, si lo único que la separa de la de pago es el
+corrimiento al hábil) y el resultado se corre al día hábil siguiente. Dos meses después del 1 de mayo es el miércoles
+1 de julio. Una cuota que ya movió un salto o un apoyo se mueve desde la fecha en que vence hoy, así que un segundo
+movimiento no deshace el primero. Mover 108 000 cuotas toma 19 ms (`PlanDeferralTest`).
 
 ### 🔴 Un crédito no puede estar bajo dos apoyos a la vez
 

@@ -380,6 +380,10 @@ def journey(c: Cliente) -> str:
     # en vez de dormir un tiempo fijo, que es la forma de que esto falle en una
     # máquina más lenta y "funcione" en la de quien lo escribió.
     estado = esperar_estado(c, distinto_de="PENDING_SCORING")
+    if c.desenlace == "en_mesa":
+        # The policy itself sent it to human review (a borderline bureau profile): it waits there for whoever
+        # decides, instead of being moved to the desk by a test-support call.
+        return "en_mesa" if estado in ("UNDER_MANUAL_REVIEW", "COMMITTEE_REVIEW") else f"no_llegó_a_mesa ({estado})"
     if c.desenlace == "en_revision":
         # A la mesa aunque el motor lo haya resuelto: sin esto la bandeja no tiene
         # ni un caso «por decidir» y la mesa de análisis no se puede probar.
@@ -430,7 +434,7 @@ def enviar_a_mesa(c: Cliente, comite=False) -> bool:
     un solo caso por decidir y nadie lo notaba hasta abrirla.
     """
     r = subprocess.run(
-        ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:latest",
+        ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:8.10.1",
          "-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST",
          f"http://origination-service:8080/internal/test-support/applications/"
          f"{c.application_id}/route-to-review?committee={'true' if comite else 'false'}"],
@@ -659,7 +663,7 @@ def envejecer_cartera(token, proporcion=0.22, rnd=None):
             continue
         for numero in (1, 2, 3):
             r = subprocess.run(
-                ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:latest",
+                ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:8.10.1",
                  "-s", "-o", "/dev/null", "-w", "%{http_code}", "-X", "POST",
                  f"http://credit-portfolio-service:8080/internal/test-support/accounts/{cid}"
                  f"/installments/{numero}/shift-due-date?daysFromToday={-atraso + (numero - 1) * 15}"],
@@ -669,7 +673,7 @@ def envejecer_cartera(token, proporcion=0.22, rnd=None):
         tramos += 1
 
     subprocess.run(
-        ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:latest",
+        ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:8.10.1",
          "-s", "-o", "/dev/null", "-X", "POST",
          "http://credit-portfolio-service:8080/internal/test-support/run-delinquency-job"],
         capture_output=True)
@@ -723,7 +727,8 @@ def main():
                          "para siembras chicas donde importa que haya de todo")
     ap.add_argument("--semilla", type=int, default=None)
     args = ap.parse_args()
-    semilla = args.semilla if args.semilla is not None else int(time.time())
+    # A fixed default: two runs with the same inputs produce the same portfolio. Pass --semilla to vary it.
+    semilla = args.semilla if args.semilla is not None else 20260811
     rnd = random.Random(semilla)
 
     token = http("POST", f"{BACKOFFICE}/auth/staff/login",

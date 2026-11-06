@@ -1,0 +1,185 @@
+# Laboratorio del cierre: la cadena nocturna (cartera → cargos → closing → estados de cuenta) sobre una
+# COPIA de la base, con el reloj de negocio desplazable, para correr semanas en minutos.
+#
+#   docker compose -p lab -f tools/lab/docker-compose.yml up -d
+#   tools/lab/lab.sh clone            # copia los esquemas del stack local
+#   tools/lab/lab.sh run 2026-11-01 2026-12-31
+#
+# Las imágenes son las mismas que construye el compose raíz. No comparte red, broker ni base con el
+# stack local: nada de lo que pasa aquí llega a la operación. Memoria aproximada: 4.3 GB.
+name: lab
+
+# Lo común a los cuatro servicios: perfil docker (hosts `postgres`, `kafka`, `redis` de esta red), soporte
+# de pruebas encendido (reloj desplazable, cierres por fecha) y un ambiente declarado de prueba, que es
+# lo que SimulatorGuard exige. Sin agente de OpenTelemetry: aquí sobra.
+x-lab-app: &lab-app
+  SPRING_PROFILES_ACTIVE: docker
+  SERVER_PORT: "8080"
+  POSTGRES_USER: fintech
+  POSTGRES_PASSWORD: fintech
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  REDIS_HOST: redis
+  TEST_SUPPORT_ENABLED: "true"
+  FINTECH_ENVIRONMENT: test
+  JAVA_TOOL_OPTIONS: "-Xmx384m -XX:+UseSerialGC"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=128MB"]
+    environment:
+      POSTGRES_DB: fintech
+      POSTGRES_USER: fintech
+      POSTGRES_PASSWORD: fintech
+    volumes:
+      - lab_pgdata:/var/lib/postgresql/data
+    ports:
+      - "15432:5432"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fintech -d fintech"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.7.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_HEAP_OPTS: "-Xmx128m"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  kafka:
+    image: confluentinc/cp-kafka:7.7.0
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx256m"
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 9092"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+  redis:
+    image: redis:7-alpine
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  # Lo único que el estado de cuenta pide a party: nombres. Una persona genérica por id.
+  party-service:
+    image: python:3.12-alpine
+    command: ["python", "-I", "/stub/party-stub.py", "8080"]
+    volumes:
+      - ./party-stub.py:/stub/party-stub.py:ro
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  credit-portfolio-service:
+    image: fintech/credit-portfolio-service:latest
+    environment:
+      <<: *lab-app
+      OTEL_SERVICE_NAME: credit-portfolio-service
+    ports:
+      - "18087:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  charges-service:
+    image: fintech/charges-service:latest
+    environment:
+      <<: *lab-app
+      OTEL_SERVICE_NAME: charges-service
+      CREDIT_PORTFOLIO_SERVICE_URL: http://credit-portfolio-service:8080
+      CHARGES_ACCRUAL_CONCURRENCY: "2"
+      CHARGES_ACCRUAL_PARTITIONS: "12"
+    ports:
+      - "18088:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+
+  closing-service:
+    image: fintech/closing-service:latest
+    environment:
+      <<: *lab-app
+      OTEL_SERVICE_NAME: closing-service
+      CREDIT_PORTFOLIO_SERVICE_URL: http://credit-portfolio-service:8080
+      CLOSING_CUTOFF_CONCURRENCY: "2"
+      CLOSING_CUTOFF_MONITOR_INTERVAL: PT5S
+    ports:
+      - "18103:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  statement-service:
+    image: fintech/statement-service:latest
+    environment:
+      <<: *lab-app
+      OTEL_SERVICE_NAME: statement-service
+      STATEMENT_CONCURRENCY: "2"
+      STATEMENT_PARTITIONS: "12"
+    ports:
+      - "18106:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 640M
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      party-service:
+        condition: service_started
+
+volumes:
+  lab_pgdata:

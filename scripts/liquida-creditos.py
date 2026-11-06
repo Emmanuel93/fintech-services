@@ -55,7 +55,7 @@ def pago_interno(cuenta, obligado, monto, ref, red):
     cuerpo = json.dumps({"creditAccountId": cuenta, "obligorPartyId": obligado,
                          "amount": monto, "paymentMethod": "SPEI", "externalRef": ref})
     r = subprocess.run(
-        ["docker", "run", "--rm", "--network", red, "curlimages/curl:latest",
+        ["docker", "run", "--rm", "--network", red, "curlimages/curl:8.10.1",
          "-s", "-o", "/dev/null", "-w", "%{http_code}",
          "-X", "POST", "http://payments-service:8080/api/v1/payments",
          "-H", "Content-Type: application/json",

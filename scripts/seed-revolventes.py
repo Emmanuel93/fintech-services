@@ -35,6 +35,7 @@ import importlib.util
 import random
 import sys
 import time
+import urllib.error
 from collections import Counter
 from pathlib import Path
 
@@ -198,8 +199,11 @@ def _espera_la_cuenta(c, intentos=20, pausa=1.0):
     for _ in range(intentos):
         # `/credit/account` (singular) y no `/accounts`: el BFF devuelve la lista bajo ese nombre.
         cuentas = http("GET", f"{MOBILE}/credit/account", token=c.token) or []
-        if cuentas:
-            return cuentas[0].get("creditAccountId") or cuentas[0].get("id")
+        # Created and activated are two steps a second apart: a purchase sent against an account the BFF still
+        # sees as PENDING_ACTIVATION gets a 404 (2 Nov: both S3 lost that way). Wait for an active one.
+        activas = [a for a in cuentas if str(a.get("status", "ACTIVE")).upper() == "ACTIVE"]
+        if activas:
+            return activas[0].get("creditAccountId") or activas[0].get("id")
         time.sleep(pausa)
     return None
 
@@ -215,7 +219,16 @@ def comprar(c, monto, plazo=None):
     cuerpo = {"creditAccountId": c.credit_account_id, "amount": monto}
     if plazo is not None:
         cuerpo["termPeriods"] = plazo
-    http("POST", f"{MOBILE}/credit/dispose", cuerpo, token=c.token)
+    # The account activates asynchronously: for a few seconds after it appears the BFF may still answer
+    # 404 to a purchase. A short retry is part of the real journey; anything else is reported as it comes.
+    for intento in range(10):
+        try:
+            http("POST", f"{MOBILE}/credit/dispose", cuerpo, token=c.token)
+            break
+        except urllib.error.HTTPError as e:
+            if e.code != 404 or intento == 9:
+                raise
+            time.sleep(1.0)
     # Y se busca, porque la respuesta es `{"success": true}` y nada más.
     #
     # Antes esto devolvía esa respuesta tal cual y quien llamaba hacía
@@ -322,12 +335,29 @@ def escenario(nombre, rnd, catalogo):
             return None
         # El programa es masivo: se propone, alguien DISTINTO lo autoriza, y se otorga. Aquí el
         # maker-checker se cumple de verdad porque los dos pasos usan tokens distintos.
+        _S7[0] = c.credit_account_id
         return f"S7 · préstamo {c.credit_account_id[:8]} listo para el padrón de apoyo"
 
     return None
 
 
-def programa_de_apoyo(token_maker, token_checker):
+_S7 = [None]
+
+
+def _segmento_de(cuenta_id):
+    """The S7 account's product and branch: a contingency program reaches a segment (a branch hit by a disaster),
+    not the whole book. Without a filter it enrolled 72 of the 74 demo accounts with three periods each."""
+    if not cuenta_id:
+        return PERSONAL, None
+    import subprocess
+    r = subprocess.run(["docker", "exec", "-i", "fintech-services-postgres-1", "psql", "-U", "fintech", "-d", "fintech", "-At", "-F", "|",
+                        "-c", f"SELECT product_type, coalesce(origin_unit_code, '') FROM credit_portfolio.credit_accounts "
+                              f"WHERE credit_account_id = '{cuenta_id}'"], capture_output=True, text=True)
+    fila = (r.stdout.strip().split("|") + ["", ""])[:2]
+    return (fila[0] or PERSONAL), (fila[1] or None)
+
+
+def programa_de_apoyo(token_maker, token_checker, hoy=None):
     """
     Propone, autoriza y otorga un programa de contingencia (BK-32…BK-36).
 
@@ -339,11 +369,16 @@ def programa_de_apoyo(token_maker, token_checker):
     hace bien—, así que aquí van dos operadores distintos: riesgo propone, administración autoriza.
     Es la única forma de que la siembra ejercite el camino feliz en vez del de rechazo.
     """
-    hoy = __import__("datetime").date.today()
+    # The program is dated on the business day the demo is seeding (the clock sits months back), not on
+    # the host's date: otherwise the roster is granted in April under a program valid from November.
+    hoy = hoy or __import__("datetime").date.today()
+    producto, sucursal = _segmento_de(_S7[0])
     programa = http("POST", f"{BACKOFFICE}/relief-programs", {
-        "name": "Apoyo por contingencia — demo",
+        "name": f"Apoyo por contingencia — {sucursal or producto}",
         "reason": "NATURAL_DISASTER",
-        "deferredPeriods": 3,
+        "deferredPeriods": 2,
+        "productCode": producto,
+        "originUnitCode": sucursal,
         "validFrom": str(hoy),
         "validTo": str(hoy + __import__("datetime").timedelta(days=90)),
         "maxDaysDelinquent": 30,
@@ -354,13 +389,13 @@ def programa_de_apoyo(token_maker, token_checker):
         return None
     pid = programa["reliefProgramId"]
 
-    padron = http("GET", f"{BACKOFFICE}/relief-programs/{pid}/padron",
+    padron = http("GET", f"{BACKOFFICE}/relief-programs/{pid}/roster",
                   token=token_maker)
     http("POST", f"{BACKOFFICE}/relief-programs/{pid}/approve", None,
          token=token_checker)
     otorgado = http("POST", f"{BACKOFFICE}/relief-programs/{pid}/grant", None,
                     token=token_checker)
-    return pid, (padron or {}).get("cuentasElegibles", 0), (otorgado or {}).get("cuentasInscritas", 0)
+    return pid, (padron or {}).get("eligibleAccounts", 0), (otorgado or {}).get("cuentasInscritas", 0)
 
 
 def _token_staff(credenciales=None):
@@ -380,10 +415,14 @@ def main():
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--clientes", type=int, default=12)
     ap.add_argument("--solo", help="Escenarios a sembrar, separados por coma (S1,S2,…)")
-    ap.add_argument("--semilla", type=int, default=None,
+    # Not the portfolio seeder's 20260811: the same seed produces the same people, and origination rejects
+    # a CURP or phone already registered (2 Nov: four of twelve revolving scenarios lost to 409s).
+    ap.add_argument("--semilla", type=int, default=20260813,
                     help="Semilla del generador. OJO: fijarla reproduce las MISMAS personas, y el "
                          "dominio rechaza una CURP ya dada de alta — útil para depurar, no para "
                          "sembrar dos veces.")
+    ap.add_argument("--hoy", help="Fecha de negocio (AAAA-MM-DD) con la que se fecha el programa de apoyo; "
+                                  "por omisión, la del host")
     args = ap.parse_args()
 
     rnd = random.Random(args.semilla)
@@ -427,7 +466,8 @@ def main():
             if not riesgo:
                 raise RuntimeError("no hay ningún RISK_ANALYST activo: el maker-checker necesita "
                                    "dos personas y sembrar con una sola ejercita el rechazo")
-            apoyo = programa_de_apoyo(_token_staff(riesgo), token)
+            apoyo = programa_de_apoyo(_token_staff(riesgo), token,
+                                      __import__("datetime").date.fromisoformat(args.hoy) if args.hoy else None)
             if apoyo:
                 pid, elegibles, inscritas = apoyo
                 print(f"\n  ✓ programa de apoyo {pid[:8]} — {elegibles} elegibles, "

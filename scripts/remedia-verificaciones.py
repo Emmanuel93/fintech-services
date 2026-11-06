@@ -45,7 +45,7 @@ SEED_USER_ID = "00000000-0000-0000-0000-000000000001"
 
 def http(servicio, method, ruta, body=None):
     """Devuelve el cuerpo, o None si no fue 2xx. El código se conserva en `http.ultimo_codigo`."""
-    cmd = ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:latest",
+    cmd = ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:8.10.1",
            "-s", "-w", "\n%{http_code}", "-X", method,
            "-H", f"X-User-Id: {SEED_USER_ID}",
            f"http://{servicio}:8080{ruta}"]

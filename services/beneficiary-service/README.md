@@ -394,7 +394,12 @@ El token de la liga **nunca** viaja en un evento.
 
 **Consume** (fases 4-5): `scoring.scoring-completed`,
 `credit-portfolio.disposition-completed`, `credit-portfolio.disposition-rejected`,
-`product-catalog.product-activated`.
+`credit-portfolio.disposition-failed`, `product-catalog.product-activated`.
+
+`disposition-failed` (D63) termina en `FAILED`, con su motivo, la colocación cuyo SPEI a la beneficiaria
+no pudo hacerse o devolvió su banco. Se busca por la distribuidora, su línea y la disposición (o el
+monto). Cartera ya le devolvió el cupo a la línea y canceló el plan de esa colocación. Sin esto, la
+colocación seguía «depositando» un pago que nunca iba a llegar.
 
 El último es de F3b: mantiene al día `beneficiary.product_kyc_policies`, la proyección local de la
 política de KYC de cada producto. Va por evento y no por llamada al catálogo a propósito —resolver
@@ -481,3 +486,17 @@ y claves de configuración. Los **comentarios van en español**, que es donde vi
 Excepciones: los nombres que viajan en el contrato de un proveedor externo, y los términos
 regulatorios sin equivalente (`CLABE`, `CURP`, `RFC`, `CEP`). Detalle y guía de migración en
 [`docs/CONVENCION_IDIOMA.md`](../../docs/CONVENCION_IDIOMA.md).
+
+## La línea bloqueada, los rangos del producto y la comisión neteada
+
+- **Bloqueo en mora.** Cartera expone en la cuenta si la línea puede colocar hoy (`placementBlocked`,
+  `placementBlockReason`, `overdueStatementsAmount`): desde el primer día que un estado de cuenta vence sin pagar
+  hasta que paga lo vencido, el mismo día. `PlacementOrchestrator.create` lo niega con 422 («Tu línea está bloqueada
+  por atraso: paga lo vencido para volver a colocar») y `DispositionRejectedListener` consume
+  `credit-portfolio.disposition-rejected`: una colocación que cartera rechazó (bloqueo, monto o plazo fuera del
+  producto, sin disponible, listas) termina `FAILED` con el motivo en palabras de la distribuidora. Antes nadie
+  consumía ese rechazo y la colocación se quedaba «depositando».
+- **Plazos.** De 12 a 24 quincenas (`term-fortnights`): abajo de 12 el 18 % de lo cobrado rebasa el interés del plan.
+- **Comisión.** El resumen de la línea (`/distributor/line-summary`) usa la tasa del producto que trae cartera
+  (`distributorCommissionRate`) y dice si está bloqueada, por qué y cuánto debe; lo que entrega es lo que cobra
+  menos su comisión, porque se le descuenta de la entrega (`NETTED`).

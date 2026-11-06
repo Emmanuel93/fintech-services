@@ -42,7 +42,7 @@ REGIMEN_EMPRESA = ["601"]                 # general de ley personas morales
 
 
 def curl(args, timeout=60):
-    r = subprocess.run(["docker", "run", "--rm", "--network", RED, "curlimages/curl:latest", "-s", *args],
+    r = subprocess.run(["docker", "run", "--rm", "--network", RED, "curlimages/curl:8.10.1", "-s", *args],
                        capture_output=True, text=True, timeout=timeout)
     return r.stdout
 

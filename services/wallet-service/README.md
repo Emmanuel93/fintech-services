@@ -80,6 +80,11 @@ flowchart LR
 > en vez de descartar el evento: un saldo visible que se corrige es mejor que un monedero vacío sin
 > explicación.
 
+> La vista copia el estado del crédito tal como lo publica cartera, así que acepta todos los estados
+> de cartera (changeset 009), incluido `CANCELLED`: el crédito a plazos cuyo único desembolso no pudo
+> hacerse (D63). Antes sólo conocía seis estados. Un estado nuevo fallaba, se reintentaba y se iba a la
+> DLT, y mientras tanto detenía el tópico.
+
 ---
 
 ## 3. Flujo de una disposición

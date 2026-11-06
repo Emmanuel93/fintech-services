@@ -125,6 +125,10 @@ sequenceDiagram
     R-->>ACC: risk.assessment-updated
 ```
 
+Un `balance-updated` con la cuenta `SETTLED` o `CANCELLED` cierra el perfil y libera su reserva. `CANCELLED`
+es el crédito cuyo único desembolso no se hizo (D63): nunca prestó nada, así que no queda pérdida que
+estimar.
+
 ---
 
 ## 4. API REST — `/api/v1/risk`

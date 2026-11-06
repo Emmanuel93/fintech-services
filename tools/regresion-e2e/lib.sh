@@ -141,25 +141,30 @@ espera() {
 
 # ── Reloj del backend ────────────────────────────────────────────────────────
 
-# devengar_quincenas N — retrocede el reloj de devengo y lo corre día por día.
+# devengar_quincenas N [cuenta] — retrocede el reloj de devengo y lo corre día por día.
 # El devengo es idempotente por día: sin `?date=`, treinta llamadas producen un día de interés.
 # Por eso esto no se puede hacer por el BFF (su proxy no acepta `?date=`).
+# Con `cuenta`, retrocede sólo ese calendario: rebobinar toda la cartera volvía a devengar días que
+# las demás cuentas ya tenían (fue lo que produjo los cargos fantasma del 29–31 de octubre).
+# Las fechas son de la zona de negocio, no del reloj de la máquina.
 devengar_quincenas() {
   # Dos `local` separados a propósito: bash expande todas las palabras del `local` antes de
   # asignar ninguna, así que `dias=$((quincenas * 14))` en la misma línea mira una `quincenas`
   # que aún no existe y aborta con "unbound variable" bajo `set -u`.
   local quincenas="$1"
+  local cuenta="${2:-}"
   local dias=$((quincenas * 14))
-  local inicio; inicio=$(date -v-"${dias}"d +%Y-%m-%d)
-  log "Devengo: $quincenas quincenas ($dias días) desde $inicio"
+  local inicio; inicio=$(TZ=America/Mexico_City date -v-"${dias}"d +%Y-%m-%d)
+  log "Devengo: $quincenas quincenas ($dias días) desde $inicio${cuenta:+ · cuenta $cuenta}"
 
-  svc POST "$CHARGES/internal/test-support/rewind-accrual-schedules?date=$inicio" >/dev/null
+  local alcance=""; [ -n "$cuenta" ] && alcance="&creditAccountId=$cuenta"
+  svc POST "$CHARGES/internal/test-support/rewind-accrual-schedules?date=$inicio$alcance" >/dev/null
 
   # Un solo contenedor para los N días. Fechas precalculadas en el host porque BusyBox date
   # no tiene aritmética de fechas.
   local fechas="" d
   for d in $(seq 0 $((dias - 1))); do
-    fechas="$fechas $(date -v-$((dias - d))d +%Y-%m-%d)"
+    fechas="$fechas $(TZ=America/Mexico_City date -v-$((dias - d))d +%Y-%m-%d)"
   done
   svc_sh "for f in $fechas; do
             curl -sS -o /dev/null -X POST '$CHARGES/internal/test-support/run-daily-accrual?date='\$f;

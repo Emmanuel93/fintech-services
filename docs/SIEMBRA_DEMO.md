@@ -4,10 +4,20 @@
 **⚠️ Borra los volúmenes.** Todo lo que haya en la base se pierde.
 
 ```bash
-./scripts/reinicia-y-siembra.sh                                  # 100 clientes, 10 distribuidoras
-./scripts/reinicia-y-siembra.sh --sin-build                      # si las imágenes están al día
-./scripts/reinicia-y-siembra.sh --clientes 45 --distribuidoras=5
+./scripts/reinicia-y-siembra.sh                                  # 100 clientes, 10 distribuidoras, 8 meses de vida (~1 h 15 min)
+./scripts/reinicia-y-siembra.sh --mini                           # 30 clientes, 5 distribuidoras, 4 meses (~25 min)
+./scripts/reinicia-y-siembra.sh --build                          # reconstruye las imágenes antes, en serie
+./scripts/reinicia-y-siembra.sh --clientes 45 --distribuidoras=5 --meses=5
 ```
+
+Son **datos mock para enseñarle al cliente**: muchos y con historia, pero correctos, porque cada
+saldo tiene sus asientos, cada póliza su hecho y cada estado de cuenta su libro. Es un objetivo
+distinto del de las **pruebas E2E del ciclo de crédito** (`tools/ciclo-credito/`), y no son la base
+de esas pruebas: el E2E arranca de la plataforma virgen (`reinicia-entorno.sh --solo-plataforma`) con
+su propia configuración fija (`tools/ciclo-credito/configura.py`) y sus propias altas
+(`tools/ciclo-credito/altas.py`), y no importa ningún script de esta siembra. Lo único que se comparte
+es el motor que corre el reloj día por día: la demo lo usa, con su personal (`motor.PERSONAL_DEMO`),
+para hacer vivir su cartera.
 
 ---
 
@@ -15,8 +25,8 @@
 
 **Nada se inserta. Todo se origina.** Cada persona pasa por OTP, KYC, alta, solicitud, scoring,
 decisión, oferta, contrato y firma, igual que lo haría desde el teléfono. Cada pago entra por el
-canal de pagos, cada mora sale de correr el envejecido, cada póliza de que contabilidad consuma un
-evento.
+canal de pagos, cada mora sale de **no pagar** con el reloj de negocio corriendo día por día, cada
+póliza de que contabilidad consuma un evento con la fecha del hecho.
 
 No es purismo. Una inserción directa produce estados que el dominio no genera —una distribuidora sin
 rol, un beneficiario sin vínculo, una revolvente con calendario de cuenta— y ésos son exactamente
@@ -29,23 +39,20 @@ aquí, tampoco lo aceptaría la app; que la siembra falle es información.
 
 | # | Paso | Script | Por qué va ahí |
 |---|---|---|---|
-| 1 | Reconstruir imágenes | — | Ver §Trampas |
-| 2 | Bajar y **borrar volúmenes** | — | |
-| 3 | Levantar el stack, recargar el gateway, esperar | — | nginx cachea las IPs al cargar; recrear contenedores las cambia |
-| 4 | Estructura comercial | `seed-sales-org.py` | 4 regiones, 8 zonas, 22 sucursales, 52 ejecutivos. Todo lo demás cuelga de aquí |
-| 5 | Un responsable por nivel | `seed-commercial-staff.py` | Para poder probar el alcance por subárbol |
-| 6 | Roles funcionales | `seed-demo-staff.py` | Analista, ejecutivo, comité, producto — el acceso rápido de la consola |
-| 7 | Clientes y cartera | `seed-portfolio.py` | Cada cliente se cuelga de un ejecutivo, que ya debe existir |
-| 8 | Documentos del expediente | `seed-expedientes.py` | Necesita prospectos con solicitud |
-| 9 | **Distribuidoras B2B2C** | `seed-distribuidoras.py` | Cuelgan de ejecutivos (paso 4) y su mora debe existir antes del paso 10 |
-| 10 | Ciclo de vida | `seed-ciclo-credito.py` | Devengo, pagos, mora, promesas, reestructuras, quebrantos |
-| 11 | Navegación por nivel | — | Para que la bitácora tenga entradas de todos los perfiles |
-| 12 | Verificaciones | `verifica-identidad-auditoria.py`, `verifica-distribuidoras.py`, `repara-cartera-sin-ejecutivo.py` + `verifica-cuadre.py` | |
-| 13 | Respaldo | `respalda-siembra.sh` | La siembra cuesta una hora; perderla por un `down -v` es evitable |
+| 1 | Entorno virgen con configuración: (reconstruir imágenes), bajar y **borrar volúmenes**, levantar, recargar el gateway, esperar, estructura comercial, personal | `reinicia-entorno.sh` → `seed-sales-org.py`, `seed-commercial-staff.py`, `seed-demo-staff.py`, `01-seed.sh` del backoffice | Todo lo demás cuelga de la estructura y se autentica contra identity. nginx cachea las IPs al cargar; recrear contenedores las cambia |
+| 2 | **El reloj de negocio se pone meses atrás** | `tools/ciclo-credito/corre.py reloj AAAA-MM-DD` | La fecha de activación decide desde cuándo devenga y cuándo corta cada crédito: para tener historia hay que originar en el pasado, no inventar asientos |
+| 3 | Clientes y cartera | `seed-portfolio.py --mora 0` | Cada cliente se cuelga de un ejecutivo, que ya debe existir. Sin envejecer nada a mano |
+| 4 | Documentos del expediente | `seed-expedientes.py` | Necesita prospectos con solicitud |
+| 5 | **Distribuidoras B2B2C** | `seed-distribuidoras.py --sin-envejecer` | Cuelgan de ejecutivos (paso 1); colocan el día de la originación |
+| 6 | Tarjetas y líneas | `seed-revolventes.py` | Compras, meses sin intereses, BNPL, salto de pago |
+| 7 | Perfiles fiscales | `seed-perfiles-fiscales.py` | Antes del ciclo, que es quien factura |
+| 8 | **Ciclo de vida, día por día hasta ayer** | `seed-ciclo-credito.py --desde … --hasta …` | Cada día: pagos de quien paga; cada noche: foto → devengo → cierre → corte → estados de cuenta → riesgo → cobranza; fin de mes: facturación y cierre contable; día 5: comisiones. Al terminar, reloj real |
+| 9 | Navegación por nivel | — | Para que la bitácora tenga entradas de todos los perfiles |
+| 10 | Verificaciones | `verifica-identidad-auditoria.py`, `verifica-distribuidoras.py`, `repara-cartera-sin-ejecutivo.py` + `verifica-cuadre.py`, `verifica-contabilidad.py`, `tools/ciclo-credito/concilia.sql` | |
+| 11 | Respaldo | `respalda-siembra.sh` | La siembra cuesta una hora; perderla por un `down -v` es evitable |
 
-**El 9 antes del 10 no es cosmético.** Los atrasos de las distribuidoras tienen que estar puestos
-cuando corra el envejecido; al revés, las diez salen al corriente y el caso «distribuidora morosa»
-no existe.
+**El reloj va antes de originar, y el ciclo después de todo lo que origina.** Lo que se origine con
+el reloj ya devuelto al presente nace hoy y no tiene historia que contar.
 
 ---
 
@@ -105,32 +112,34 @@ que le da a una línea algo que vencer.
 **Del beneficiario, sólo el expediente y su vínculo.** No tiene cuenta de crédito, ni mora, ni ECL,
 ni reporte a buró: quien responde por el saldo íntegro es la distribuidora.
 
-Los diez estados sembrados, uno por distribuidora:
+Los perfiles sembrados deciden cuánto coloca cada distribuidora (con disponible, poco dispuesta,
+línea agotada, sin disponer). **Su mora ya no se siembra aquí**: con `--sin-envejecer` ningún
+calendario se retrocede; la produce el ciclo de vida (paso 8) cuando a una distribuidora le toca
+dejar de pagar sus cortes quincenales, y los días de atraso los cuenta la foto diaria de cartera
+desde la cuota de colocación más vieja sin pagar.
 
-| Estado | Cómo se produce |
-|---|---|
-| Al corriente, con disponible | coloca y paga |
-| Al corriente, poco dispuesto | coloca menos |
-| Línea agotada | coloca cerca del límite |
-| DPD 30 / 60 / 90 | se envejece el calendario de una colocación 60 / 90 / 120 días |
-| En cobranza con promesa | atraso + promesa de pago |
-| Reestructurada | convenio ejecutado |
-| Quebrantada | atraso de 230 días |
-| Aprobada sin disponer | línea activa, saldo cero |
+> **La mora no se escribe: se produce.** Un DPD escrito a mano se vería idéntico en la pantalla sin
+> haber pasado por la regla que lo produce, y entonces no probaría nada. Retroceder un calendario
+> (`age-schedule`) producía DPD reales pero intereses, cortes y estados de cuenta incoherentes con
+> ellos: por eso se dejó de usar en la demo (sigue disponible para la siembra suelta).
 
-> **La mora no se escribe: se produce.** No se pone un número de días en la cuenta; se corre el
-> calendario de una colocación hacia atrás y se deja que el envejecido **cuente** los días desde la
-> cuota vencida más antigua. Un DPD escrito a mano se vería idéntico en la pantalla sin haber
-> pasado por la regla que lo produce, y entonces no probaría nada.
->
-> Por eso los DPD observados son 29, 39, 44, 59, 89 y 199 y no redondos: el envejecimiento menos el
-> mes de gracia de la primera cuota. Que no sean redondos **es la señal de que son reales**.
+### `seed-ciclo-credito.py` — que la cartera viva y la contabilidad tenga qué contar
 
-### `seed-ciclo-credito.py` — que la contabilidad tenga qué contar
+Corre el reloj de negocio **día por día** desde la fecha en que se originó la cartera hasta ayer, con
+el motor de `tools/ciclo-credito/motor.py` y un plan aleatorio de semilla fija, repartido **por
+familia** (préstamos, tarjetas y líneas, distribuidoras) para que cada una tenga de todo: una parte
+liquida, otra paga con algún atraso (y paga moratorios), otra deja de pagar y se recupera (los
+revolventes pagan lo que dejaron de pagar y siguen), otra negocia (promesa, reestructura), otra cae en
+mora al final de la historia y otra nunca paga (y, con siete meses, se quebranta). Las tarjetas y
+líneas compran cada pocas semanas (alguna compra a meses en tarjeta) y las distribuidoras colocan a
+sus clientes a lo largo de la historia. Cada noche corre la
+misma cadena que el cron de las 00:05 —foto, devengo, cierre de cartera, corte, estados de cuenta,
+riesgo, cobranza— y a fin de mes la facturación y el cierre del período contable.
 
-Devengo de 30 días, liquidaciones, abonos parciales, mora, promesas, reestructuras, quebrantos y la
-reconciliación de la sucursal de origen. Sin esto la contabilidad enseña media balanza en ceros y no
-se puede distinguir «esta cuenta no se usa» de «esta cuenta no se está posteando».
+Ya no usa `rewind-accrual-schedules` ni `run-daily-accrual?date=` ni `shift-due-date`: el interés
+sale de la foto de cada día, la mora de no pagar, la reserva del recálculo nocturno. Por eso la
+cadena entera concilia al terminar (`tools/ciclo-credito/concilia.sql`): libro = saldos, cargos =
+cartera, foto = cargo, corte = foto, estado de cuenta = libro, contabilidad = fuente.
 
 ---
 
@@ -215,5 +224,10 @@ consulta falla en silencio.
 **`/internal/*` no se enruta desde el gateway** — es soporte de pruebas, no API. Se llama por la red
 de Docker. Llamarlo por el gateway devuelve 404 y el script lo daría por hecho.
 
-**La semilla es nueva en cada corrida.** Repetirla genera las mismas CURP y teléfonos, y el dominio
-—con razón— rechaza al segundo con 409.
+**Cada sembrador tiene su propia semilla fija, y las tres son distintas.** `seed-portfolio.py` usa 20260811,
+`seed-distribuidoras.py` 20260812 y `seed-revolventes.py` 20260813: con la misma semilla los tres generaban
+las mismas personas, y el dominio —con razón— rechaza una CURP o un teléfono ya registrados con 409 (el 2 de
+noviembre se perdieron así cuatro de los doce escenarios revolventes y un beneficiario). Una semilla fija
+reproduce la misma cartera en un entorno virgen; para sembrar dos veces sobre el mismo entorno hay que pasar
+`--semilla` distinta. `seed-revolventes.py --hoy` fecha el programa de apoyo con el día de negocio en que se
+siembra (el reloj está meses atrás), no con el del host.

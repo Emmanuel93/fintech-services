@@ -37,6 +37,19 @@ flowchart LR
 - **Métricas:** cada servicio expone `/actuator/prometheus` (Micrometer); Prometheus lo scrapea.
 - **Logs:** JSON estructurado a stdout con `trace_id`/`corrId` para correlacionar con la traza; Fluent-bit los envía a Elasticsearch.
 
+### El agente se enciende con el perfil
+
+El agente instrumenta cada clase que carga: unos 50 MB más de metaspace y heap por servicio. Sin el colector (sin
+`--profile observability`) todos los exportadores están en `none` y no produce nada, así que queda **apagado**
+(`OTEL_JAVAAGENT_ENABLED=false`) y cada servicio cabe en su límite. Se enciende junto con el perfil:
+
+```bash
+OTEL_JAVAAGENT_ENABLED=true OTEL_TRACES_EXPORTER=otlp docker compose --profile observability up -d
+```
+
+La memoria de la JVM está acotada en el `Dockerfile` (heap 50 % del límite, metaspace 192 MB, caché de código 64 MB,
+memoria directa 64 MB, Serial GC, sólo C1): con el agente encendido el metaspace sube a ~150 MB y sigue dentro del tope.
+
 ## 3. Correlación
 
 El `traceparent` del gateway + el `X-Correlation-Id` (MDC en cada servicio) atan una petición extremo a extremo: de la traza en Tempo al log en Elasticsearch al panel en Grafana. Es lo que permite responder "qué pasó con esta petición" sin adivinar por hora.

@@ -62,6 +62,33 @@ Evento entrante (charge-applied / payment-applied)
 | `ORDINARY_INTEREST` | `accruedInterestBalance` |
 | `MORATORIUM_INTEREST`, `IVA`, `OPENING_FEE`, `ADMIN_FEE`, cualquier otro | `penaltyBalance` |
 
+### El plan de una colocación, como estaba al corte
+
+Cada cuota guarda el día de negocio en que quedó pagada (`installments.paid_on`, migración `040`), y lo pierde si
+un pago devuelto la reabre. La vista del estado de cuenta (`StatementViewService`) lee el plan de cada colocación y
+de cada compra a meses **a la fecha de corte**: una cuota pagada después del corte todavía se debía, y una
+disposición hecha después es del siguiente estado. Una colocación es «liquidada en el periodo» si su última cuota se
+pagó dentro del periodo (`settledOn`); antes se juzgaba por el vencimiento de su última cuota, y una pagada por
+adelantado se reportaba como liquidada en cada estado hasta esa fecha. Las cuotas pagadas antes de que existiera la
+columna se cuentan pagadas en cualquier fecha y se juzgan por su último vencimiento.
+
+### Mora de cuentas por estado de cuenta (tarjeta, línea, distribuidora)
+
+Cada corte deja una cuota del ciclo (`installments`, `schedule_id` = cuenta) con lo que el estado pide, su
+corte (`cutoff_date`) y su fecha límite. Qué tanto de cada estado está pagado lo decide `StatementCoverage`:
+
+- un pago cubre sólo los estados **emitidos antes de su fecha valor** (corte estrictamente anterior), del más
+  antiguo al más nuevo;
+- un pago anterior a un corte ya bajó el saldo de ese estado: no cuenta también para lo que el estado pide;
+- el sobrante de un pago bajó el saldo; **no adelanta** el mínimo de los estados por venir;
+- las devoluciones (`PAYMENT_RETURNED:<orden>`) se restan del pago que deshacen.
+
+La misma regla la usan la foto diaria (`account_day_snapshots`: capital vencido, cuotas vencidas, vencimiento
+más antiguo, días de atraso, y aparte lo que vencía ese mismo día y quedó sin pagar, `statement_due_unpaid`), la
+conciliación de pagos y el job de mora. El atraso de un estado cortado en D es el vencido de la foto de D más ese
+monto: el estado se emite cuando D ya terminó. Antes se comparaban pagos y mínimos
+acumulados, y pagar el total de un corte cubría los mínimos de los siguientes (D25, E2E E34).
+
 ---
 
 ## Versionado de saldo (balanceVersion)

@@ -45,7 +45,7 @@ def interno(servicio, ruta):
     # Este helper se traga los errores, así que sin la cabecera las comprobaciones sobre cartera
     # —incluida S4, la que protege el modelo— habrían pasado sin mirar nada.
     r = subprocess.run(
-        ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:latest",
+        ["docker", "run", "--rm", "--network", RED_DOCKER, "curlimages/curl:8.10.1",
          "-s", "-H", f"X-User-Id: {SEED_USER_ID}",
          f"http://{servicio}:8080{ruta}"], capture_output=True)
     try:

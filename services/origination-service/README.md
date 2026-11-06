@@ -175,18 +175,25 @@ stateDiagram-v2
     OFFER_ACCEPTED --> PENDING_SIGNATURE : contract/generate
     PENDING_SIGNATURE --> CONTRACT_SIGNED : contract/sign
     CONTRACT_SIGNED --> DISBURSED : credit-account-activated
+    DISBURSED --> DISBURSEMENT_FAILED : credit-account-cancelled (D63)
+    CONTRACT_SIGNED --> DISBURSEMENT_FAILED : credit-account-cancelled (D63)
 
     DRAFT --> CANCELLED
     PENDING_SCORING --> CANCELLED
     UNDER_MANUAL_REVIEW --> CANCELLED
 
     DISBURSED --> [*]
+    DISBURSEMENT_FAILED --> [*]
     REJECTED --> [*]
     OFFER_REJECTED --> [*]
     OFFER_EXPIRED --> [*]
     FAILED --> [*]
     CANCELLED --> [*]
 ```
+
+`DISBURSEMENT_FAILED` (D63) es la solicitud cuyo crédito cartera canceló porque su único desembolso no
+pudo hacerse (`credit-portfolio.credit-account-cancelled`). Es terminal y queda fuera del índice de
+solicitud activa por producto, así que la persona puede volver a pedir (changeset 019).
 
 Terminales (`ApplicationStatus.isTerminal()`): `DISBURSED`, `REJECTED`, `OFFER_REJECTED`,
 `OFFER_EXPIRED`, `FAILED`, `CANCELLED`. `APPROVED` **no** es terminal: el flujo sigue a oferta.
@@ -202,6 +209,7 @@ Terminales (`ApplicationStatus.isTerminal()`): `DISBURSED`, `REJECTED`, `OFFER_R
 | **OM-04** | La oferta expira al pasar `validUntil` |
 | **CM-04** | El contrato es inmutable después de la firma |
 | **CM-06** | La CLABE se valida antes de firmar — **con su dígito verificador**, no sólo el formato |
+| **CAT** | El CAT de la oferta (Banxico C21/2009) se calcula en **porcentaje**: el catálogo guarda las tasas como fracción (0.32) y `CatCalculator.percent` las convierte; el plan se valora con su frecuencia (52 semanal, 26 quincenal, 12 mensual, como la amortización de cartera) y la comisión de apertura descontada de lo entregado. En revolvente, `(1 + tasa/m)^m − 1` con `m` los pagos al año del producto (Circular 21/2009, 5.4.1 y 5.1 f): la línea de distribuidora, a 24 quincenas, cuesta 153.9 %; valorada mensual leía 149.5 %. Viaja con el contrato a la cuenta (`credit-product-creation-requested.cat`) y el estado de cuenta lo imprime |
 
 ---
 

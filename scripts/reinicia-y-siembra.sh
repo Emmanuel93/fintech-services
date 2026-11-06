@@ -1,231 +1,113 @@
 #!/usr/bin/env bash
 #
-# Reinicia el stack desde cero y regenera toda la data de demostración.
+# Reinicia el stack desde cero y regenera toda la data de DEMOSTRACIÓN: datos mock para enseñarle al
+# cliente, muchos y con historia, pero correctos: cada saldo explicado por sus asientos, cada póliza
+# por su hecho, cada estado de cuenta por su libro. Es un objetivo distinto del de las pruebas E2E
+# (`tools/ciclo-credito`), que sólo siembran configuración y hacen todo por las operaciones.
 #
-# Un backoffice contra una base a medias no se puede revisar, y una bitácora sembrada a medias es
-# peor: parece que el sistema no identifica a nadie cuando lo que pasa es que la data se creó antes
-# de que existiera el campo. Este script deja el entorno en un estado del que uno se puede fiar,
-# recorriendo el mismo camino que recorrería una persona.
+# Cómo consigue historia sin inventarla: pone el reloj de negocio MESES atrás, origina ahí la cartera
+# por el journey real, y después la hace vivir día por día con la cadena nocturna real (foto, devengo,
+# cierre, corte, estados de cuenta, riesgo, cobranza, facturación, cierre contable) hasta ayer. Nada
+# se inserta, ningún calendario se retrocede: la mora nace de no pagar.
 #
 # ⚠️  BORRA LOS VOLÚMENES. Todo lo que haya en la base se pierde y no hay vuelta atrás.
 #
-#     ./scripts/reinicia-y-siembra.sh              # ciclo completo (~30 min)
-#     ./scripts/reinicia-y-siembra.sh --mini       # siembra chica, auditable a mano (~12 min)
-#     ./scripts/reinicia-y-siembra.sh --sin-build  # si las imágenes ya están al día
-#     ./scripts/reinicia-y-siembra.sh --clientes 20
+#     ./scripts/reinicia-y-siembra.sh              # ciclo completo (~1 h 15 min)
+#     ./scripts/reinicia-y-siembra.sh --mini       # siembra chica, auditable a mano (~25 min)
+#     ./scripts/reinicia-y-siembra.sh --build      # reconstruye las imágenes antes (en serie)
+#     ./scripts/reinicia-y-siembra.sh --clientes 20 --meses 4
 #
-# `--sin-build` sólo vale si no tocaste código **ni migraciones**. Las migraciones viajan dentro de
-# la imagen, así que saltarse el build tras editar una siembra la base con la versión anterior: el
-# esquema queda bien y el dato que la migración debía dejar, no. Cuesta un rato de build y ahorra
-# media hora de perseguir un campo vacío que en el fuente sí está.
+# Sin `--build` se usan las imágenes como están. Las migraciones viajan dentro de la imagen: tras
+# editar código o migraciones hay que reconstruir, o la siembra corre sobre la versión anterior.
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 CLIENTES=100
-# Meses de historia contable, contando el actual. Tres es el mínimo que enseña algo: dos cerrados
-# para comparar y el corriente abierto para trabajar.
-MESES_HISTORIA=3
+# Meses de historia. Ocho alcanzan para que exista todo el recorrido: mora de 30, 60, 90 y 180+
+# días, promesas, reestructuras y quebrantos reales (el umbral de quebranto son 181 días de atraso, y
+# la primera cuota vence un mes después del alta).
+MESES_HISTORIA=8
 DISTRIBUIDORAS=10
 BENEFICIARIOS=5
-BUILD=1
+REVOLVENTES=12
+BUILD=""
 EQUILIBRADO=""
 for arg in "$@"; do
   case "$arg" in
-    --sin-build) BUILD=0 ;;
-    --clientes)  shift; CLIENTES="${1:-100}" ;;
+    --build)      BUILD="--build" ;;
+    --sin-build)  BUILD="" ;;
+    --clientes)   shift; CLIENTES="${1:-100}" ;;
     --clientes=*) CLIENTES="${arg#*=}" ;;
     --meses=*)    MESES_HISTORIA="${arg#*=}" ;;
-    # Siembra chica, para auditar a mano.
-    #
-    # Con cien clientes y tres meses de devengo diario salen ~15 000 pólizas: la consola se ve bien
-    # y ningún número se puede verificar con una calculadora. Este preset baja el volumen a un orden
-    # que una persona puede recorrer entero —5 distribuidoras x 5 clientes, y unos cinco créditos de
-    # cada producto B2C— sin quitar ningún caso: sigue habiendo mora, quebranto, pagos y cierres.
-    #
-    # Dos meses en vez de tres porque el tercero multiplica las pólizas sin añadir un caso nuevo:
-    # con uno cerrado y uno abierto ya se puede comparar y ver un cierre.
+    # Siembra chica, para auditar a mano: 5 distribuidoras x 5 clientes y unos cinco créditos de cada
+    # producto, cuatro meses de vida. Sigue habiendo mora, pagos, cortes y cierres; no hay quebrantos
+    # (necesitan 181 días de atraso).
     --mini)
-      CLIENTES=30; DISTRIBUIDORAS=5; BENEFICIARIOS=5
-      MESES_HISTORIA=2; EQUILIBRADO="--equilibrado" ;;
+      CLIENTES=30; DISTRIBUIDORAS=5; BENEFICIARIOS=5; REVOLVENTES=7
+      MESES_HISTORIA=4; EQUILIBRADO="--equilibrado" ;;
     --distribuidoras=*) DISTRIBUIDORAS="${arg#*=}" ;;
     --beneficiarios=*)  BENEFICIARIOS="${arg#*=}" ;;
   esac
 done
 
 paso() { printf "\n\033[1m▸ %s\033[0m\n" "$1"; }
+RELOJ="python3 tools/ciclo-credito/corre.py"
 
-# El orden importa y no es arbitrario: identity tiene que estar en pie antes que nadie porque todo
-# lo demás se autentica contra él, y la estructura comercial antes que la cartera porque cada
-# cliente se cuelga de un ejecutivo que debe existir.
+# El primer día del mes que arranca la historia, y ayer, en la zona de negocio.
+read -r INICIO AYER <<<"$(python3 - "$MESES_HISTORIA" <<'EOF'
+import datetime, sys
+from zoneinfo import ZoneInfo
+hoy = datetime.datetime.now(ZoneInfo("America/Mexico_City")).date()
+primero = hoy.replace(day=1)
+for _ in range(int(sys.argv[1]) - 1):
+    primero = (primero - datetime.timedelta(days=1)).replace(day=1)
+print(primero.isoformat(), (hoy - datetime.timedelta(days=1)).isoformat())
+EOF
+)"
+echo "  historia: del $INICIO a $AYER · $CLIENTES clientes · $DISTRIBUIDORAS distribuidoras × $BENEFICIARIOS · $REVOLVENTES revolventes"
 
-if [ "$BUILD" = "1" ]; then
-  paso "Reconstruyendo las imágenes de los servicios tocados"
-  # Secuencial a propósito: en paralelo, cuatro builds de Gradle a la vez agotan la memoria de la
-  # VM de Docker y el fallo se manifiesta como un compilador que muere sin explicar por qué.
-  # La lista se queda corta sola, y falla de la peor manera: el servicio arranca, contesta, y sirve
-  # código viejo. Un endpoint agregado hace un rato devuelve 404 y parece un problema de rutas; un
-  # campo nuevo del evento llega nulo y el consumidor cae a su valor por defecto sin quejarse. Se
-  # perdió una tarde en eso con `wallet` y `commission`, que no estaban aquí.
-  #
-  # Ante la duda, agrega el servicio: reconstruir de más cuesta minutos, y depurar una imagen
-  # rezagada cuesta la confianza en todo lo que se vio en pantalla.
-  #
-  # Por eso **ya no hay lista**. La había, escrita a mano, y se quedó corta exactamente como
-  # advertía el párrafo de arriba: faltaban `beneficiary-service` —que llevaba semanas con una
-  # imagen que ni siquiera compilaba—, `payments-service`, `channels-service`,
-  # `configuration-service` y el propio `gateway-service`, cuya imagen era de junio contra un
-  # fuente de agosto. Se deriva de `docker-compose.yml`: todo servicio con sección `build` entra,
-  # y agregar un servicio nuevo al compose lo mete aquí sin que nadie se acuerde de tocar esto.
-  #
-  # No cuesta lo que parece: Docker cachea por contenido, así que un servicio sin cambios se
-  # resuelve en segundos y sólo recompila lo que de verdad se movió.
-  SERVICIOS=$(docker compose config --format json 2>/dev/null \
-    | python3 -c "import sys,json;c=json.load(sys.stdin);print(' '.join(sorted(k for k,v in c.get('services',{}).items() if v.get('build'))))" 2>/dev/null || true)
-  if [ -z "$SERVICIOS" ]; then
-    echo "  ✗ no se pudo leer la lista de servicios de docker-compose.yml" >&2
-    exit 1
-  fi
-  echo "    $(echo "$SERVICIOS" | wc -w | tr -d ' ') servicios con imagen propia"
-  for s in $SERVICIOS; do
-    printf "    %s… " "$s"
-    # `cmd && echo ok` NO aborta con `set -e`: la excepción POSIX dice que en una lista `&&` sólo
-    # cuenta el último comando. Así estaba escrito, y un build que moría se tragaba en silencio —
-    # el script seguía, levantaba el stack con la imagen anterior, y el síntoma aparecía horas
-    # después como un endpoint que responde 404 con el código delante. Exactamente lo que este
-    # bloque advierte en el comentario de arriba y no hacía cumplir.
-    #
-    # El reintento es porque el fallo típico no es de código: cuatro builds de Gradle seguidos
-    # agotan la memoria de la VM de Docker y el compilador muere sin explicar por qué. A la segunda
-    # pasa. Si falla dos veces, se para y se enseña el error en vez de sembrar sobre código viejo.
-    if docker compose build "$s" >"/tmp/build-$s.log" 2>&1; then
-      echo "ok"
-    elif docker compose build "$s" >>"/tmp/build-$s.log" 2>&1; then
-      echo "ok (al segundo intento)"
-    else
-      echo "FALLÓ"
-      echo "  ✗ $s no compiló. Últimas líneas de /tmp/build-$s.log:" >&2
-      tail -25 "/tmp/build-$s.log" >&2
-      exit 1
-    fi
-  done
-fi
+# El orden importa: identity antes que nadie (todo se autentica contra él), la estructura comercial
+# antes que la cartera (cada cliente cuelga de un ejecutivo), el reloj antes de originar (la fecha
+# de activación es la que decide desde cuándo devenga y cuándo corta).
+./scripts/reinicia-entorno.sh $BUILD
 
-paso "Bajando el stack y BORRANDO los volúmenes"
-docker compose down -v >/dev/null 2>&1
-echo "    volúmenes eliminados"
-
-paso "Levantando el stack"
-docker compose up -d >/dev/null 2>&1
-
-# nginx resuelve TODOS los upstreams al cargar la configuración y cachea las IPs. Al recrear
-# contenedores las IPs cambian, y el gateway sigue apuntando a las viejas: el síntoma es un 502 en
-# todo el backoffice con los servicios perfectamente arriba, que se diagnostica como «el BFF está
-# caído» y no lo está. Recargar es barato; perseguir ese 502 no.
-paso "Recargando el gateway para que resuelva las IPs nuevas"
-for i in $(seq 1 20); do
-  docker compose exec -T gateway-service openresty -s reload >/dev/null 2>&1 && break
-  sleep 3
-done
-
-# Y se comprueba que de verdad contesta antes de seguir. Sembrar contra un gateway que no resuelve
-# produce cientos de fallos que parecen de la siembra.
-paso "Esperando a que el gateway conteste"
-for i in $(seq 1 60); do
-  code=$(curl -s -o /dev/null -w "%{http_code}" \
-    -X POST http://backoffice.localhost:8090/auth/staff/login \
-    -H 'Content-Type: application/json' \
-    -d '{"email":"admin@kredius.mx","password":"Backoffice#2026"}' 2>/dev/null || true)
-  if [ "$code" = "200" ]; then echo "    gateway ✓"; break; fi
-  if [ "$code" = "502" ] && [ $((i % 5)) = 0 ]; then
-    docker compose exec -T gateway-service openresty -s reload >/dev/null 2>&1 || true
-  fi
-  sleep 3
-done
-
-echo "    esperando a que el backoffice acepte credenciales…"
-token=""
-for i in $(seq 1 80); do
-  token=$(curl -s -X POST http://backoffice.localhost:8090/auth/staff/login \
-    -H 'Content-Type: application/json' \
-    -d '{"email":"admin@kredius.mx","password":"Backoffice#2026"}' 2>/dev/null \
-    | python3 -c "import sys,json;print(json.load(sys.stdin).get('accessToken',''))" 2>/dev/null || true)
-  if [ -n "$token" ]; then echo "    login listo tras $((i * 5))s"; break; fi
-  if [ "$i" = "80" ]; then echo "    ✗ el stack no respondió en 400s" >&2; exit 1; fi
-  sleep 5
-done
-
-# Que identity conteste no significa que el resto esté en pie. Los seeds hablan con sales-org,
-# party y el catálogo de productos, y cada uno arranca a su ritmo —migraciones incluidas—. Esperar
-# sólo al login hacía que la siembra empezara contra un sales-org a medio levantar y muriera con un
-# 500 a los diez segundos, después de haber borrado ya los volúmenes: lo peor de los dos mundos.
-echo "    esperando a los servicios que la siembra necesita…"
-set -f
-for ruta in "/sales-org/levels" "/products" "/clients?page=0&size=1"; do
-  for i in $(seq 1 60); do
-    code=$(curl -s -o /dev/null -w "%{http_code}" \
-      "http://backoffice.localhost:8090${ruta}" -H "Authorization: Bearer $token" 2>/dev/null || true)
-    if [ "$code" = "200" ]; then printf "      %-28s ok\n" "$ruta"; break; fi
-    if [ "$i" = "60" ]; then echo "      ✗ $ruta sigue en $code tras 300s" >&2; exit 1; fi
-    sleep 5
-  done
-done
-set +f
-
-paso "Estructura comercial (4 regiones, 8 zonas, 22 sucursales, 52 ejecutivos)"
-python3 scripts/seed-sales-org.py
-
-paso "Un responsable por nivel, para validar el alcance"
-python3 scripts/seed-commercial-staff.py
-
-paso "Los roles funcionales del acceso rápido (analista, ejecutivo, comité, producto)"
-python3 scripts/seed-demo-staff.py
+paso "Poniendo el reloj de negocio en $INICIO para originar en el pasado"
+$RELOJ reloj "$INICIO"
+# If anything below dies, the services must not stay in the past.
+trap '$RELOJ reloj-real >/dev/null 2>&1 || true' EXIT
 
 paso "Clientes, solicitudes y cartera por el journey real (~15 min)"
-python3 scripts/seed-portfolio.py --clientes "$CLIENTES" $EQUILIBRADO
+# --mora 0: nada se envejece a mano; la mora la produce el ciclo de vida.
+python3 scripts/seed-portfolio.py --clientes "$CLIENTES" --mora 0 $EQUILIBRADO
 
 paso "Documentos del expediente"
 python3 scripts/seed-expedientes.py --limit 12
 
-# Las distribuidoras van después de la cartera y antes del ciclo de vida. Después de la cartera
-# porque cuelgan de ejecutivos que tienen que existir; antes del ciclo, porque sus cortes impagos
-# tienen que estar puestos cuando corra el envejecido — si no, las diez salen con cero días de
-# atraso y el caso «distribuidora morosa» no se puede enseñar.
 paso "Distribuidoras B2B2C: $DISTRIBUIDORAS con $BENEFICIARIOS clientes cada una (~6 min)"
-python3 scripts/seed-distribuidoras.py \
-  --distribuidoras "$DISTRIBUIDORAS" --clientes "$BENEFICIARIOS"
+python3 scripts/seed-distribuidoras.py --distribuidoras "$DISTRIBUIDORAS" --clientes "$BENEFICIARIOS" --sin-envejecer
 
-# El perfil fiscal va ANTES del ciclo de vida, porque el ciclo es quien corre la facturación. Al
-# revés, los CFDI se timbran contra el RFC genérico y salen todos como «PUBLICO EN GENERAL»: no
-# falla nada, y por eso es peor — la pantalla de facturas se ve llena y sin dueño.
+paso "Tarjetas y líneas revolventes: compras, meses sin intereses, BNPL, salto de pago"
+python3 scripts/seed-revolventes.py --clientes "$REVOLVENTES" --hoy "$INICIO" || echo "    (la siembra revolvente terminó con avisos)"
+
+# El perfil fiscal va ANTES del ciclo de vida: el ciclo corre la facturación, y sin RFC los CFDI
+# salen todos como «PUBLICO EN GENERAL».
 paso "Perfiles fiscales CFDI de los clientes"
 python3 scripts/seed-perfiles-fiscales.py
 
-# El ciclo de vida, después de que exista cartera y antes de la navegación: sin devengo no hay
-# ingreso que contabilizar, sin pagos no baja el auxiliar de intereses, sin mora no hay estimación
-# preventiva, sin quebranto nada consume la reserva y sin corrida de facturación no existe una sola
-# factura. Una base sin esto enseña media contabilidad en ceros y no se puede distinguir «esta
-# cuenta no se usa» de «esta cuenta no se está posteando».
-#
-# Construye MESES de historia, no días: retrocede el reloj del devengo y lo corre fecha por fecha,
-# cerrando cada período y facturándolo. Es lo que hace que junio, julio y agosto tengan cifras
-# distintas en vez de un único día apilado en el mes corriente.
-paso "Ciclo de vida: $MESES_HISTORIA meses de devengo, pagos, mora, riesgo, facturación y cierre (~12 min)"
-python3 scripts/seed-ciclo-credito.py --meses "$MESES_HISTORIA"
+paso "Ciclo de vida: $MESES_HISTORIA meses día por día (pagos, mora, cortes, estados de cuenta, riesgo, cobranza, facturación, cierres)"
+python3 scripts/seed-ciclo-credito.py --desde "$INICIO" --hasta "$AYER"
+$RELOJ reloj-real
+trap - EXIT
 
-# El canal cachea la identidad del personal diez minutos, así que las entradas escritas durante la
-# siembra llevan lo que se supiera al empezarla. Reiniciarlo vacía esa caché y la navegación de
-# abajo queda con la identidad ya completa — que es lo que se quiere enseñar.
+# El canal cachea la identidad del personal diez minutos; reiniciarlo deja la navegación de abajo con
+# la identidad completa. Reiniciarlo le cambia la IP: el gateway se recarga para no servir 502.
 paso "Reiniciando el canal para vaciar la caché de identidad"
 docker restart fintech-services-channel-backoffice-service-1 >/dev/null 2>&1
-# Reiniciar el canal le cambia la IP: sin recargar, el gateway sigue apuntando a la anterior y todo
-# lo que viene después de este paso responde 502.
 docker compose exec -T gateway-service openresty -s reload >/dev/null 2>&1 || true
 for i in $(seq 1 40); do
-  code=$(curl -s -o /dev/null -w "%{http_code}" \
-    -X POST http://backoffice.localhost:8090/auth/staff/login \
-    -H 'Content-Type: application/json' \
-    -d '{"email":"admin@kredius.mx","password":"Backoffice#2026"}' 2>/dev/null || true)
+  code=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://backoffice.localhost:8090/auth/staff/login \
+    -H 'Content-Type: application/json' -d '{"email":"admin@kredius.mx","password":"Backoffice#2026"}' 2>/dev/null || true)
   [ "$code" = "200" ] && break
   sleep 3
 done
@@ -255,20 +137,41 @@ python3 scripts/verifica-identidad-auditoria.py
 paso "Verificando la siembra de distribuidoras"
 python3 scripts/verifica-distribuidoras.py
 
-# Que el tablero, el árbol comercial y el listado digan el mismo número. Es la comprobación que
-# atrapa la cartera huérfana: un crédito sin ejecutivo no cuelga de ninguna rama, y entonces el
-# árbol suma menos que el tablero sin que nada falle.
+# Que el tablero, el árbol comercial y el listado digan el mismo número: atrapa la cartera huérfana.
 paso "Verificando que el tablero y el árbol comercial cuadren"
 python3 scripts/repara-cartera-sin-ejecutivo.py
+# Origin units again, now that every credit has an executive: the sealing inside seed-ciclo-credito ran before
+# the repair, and the revolving and distributor credits seeded after the portfolio's distribution were left out
+# (2 Nov: 8 of 74 unsealed, the commercial tree short by the whole capital).
+python3 - <<'EOF'
+import sys; sys.path.insert(0, "tools/ciclo-credito")
+import motor
+r = motor.bo(motor.login_admin(), "POST", "/accounting/backfill-origin-units") or {}
+print(f"  sucursal de origen: {r.get('sellados', 0)} sellados ahora · {r.get('yaSellados', 0)} ya sellados · {r.get('polizasAtribuidas', 0)} pólizas atribuidas")
+EOF
 python3 scripts/verifica-cuadre.py
 
-# Y que la contabilidad diga lo mismo que la fuente de cada hecho. Es una comprobación distinta de
-# la de arriba: la balanza cuadra igual cuando el importe está mal —cada asiento es un par que
-# cuadra consigo mismo—, así que sólo salirse del mayor y preguntarle a `charges` detecta un devengo
-# multiplicado. Es el error que estuvo quince veces inflado sin que ninguna pantalla lo delatara.
+# Y que la contabilidad diga lo mismo que la fuente de cada hecho, y que toda la cadena concilie:
+# libro = saldos, cargos = cartera, foto = cargo, corte = foto, estado de cuenta = libro.
 paso "Verificando la contabilidad contra la fuente de cada hecho"
 python3 scripts/verifica-contabilidad.py
 
-# Respaldo automático: la siembra cuesta horas y perderla por un `down -v` a destiempo es evitable.
+paso "Conciliando la cadena completa"
+docker compose exec -T postgres psql -U fintech -d fintech < tools/ciclo-credito/concilia.sql
+# The demo is a mock with history, but squared: every row must show zero, as the E2E's verdict asks.
+FUERA=$(docker compose exec -T postgres psql -U fintech -d fintech -At -F'|' -v ON_ERROR_STOP=1 < tools/ciclo-credito/concilia.sql \
+        | awk -F'|' 'NF >= 3 && $2 != "" && $2 + 0 != 0 { print "  ✗ " $1 ": " $2 " (" substr($3, 1, 160) ")" }')
+
+# Respaldo automático: la siembra cuesta una hora y perderla por un `down -v` a destiempo es evitable.
 paso "Respaldando la base recién sembrada"
 ./scripts/respalda-siembra.sh guardar "siembra-${CLIENTES}c" || echo "  (respaldo omitido)"
+
+if [ -n "$FUERA" ]; then
+  echo
+  echo "✗ la demo no cuadra: la conciliación de la cadena tiene filas fuera de cero"
+  echo "$FUERA"
+  exit 1
+fi
+
+echo
+echo "✓ demo sembrada: cartera originada el $INICIO y viva hasta $AYER"

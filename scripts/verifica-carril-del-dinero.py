@@ -120,9 +120,10 @@ def main():
 
     disposicion = psql("""SELECT debit_account||'→'||credit_account FROM accounting.posting_rules
                            WHERE trigger_event='DISPOSITION_SELF_USE';""")
-    v.comprueba("toda disposición sale por BANCO, no a monedero (wallet en hold)",
-                disposicion == "1201→1101", f"póliza: {disposicion}",
-                "con 2101 el dinero se quedaba en la plataforma y no había contraparte conciliable")
+    v.comprueba("toda disposición sale por SPEI (2103 hasta que el banco reporta la orden), no a monedero",
+                disposicion == "1201→2103", f"póliza: {disposicion}",
+                "con 2101 el dinero se quedaba en la plataforma; con 1101 directo, una orden de las 18:30 salía "
+                "del banco un día antes que en su estado de cuenta")
 
     print("\n── La mora existe y se cobra sobre lo vencido (BK-18/19) ──")
 
