@@ -31,6 +31,13 @@ spring:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
 
+fintech:
+  sales-org:
+    clients:
+      # The product catalog: a placement policy is validated against the distributor line's envelope.
+      credit-product-url: ${CREDIT_PRODUCT_SERVICE_URL:http://localhost:8084}
+      timeout: PT10S
+
 server:
   port: 8100
   error:

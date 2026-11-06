@@ -39,6 +39,10 @@ public class CreditAllocation {
     @Column(name = "payment_order_id", updatable = false)
     private UUID paymentOrderId;
 
+    /** The distributor's client who paid, when he deposited with his own reference. */
+    @Column(name = "beneficiary_party_id", updatable = false)
+    private UUID beneficiaryPartyId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -54,6 +58,7 @@ public class CreditAllocation {
         a.creditAccountId = line.creditAccountId();
         a.amount = line.amount();
         a.paymentOrderId = paymentOrderId;
+        a.beneficiaryPartyId = line.beneficiaryPartyId();
         a.createdAt = BusinessClock.current().now();
         return a;
     }
@@ -65,5 +70,6 @@ public class CreditAllocation {
     public UUID getCreditAccountId() { return creditAccountId; }
     public BigDecimal getAmount() { return amount; }
     public UUID getPaymentOrderId() { return paymentOrderId; }
+    public UUID getBeneficiaryPartyId() { return beneficiaryPartyId; }
     public Instant getCreatedAt() { return createdAt; }
 }

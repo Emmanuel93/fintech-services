@@ -122,6 +122,9 @@ public class SecurityConfig {
                         // ── Clientes ──────────────────────────────────────────────────────
                         .requestMatchers(HttpMethod.POST, "/clients/*/assign-executive")
                                 .access(requires("clients.assign-executive"))
+                        // La lista roja: marcar o levantar a un cliente es gestión de cobranza, no consulta.
+                        .requestMatchers(HttpMethod.POST, "/clients/*/red-list", "/clients/*/red-list/**")
+                                .access(requires("collections.manage"))
                         .requestMatchers("/clients/**").access(requires("clients.view"))
 
                         // ── Productos ─────────────────────────────────────────────────────

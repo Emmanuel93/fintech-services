@@ -42,6 +42,11 @@ class JpaOrgUnitAdapter implements OrgUnitRepository {
     }
 
     @Override
+    public List<OrgUnit> findAncestorsInclusive(String path) {
+        return jpa.findAncestorsInclusive(path);
+    }
+
+    @Override
     public List<UUID> findPartyRefsInSubtreeByLevel(String ancestorPath, String levelCode) {
         return jpa.findPartyRefsInSubtreeByLevel(ancestorPath, levelCode);
     }

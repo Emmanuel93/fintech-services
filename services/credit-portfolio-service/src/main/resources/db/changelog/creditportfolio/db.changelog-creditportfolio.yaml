@@ -389,3 +389,30 @@ databaseChangeLog:
             path: db/changelog/creditportfolio/049-cierre-de-linea-tras-quita.sql
             relativeToChangelogFile: false
             splitStatements: true
+
+  - changeSet:
+      id: 050-tipo-de-cliente-politica-y-lista-roja
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/050-tipo-de-cliente-politica-y-lista-roja.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 051-referencia-de-pago-del-cliente
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/051-referencia-de-pago-del-cliente.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 052-pago-directo-del-cliente
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/052-pago-directo-del-cliente.sql
+            relativeToChangelogFile: false
+            splitStatements: true

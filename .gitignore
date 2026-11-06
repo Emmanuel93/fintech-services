@@ -60,6 +60,8 @@ _to_delete/
 *.avi
 *.gif
 *.png
+# The documents' logotype is part of the code: every PDF prints it.
+!shared-documents/src/main/resources/branding/*.png
 *.jpg
 *.jpeg
 *.webp

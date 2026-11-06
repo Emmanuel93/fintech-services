@@ -2,6 +2,9 @@ package com.fintech.salesorg.infrastructure.adapter.in.api;
 
 import com.fintech.salesorg.application.port.in.CreateOrgUnitCommand;
 import com.fintech.salesorg.application.port.in.OrgUnitUseCase;
+import com.fintech.salesorg.application.port.in.PlacementPolicyUseCase;
+import com.fintech.salesorg.application.port.out.OrgUnitRepository;
+import com.fintech.salesorg.domain.OrgUnit;
 import com.fintech.salesorg.infrastructure.adapter.in.api.dto.CreateOrgUnitRequest;
 import com.fintech.salesorg.infrastructure.adapter.in.api.dto.OrgUnitResponse;
 import io.swagger.v3.oas.annotations.Operation;
@@ -12,7 +15,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -27,12 +33,14 @@ class OrgUnitController {
     private static final Logger log = LoggerFactory.getLogger(OrgUnitController.class);
 
     private final OrgUnitUseCase orgUnitUseCase;
-    private final com.fintech.salesorg.application.port.out.OrgUnitRepository orgUnitRepository;
+    private final OrgUnitRepository orgUnitRepository;
+    private final PlacementPolicyUseCase placementPolicies;
 
-    OrgUnitController(OrgUnitUseCase orgUnitUseCase,
-                      com.fintech.salesorg.application.port.out.OrgUnitRepository orgUnitRepository) {
-        this.orgUnitUseCase   = orgUnitUseCase;
+    OrgUnitController(OrgUnitUseCase orgUnitUseCase, OrgUnitRepository orgUnitRepository,
+                      PlacementPolicyUseCase placementPolicies) {
+        this.orgUnitUseCase    = orgUnitUseCase;
         this.orgUnitRepository = orgUnitRepository;
+        this.placementPolicies = placementPolicies;
     }
 
     @GetMapping
@@ -50,9 +58,15 @@ class OrgUnitController {
                            @RequestHeader(value = "X-User-Id", required = false) String staffUserId) {
         log.info("POST /sales-org/units code={} parent={} by={}",
                 request.code(), request.parentUnitId(), staffUserId);
-        return OrgUnitResponse.from(orgUnitUseCase.create(new CreateOrgUnitCommand(
+        OrgUnit unit = orgUnitUseCase.create(new CreateOrgUnitCommand(
                 request.levelId(), request.parentUnitId(), request.code(), request.name(),
-                request.partyRef(), staffUserId)));
+                request.partyRef(), staffUserId));
+        // A branch opened with its placement policy in the same call: its distributors never place under limits
+        // nobody remembered to set.
+        if (request.placementPolicy() != null) {
+            placementPolicies.declare(unit.getCode(), request.placementPolicy().toDomain(), staffUserId);
+        }
+        return OrgUnitResponse.from(unit);
     }
 
     @GetMapping("/{unitId}")
@@ -91,23 +105,23 @@ class OrgUnitController {
      * <p>{@code null} la borra y devuelve la unidad a heredar de su padre.
      */
     @PutMapping("/by-code/{code}/vat-rate")
-    java.util.Map<String, Object> setVatRate(@PathVariable String code,
-                                             @RequestParam(required = false) java.math.BigDecimal rate) {
+    Map<String, Object> setVatRate(@PathVariable String code,
+                                   @RequestParam(required = false) BigDecimal rate) {
         var unidad = orgUnitRepository.findByCode(code)
                 .orElseThrow(() -> new IllegalArgumentException("Unidad no encontrada: " + code));
         unidad.setVatRate(rate);
         orgUnitRepository.save(unidad);
         log.info("IVA de la unidad {} fijado en {}", code, rate);
-        java.util.Map<String, Object> r = new java.util.LinkedHashMap<>();
+        Map<String, Object> r = new LinkedHashMap<>();
         r.put("code", code);
         r.put("vatRate", rate);
         return r;
     }
 
     @GetMapping("/by-code/{code}/vat-rate")
-    java.util.Map<String, Object> vatRate(@PathVariable String code) {
-        java.math.BigDecimal rate = orgUnitRepository.findEffectiveVatRate(code);
-        java.util.Map<String, Object> r = new java.util.LinkedHashMap<>();
+    Map<String, Object> vatRate(@PathVariable String code) {
+        BigDecimal rate = orgUnitRepository.findEffectiveVatRate(code);
+        Map<String, Object> r = new LinkedHashMap<>();
         r.put("code", code);
         // Sin ancestro con tasa declarada devuelve null, no cero: cero es «exento», que es una
         // decisión fiscal distinta de «aquí no se configuró nada». Quien pregunta aplica su default.

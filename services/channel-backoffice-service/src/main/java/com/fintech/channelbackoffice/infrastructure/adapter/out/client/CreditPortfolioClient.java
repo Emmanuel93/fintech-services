@@ -114,6 +114,52 @@ public class CreditPortfolioClient {
                 .block();
     }
 
+    // ── The distributors' clients: type and red list ──────────────────────────────────────────
+
+    /** The client's profile: his type (NUEVO / REVOLVENTE), his red-list marks and how he stands with each line. */
+    public Map<String, Object> beneficiaryProfile(UUID partyId) {
+        return webClient.get()
+                .uri("/api/v1/portfolio/beneficiaries/{id}/profile", partyId)
+                .headers(staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("credit-portfolio-service", r))
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
+    }
+
+    /** Every stored mark on the client (open and cleared), newest first. */
+    public List<Map<String, Object>> beneficiaryFlags(UUID partyId) {
+        return webClient.get()
+                .uri("/api/v1/portfolio/beneficiaries/{id}/flags", partyId)
+                .headers(staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("credit-portfolio-service", r))
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .block();
+    }
+
+    public Map<String, Object> reportBeneficiary(UUID partyId, Map<String, Object> body) {
+        return webClient.post()
+                .uri("/api/v1/portfolio/beneficiaries/{id}/flags", partyId)
+                .headers(staffIdentity())
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("credit-portfolio-service", r))
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
+    }
+
+    public Map<String, Object> clearBeneficiaryFlag(UUID partyId, UUID flagId, Map<String, Object> body) {
+        return webClient.post()
+                .uri("/api/v1/portfolio/beneficiaries/{id}/flags/{flag}/clear", partyId, flagId)
+                .headers(staffIdentity())
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("credit-portfolio-service", r))
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
+    }
+
     public List<CreditAccountResponse> listByParty(UUID partyId) {
         log.info("-> GET credit-portfolio-service /api/v1/portfolio/accounts?partyId={}", partyId);
         return webClient.get()

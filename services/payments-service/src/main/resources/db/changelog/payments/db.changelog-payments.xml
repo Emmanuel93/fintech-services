@@ -11,5 +11,6 @@
     <include file="db/changelog/payments/004-create-event-publication.sql"        relativeToChangelogFile="false"/>
     <include file="db/changelog/payments/005-add-overpayment-columns.sql"         relativeToChangelogFile="false"/>
     <include file="db/changelog/payments/006-abonos-y-saldo-a-favor.sql"         relativeToChangelogFile="false"/>
+    <include file="db/changelog/payments/007-referencia-del-cliente.sql"        relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

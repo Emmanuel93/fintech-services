@@ -1,0 +1,14 @@
+package com.fintech.creditportfolio.infrastructure.adapter.out.persistence;
+
+import com.fintech.creditportfolio.domain.beneficiary.BeneficiaryFlag;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+import java.util.UUID;
+
+interface SpringDataBeneficiaryFlagRepository extends JpaRepository<BeneficiaryFlag, UUID> {
+
+    List<BeneficiaryFlag> findByBeneficiaryPartyIdAndClearedAtIsNullOrderByRaisedAtAsc(UUID beneficiaryPartyId);
+
+    List<BeneficiaryFlag> findByBeneficiaryPartyIdOrderByRaisedAtDesc(UUID beneficiaryPartyId);
+}

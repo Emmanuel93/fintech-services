@@ -11,6 +11,9 @@ public interface DispositionRepository {
     Optional<Disposition> findById(UUID dispositionId);
     List<Disposition> findByCreditAccountId(UUID creditAccountId);
 
+    /** Every placement a client received, through any distributor: what types him and what he still owes. */
+    List<Disposition> findByBeneficiaryPartyId(UUID beneficiaryPartyId);
+
     /** Disposiciones de varias cuentas — evita el N+1 al armar el plan de una página de líneas. */
     List<Disposition> findByCreditAccountIdIn(java.util.Collection<UUID> creditAccountIds);
 }

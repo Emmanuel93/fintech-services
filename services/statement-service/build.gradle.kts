@@ -47,17 +47,9 @@ dependencies {
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${property("springdocVersion")}")
     implementation("org.springframework.kafka:spring-kafka")
 
-    // Los documentos: plantillas JRXML compiladas al arrancar y exportadas a PDF.
-    implementation("net.sf.jasperreports:jasperreports:${property("jasperVersion")}")
-    implementation("net.sf.jasperreports:jasperreports-pdf:${property("jasperVersion")}")
-    // DejaVu empaquetada: el PDF sale igual en la laptop y en el pod, sin depender de las fuentes del SO.
-    implementation("net.sf.jasperreports:jasperreports-fonts:${property("jasperVersion")}")
-    // Jasper compila las expresiones de la plantilla a Java al arrancar. La imagen corre con un JRE,
-    // que no trae javac: sin el compilador de Eclipse (JDT, va dentro del jar) el pod no arranca.
-    // `jasperreports.properties` lo fija para que las pruebas usen el mismo que producción.
-    implementation("net.sf.jasperreports:jasperreports-jdt:${property("jasperVersion")}")
-    // jasperreports-jdt trae ECJ 3.21 (2020), que no conoce las clases de Java 21. 3.40 sí.
-    implementation("org.eclipse.jdt:ecj:3.40.0")
+    // Los documentos: modelo, formatos, marca, motor Jasper, Inter y logotipo (shared-documents, también lo usa
+    // receipt-service). Las plantillas JRXML de los estados de cuenta siguen aquí.
+    implementation(project(":shared-documents"))
 
     // Candado de crones: el reintento de fallidos corre en una sola réplica.
     implementation("net.javacrumbs.shedlock:shedlock-spring:5.16.0")

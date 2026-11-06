@@ -1,5 +1,7 @@
 package com.fintech.beneficiary.infrastructure.adapter.in.messaging;
 
+import com.fintech.beneficiary.domain.PlacementRefusal;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fintech.beneficiary.application.port.in.PlacementLifecycleUseCase;
 import com.fintech.beneficiary.application.port.out.PlacementRepository;
@@ -65,6 +67,10 @@ public class DispositionRejectedListener {
         if (r.startsWith("LINE_CLOSED_AFTER_QUITA")) {
             return "Tu línea quedó cerrada por el convenio de quita: ya no coloca";
         }
+        // The client's side (his type's limits, the red list) before the product's ranges: AMOUNT_ABOVE_CLIENT_LIMIT
+        // starts like the product's AMOUNT_ codes. The event says nothing of whose marks they are: the red list is
+        // told as Kredius not lending to him today.
+        if (PlacementRefusal.isAboutTheClient(r)) return PlacementRefusal.inHerWords(r, false);
         if (r.startsWith("AMOUNT_")) return "El monto no está dentro de lo que permite el producto";
         if (r.startsWith("TERM_")) return "El plazo no está dentro de lo que permite el producto";
         if (r.startsWith("INSUFFICIENT_AVAILABLE_CREDIT")) return "Tu línea no tiene disponible suficiente";

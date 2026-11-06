@@ -7,6 +7,8 @@ import com.fintech.creditportfolio.application.port.out.DispositionRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
 import com.fintech.creditportfolio.domain.CommissionNetting;
+import com.fintech.creditportfolio.domain.Disposition;
+import com.fintech.creditportfolio.domain.DirectPayments;
 import com.fintech.creditportfolio.domain.StatementCoverage;
 import com.fintech.creditportfolio.domain.config.DistributorCommission;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
@@ -30,6 +32,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -373,15 +376,24 @@ public class BalanceReconciliationService {
         List<Installment> cycles = installmentRepository.findByScheduleIdOrdered(id).stream()
                 .sorted(Comparator.comparing(Installment::getDueDate).thenComparing(Installment::getInstallmentNumber))
                 .toList();
-        List<UUID> planIds = dispositionRepository.findByCreditAccountId(id).stream().map(d -> d.getDispositionId()).toList();
+        List<Disposition> placements = dispositionRepository.findByCreditAccountId(id);
+        List<UUID> planIds = placements.stream().map(Disposition::getDispositionId).toList();
         List<Installment> plans = planIds.isEmpty() ? List.of() : installmentRepository.findByScheduleIds(planIds);
         Map<Integer, List<Installment>> plansByCycle = plans.stream().filter(i -> i.getBilledCycle() != null)
                 .collect(Collectors.groupingBy(Installment::getBilledCycle));
 
         // Each payment covers only the statements issued before it (StatementCoverage): what it leaves over lowered
         // the balance and does not pay ahead the minimums of the statements to come.
+        List<BalanceEvent> ledger = balanceEventRepository.paymentsOf(id);
         Map<UUID, BigDecimal> covered = StatementCoverage.cover(StatementCoverage.obligationsFrom(cycles),
-                StatementCoverage.paymentsFrom(balanceEventRepository.paymentsOf(id)), null);
+                StatementCoverage.paymentsFrom(ledger), null);
+        // A distributor's client who paid his own installments with his reference has them paid, even while her
+        // statement is not complete: he is current, and nothing of hers is his to answer for.
+        Set<UUID> paidByTheirClients = DirectPayments.covered(directDeposits(ledger), plans,
+                placements.stream().filter(d -> d.getBeneficiaryPartyId() != null)
+                        .collect(Collectors.toMap(Disposition::getDispositionId, Disposition::getBeneficiaryPartyId)),
+                cycles.stream().filter(c -> c.getCutoffDate() != null)
+                        .collect(Collectors.toMap(Installment::getInstallmentNumber, Installment::getCutoffDate, (a, b) -> a)));
         List<Installment> changed = new ArrayList<>();
         for (Installment cycle : cycles) {
             BigDecimal cyclePaid = covered.getOrDefault(cycle.getInstallmentId(), BigDecimal.ZERO);
@@ -391,8 +403,10 @@ public class BalanceReconciliationService {
             if (cycle.settleAs(status)) {
                 changed.add(cycle);
             }
-            InstallmentStatus planStatus = status == InstallmentStatus.PAID ? InstallmentStatus.PAID : InstallmentStatus.PENDING;
             for (Installment plan : plansByCycle.getOrDefault(cycle.getInstallmentNumber(), List.of())) {
+                // Decided once, so a paid installment keeps the day it was paid.
+                InstallmentStatus planStatus = status == InstallmentStatus.PAID || paidByTheirClients.contains(plan.getInstallmentId())
+                        ? InstallmentStatus.PAID : InstallmentStatus.PENDING;
                 if (plan.settleAs(planStatus)) {
                     changed.add(plan);
                 }
@@ -404,6 +418,22 @@ public class BalanceReconciliationService {
         if (!changed.isEmpty()) {
             installmentRepository.saveAll(changed);
         }
+    }
+
+    /** The deposits a distributor's clients made themselves (net of returns): the payments whose entry names a client. */
+    static List<DirectPayments.Deposit> directDeposits(List<BalanceEvent> ledger) {
+        Map<String, UUID> clientOf = new HashMap<>();
+        for (BalanceEvent e : ledger) {
+            if (e.getBeneficiaryPartyId() != null && StatementCoverage.PAYMENT_APPLIED.equals(e.getEventType())) {
+                clientOf.put(e.getSourceEventId() != null ? e.getSourceEventId() : String.valueOf(e.getBalanceEventId()),
+                        e.getBeneficiaryPartyId());
+            }
+        }
+        if (clientOf.isEmpty()) return List.of();
+        return StatementCoverage.paymentsFrom(ledger).stream()
+                .filter(p -> clientOf.containsKey(p.key()))
+                .map(p -> new DirectPayments.Deposit(p.key(), clientOf.get(p.key()), p.valueDate(), p.amount()))
+                .toList();
     }
 
     /**
@@ -646,6 +676,11 @@ public class BalanceReconciliationService {
         BalanceEvent asiento = BalanceEvent.record(accountId, sourceEventId, eventType, medido, account, effectiveDate)
                 .inDayClose(dayCloseDate)
                 .withBreakdown(capDelta, intDelta, ivaDelta, account.getPenaltyBalance().subtract(morAntes));
+        // A distributor's client paid it himself: the entry says whose money it was, so his installments are covered
+        // first (settleStatements) and her statement names him.
+        if (payment != null && payment.byAClient() && StatementCoverage.PAYMENT_APPLIED.equals(eventType)) {
+            asiento.paidBy(payment.beneficiaryPartyId());
+        }
         balanceEventRepository.save(asiento);
 
         eventPublisher.publishBalanceUpdated(new BalanceUpdatedEvent(

@@ -84,7 +84,7 @@ public interface StatementViewUseCase {
                    BigDecimal moratoriumRate, BigDecimal vatRate, BigDecimal creditLimit,
                    BigDecimal availableCredit, BigDecimal principalBalance, BigDecimal interestBalance,
                    BigDecimal penaltyBalance, BigDecimal ivaBalance, Integer assignedTerm,
-                   String amortizationType, Instant activatedAt, String clabe, int daysDelinquent,
+                   String amortizationType, Instant activatedAt, String collectionClabe, int daysDelinquent,
                    BigDecimal cat) {}
 
     /** Capital, interés y moratorio según el libro. El IVA no lleva saldo propio en el libro. */
@@ -110,7 +110,13 @@ public interface StatementViewUseCase {
     record LadderStep(int daysLate, BigDecimal rate, BigDecimal commission) {}
 
     /** Un movimiento que se lista uno por uno: disposiciones, pagos, comisiones, castigos. */
-    record Movement(Instant appliedAt, String type, BigDecimal amount, BigDecimal principalAfter) {}
+    /** @param beneficiaryPartyId the distributor's client who made this payment himself; null for any other movement */
+    record Movement(Instant appliedAt, String type, BigDecimal amount, BigDecimal principalAfter, UUID beneficiaryPartyId) {
+
+        public Movement(Instant appliedAt, String type, BigDecimal amount, BigDecimal principalAfter) {
+            this(appliedAt, type, amount, principalAfter, null);
+        }
+    }
 
     /** @param originalDueDate the date it had before it moved (to a business day, or by a skip); null if it never did */
     record InstallmentLine(UUID scheduleId, int number, LocalDate dueDate, BigDecimal principal,

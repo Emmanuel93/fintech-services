@@ -1,6 +1,6 @@
 package com.fintech.statement.application.port.out;
 
-import com.fintech.statement.application.service.assembly.DocumentModel;
+import com.fintech.documents.DocumentModel;
 import com.fintech.statement.domain.StatementTemplate;
 
 public interface StatementRenderer {

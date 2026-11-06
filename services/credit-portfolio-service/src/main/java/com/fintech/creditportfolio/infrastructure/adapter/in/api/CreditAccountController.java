@@ -2,6 +2,7 @@ package com.fintech.creditportfolio.infrastructure.adapter.in.api;
 
 import com.fintech.creditportfolio.application.port.in.DeferDispositionUseCase;
 import com.fintech.creditportfolio.application.port.in.FindCreditAccountUseCase;
+import com.fintech.creditportfolio.application.service.BeneficiaryProfileService;
 import com.fintech.creditportfolio.application.service.PlacementGateService;
 import com.fintech.creditportfolio.domain.config.DistributorCommission;
 import org.springframework.lang.Nullable;
@@ -28,6 +29,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
 import java.util.Map;
@@ -59,6 +61,8 @@ class CreditAccountController {
 
     /** The distributor line's placement gate and commission terms; null means no account carries them. */
     private final PlacementGateService gates;
+    /** What a client may take on a distributor line (his type, the branch's limits, the red list); null where not wired. */
+    private final BeneficiaryProfileService beneficiaries;
 
     CreditAccountController(FindCreditAccountUseCase findUseCase,
                              DeferDispositionUseCase deferUseCase,
@@ -67,8 +71,10 @@ class CreditAccountController {
                              DispositionRepository dispositionRepository,
                              InstallmentRepository installmentRepository,
                              CollectionAccountProjection collectionAccounts,
-                             @Nullable PlacementGateService gates) {
+                             @Nullable PlacementGateService gates,
+                             @Nullable BeneficiaryProfileService beneficiaries) {
         this.gates                    = gates;
+        this.beneficiaries            = beneficiaries;
         this.deferUseCase             = deferUseCase;
         this.skipUseCase              = skipUseCase;
         this.findUseCase              = findUseCase;
@@ -118,6 +124,23 @@ class CreditAccountController {
     List<Installment> dispositionSchedule(@PathVariable UUID creditAccountId,
                                            @PathVariable UUID dispositionId) {
         return installmentRepository.findByScheduleIdOrdered(dispositionId);
+    }
+
+    /**
+     * What this client may take on this line today: his type, the branch's limits for it, his headroom and, with an
+     * amount and a term, whether that placement would be authorized and why not. The app's slider and the sign-up
+     * page ask before trying; the authorization applies the same rule.
+     */
+    @GetMapping("/{creditAccountId}/placement-limits")
+    @Operation(summary = "Límites de colocación de un cliente en esta línea (tipo, política de la sucursal, lista roja)")
+    BeneficiaryProfileService.PlacementLimitsView placementLimits(@PathVariable UUID creditAccountId,
+                                                                   @RequestParam UUID beneficiaryPartyId,
+                                                                   @RequestParam(required = false) BigDecimal amount,
+                                                                   @RequestParam(required = false) Integer termPeriods) {
+        if (beneficiaries == null) {
+            throw new IllegalStateException("Esta cartera no resuelve límites por cliente");
+        }
+        return beneficiaries.limitsFor(findUseCase.getById(creditAccountId), beneficiaryPartyId, amount, termPeriods);
     }
 
     @GetMapping("/{creditAccountId}")

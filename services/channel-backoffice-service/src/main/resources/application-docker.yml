@@ -30,6 +30,7 @@ fintech:
     beneficiary-service-url:      ${BENEFICIARY_SERVICE_URL:http://beneficiary-service:8080}
     compliance-service-url:       ${COMPLIANCE_SERVICE_URL:http://compliance-service:8080}
     statement-service-url:        ${STATEMENT_SERVICE_URL:http://statement-service:8080}
+    receipt-service-url:          ${RECEIPT_SERVICE_URL:http://receipt-service:8080}
     banking-service-url:          ${BANKING_SERVICE_URL:http://banking-service:8080}
     disbursement-service-url:     ${DISBURSEMENT_SERVICE_URL:http://disbursement-service:8080}
     stp-service-url:              ${STP_SERVICE_URL:http://stp-service:8080}

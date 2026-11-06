@@ -1,5 +1,9 @@
 package com.fintech.channelmobile.infrastructure.adapter.in.api;
 
+import com.fintech.channelmobile.infrastructure.adapter.out.client.BeneficiaryClient;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
 import com.fintech.channelmobile.infrastructure.adapter.in.api.dto.CreateApplicationRequest;
 import com.fintech.channelmobile.infrastructure.adapter.in.api.dto.AmountRequest;
 import com.fintech.channelmobile.infrastructure.adapter.in.api.dto.ContractSignRequest;
@@ -49,13 +53,17 @@ class CreditController {
     private final WalletClient walletClient;
     private final PaymentsClient paymentsClient;
     private final ScoringClient scoringClient;
+    /** The client's side of a placement (his type's limits, the red list), told in her words before trying. */
+    private final BeneficiaryClient beneficiaryClient;
 
     CreditController(CreditProductClient creditProductClient,
                      OriginationClient originationClient,
                      CreditPortfolioClient creditPortfolioClient,
                      WalletClient walletClient,
                      PaymentsClient paymentsClient,
-                     ScoringClient scoringClient) {
+                     ScoringClient scoringClient,
+                     BeneficiaryClient beneficiaryClient) {
+        this.beneficiaryClient     = beneficiaryClient;
         this.creditProductClient   = creditProductClient;
         this.originationClient     = originationClient;
         this.creditPortfolioClient = creditPortfolioClient;
@@ -303,6 +311,20 @@ class CreditController {
         }
         UUID beneficiary = (request.beneficiaryPartyId() == null || request.beneficiaryPartyId().isBlank())
                 ? null : UUID.fromString(request.beneficiaryPartyId());
+        // A placement to a client: his type's limits on her line and the red list, said at the door. The portfolio decides
+        // again when it authorizes; if this question cannot be answered, it is left to the portfolio.
+        if (beneficiary != null && "DISTRIBUTOR_LINE".equalsIgnoreCase(account.productType())) {
+            JsonNode limits = null;
+            try {
+                limits = beneficiaryClient.placementLimits(userId, beneficiary, BigDecimal.valueOf(request.amount()), request.termPeriods());
+            } catch (RuntimeException e) {
+                log.warn("No se pudieron leer los límites del cliente {} antes de colocar: {}", beneficiary, e.getMessage());
+            }
+            if (limits != null && !limits.path("canPlace").asBoolean(true)) {
+                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        limits.path("message").asText("Tu cliente no puede recibir esta colocación"));
+            }
+        }
         // El tipo de disposición NO viaja: lo decide el producto (BK-13). Que la app pudiera
         // mandarlo era lo que permitía acreditar a la distribuidora un dinero de la beneficiaria.
         log.info("POST /credit/dispose creditAccountId={} amount={}",

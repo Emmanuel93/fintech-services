@@ -61,6 +61,15 @@ interface SpringDataOrgUnitRepository extends JpaRepository<OrgUnit, UUID> {
     List<UUID> findPartyRefsInSubtreeByLevel(@Param("ancestorPath") String ancestorPath,
                                              @Param("levelCode") String levelCode);
 
+    /**
+     * The unit and its ancestors, root first: the units whose path is a prefix of {@code path} ({@code @>}, "is an
+     * ancestor of or equal to"). One indexed query, whatever the depth; it is the chain a placement policy walks.
+     */
+    @Query(value = "SELECT * FROM sales_org.org_units "
+                 + "WHERE path::public.ltree @> CAST(:path AS public.ltree) ORDER BY nlevel(path::public.ltree)",
+            nativeQuery = true)
+    List<OrgUnit> findAncestorsInclusive(@Param("path") String path);
+
     /** party_ref del nodo vigente de un nivel dado con un código dado (resuelve promoterCode→distribuidor). */
     @Query(value = "SELECT u.party_ref FROM sales_org.org_units u "
                  + "JOIN sales_org.org_levels l ON l.level_id = u.level_id "

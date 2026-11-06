@@ -1,6 +1,7 @@
 package com.fintech.creditportfolio.infrastructure.adapter.out.messaging;
 
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
+import com.fintech.creditportfolio.domain.event.ClientReferenceAssignedEvent;
 import com.fintech.creditportfolio.domain.event.BalanceUpdatedEvent;
 import com.fintech.creditportfolio.domain.event.CreditAccountActivatedEvent;
 import com.fintech.creditportfolio.domain.event.CreditAccountCancelledEvent;
@@ -43,6 +44,7 @@ public class KafkaCreditPortfolioPublisher implements CreditPortfolioEventPublis
     static final String TOPIC_DISPOSITION_COMPLETED   = "credit-portfolio.disposition-completed";
     static final String TOPIC_DISPOSITION_DEFERRED    = "credit-portfolio.disposition-deferred";
     static final String TOPIC_RELIEF_GRANTED          = "credit-portfolio.relief-granted";
+    static final String TOPIC_CLIENT_REFERENCE_ASSIGNED = "credit-portfolio.client-reference-assigned";
     static final String TOPIC_DISPOSITION_REJECTED    = "credit-portfolio.disposition-rejected";
     static final String TOPIC_DISPOSITION_FAILED      = "credit-portfolio.disposition-failed";
     static final String TOPIC_ACCOUNT_CANCELLED       = "credit-portfolio.credit-account-cancelled";
@@ -229,6 +231,18 @@ public class KafkaCreditPortfolioPublisher implements CreditPortfolioEventPublis
                         log.info("DispositionCompleted published dispositionId={} creditAccountId={} type={} amount={}",
                                 event.getDispositionId(), event.getCreditAccountId(),
                                 event.getDispositionType(), event.getAmount());
+                    }
+                });
+    }
+
+    @Override
+    public void publishClientReferenceAssigned(ClientReferenceAssignedEvent event) {
+        // Keyed by the line: the directory of one distributor's clients is built in order.
+        kafkaTemplate.send(TOPIC_CLIENT_REFERENCE_ASSIGNED, event.creditAccountId().toString(), event)
+                .whenComplete((result, ex) -> {
+                    if (ex != null) {
+                        log.error("ClientReferenceAssigned publish failed creditAccountId={} beneficiary={}: {}",
+                                event.creditAccountId(), event.beneficiaryPartyId(), ex.getMessage());
                     }
                 });
     }

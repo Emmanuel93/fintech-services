@@ -10,4 +10,5 @@ interface SpringDataDispositionRepository extends JpaRepository<Disposition, UUI
 
     List<Disposition> findByCreditAccountIdIn(java.util.Collection<UUID> creditAccountIds);
     List<Disposition> findByCreditAccountId(UUID creditAccountId);
+    List<Disposition> findByBeneficiaryPartyIdOrderByCreatedAtAsc(UUID beneficiaryPartyId);
 }

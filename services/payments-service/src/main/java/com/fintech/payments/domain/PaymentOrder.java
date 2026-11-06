@@ -97,6 +97,10 @@ public class PaymentOrder {
     @Column(name = "tracking_key", updatable = false)
     private String trackingKey;
 
+    /** The distributor's client who paid, when he deposited with his own reference (BENEFICIARY). */
+    @Column(name = "beneficiary_party_id", updatable = false)
+    private UUID beneficiaryPartyId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -135,6 +139,16 @@ public class PaymentOrder {
      * The share of a received credit that goes to one loan, in the prelation's order. The external reference is the
      * credit and the share, so a redelivered credit creates no second order.
      */
+    public static PaymentOrder forReceivedCredit(UUID creditAccountId, UUID obligorPartyId, BigDecimal amount,
+                                                 UUID inboundCreditId, int allocationSeq, AllocationMode mode,
+                                                 Instant receivedAt, LocalDate operationDate, String trackingKey,
+                                                 long snapshotVersion, UUID beneficiaryPartyId) {
+        PaymentOrder o = forReceivedCredit(creditAccountId, obligorPartyId, amount, inboundCreditId, allocationSeq, mode,
+                receivedAt, operationDate, trackingKey, snapshotVersion);
+        o.beneficiaryPartyId = beneficiaryPartyId;
+        return o;
+    }
+
     public static PaymentOrder forReceivedCredit(UUID creditAccountId, UUID obligorPartyId, BigDecimal amount,
                                                  UUID inboundCreditId, int allocationSeq, AllocationMode mode,
                                                  Instant receivedAt, LocalDate operationDate, String trackingKey,
@@ -239,4 +253,5 @@ public class PaymentOrder {
     public Instant getReceivedAt()         { return receivedAt; }
     public LocalDate getOperationDate()    { return operationDate; }
     public String getTrackingKey()         { return trackingKey; }
+    public UUID getBeneficiaryPartyId()    { return beneficiaryPartyId; }
 }

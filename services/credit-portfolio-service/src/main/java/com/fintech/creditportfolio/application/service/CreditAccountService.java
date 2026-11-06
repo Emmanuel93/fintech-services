@@ -31,6 +31,7 @@ import com.fintech.creditportfolio.domain.DispositionType;
 import com.fintech.creditportfolio.domain.PartyVerification;
 import com.fintech.creditportfolio.domain.DistributorCommissionSchedule;
 import com.fintech.creditportfolio.domain.Installment;
+import com.fintech.creditportfolio.application.ClientPlacementCheck;
 import com.fintech.creditportfolio.domain.PlacementGate;
 import com.fintech.creditportfolio.domain.StatementCoverage;
 import java.util.ArrayList;
@@ -45,6 +46,7 @@ import com.fintech.creditportfolio.domain.event.DispositionAuthorizedEvent;
 import com.fintech.creditportfolio.domain.event.DispositionRejectedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -81,6 +83,10 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
     private BigDecimal ivaPorDefecto = AmortizationEngine.IVA_NACIONAL;
     private final CreditPortfolioEventPublisher eventPublisher;
     private final ProductConfigResolver configResolver;
+    /** The client's side of a placement on a distributor line (red list, branch limits); null where not wired. */
+    private final ClientPlacementCheck clientChecks;
+    /** The client's payment reference on the line, assigned with his first placement; null where not wired. */
+    private ClientReferenceService clientReferences;
 
     /**
      * Plazo de una colocación cuando ni la disposición ni la cuenta lo traen.
@@ -106,10 +112,35 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                 new BankingCalendar(new BusinessCalendarRepository() {
                     @Override public void upsert(String c, LocalDate d, boolean b, String l) { }
                     @Override public Map<LocalDate, Boolean> exceptions(String c) { return Map.of(); }
-                }), new InMemoryPaymentReferences(), defaultDispositionTerm);
+                }), new InMemoryPaymentReferences(), null, defaultDispositionTerm);
+    }
+
+    /** As the constructor above, with the client checks of a distributor line wired in (tests). */
+    public CreditAccountService(CreditAccountRepository accountRepository,
+                                 DispositionRepository dispositionRepository,
+                                 InstallmentRepository installmentRepository,
+                                 BalanceEventRepository balanceEventRepository,
+                                 AmortizationEngine amortizationEngine,
+                                 CreditPortfolioEventPublisher eventPublisher,
+                                 ProductConfigResolver configResolver,
+                                 PartyVerificationRepository partyVerificationRepository,
+                                 ClientPlacementCheck clientChecks,
+                                 int defaultDispositionTerm) {
+        this(accountRepository, dispositionRepository, installmentRepository, balanceEventRepository,
+                amortizationEngine, eventPublisher, configResolver, partyVerificationRepository,
+                new BankingCalendar(new BusinessCalendarRepository() {
+                    @Override public void upsert(String c, LocalDate d, boolean b, String l) { }
+                    @Override public Map<LocalDate, Boolean> exceptions(String c) { return Map.of(); }
+                }), new InMemoryPaymentReferences(), clientChecks, defaultDispositionTerm);
     }
 
     /** For tests without a database: consecutive references from the first of the range. */
+    /** Wired by Spring; tests that do not exercise references leave it null. */
+    @Autowired(required = false)
+    public void setClientReferences(ClientReferenceService clientReferences) {
+        this.clientReferences = clientReferences;
+    }
+
     static final class InMemoryPaymentReferences implements PaymentReferenceSequence {
         private final AtomicLong next = new AtomicLong(PaymentReference.MIN_BODY);
         @Override public long nextBody() { return next.getAndIncrement(); }
@@ -126,10 +157,12 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                                  PartyVerificationRepository partyVerificationRepository,
                                  BankingCalendar bankingCalendar,
                                  PaymentReferenceSequence paymentReferences,
+                                 @Nullable ClientPlacementCheck clientChecks,
                                  @Value("${fintech.credit-portfolio.default-disposition-term:12}")
                                  int defaultDispositionTerm) {
         this.bankingCalendar = bankingCalendar;
         this.paymentReferences = paymentReferences;
+        this.clientChecks = clientChecks;
         this.defaultDispositionTerm = defaultDispositionTerm;
         this.accountRepository      = accountRepository;
         this.dispositionRepository  = dispositionRepository;
@@ -466,6 +499,9 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         if (rejectionReason == null) {
             rejectionReason = validateBeneficiary(account, cmd);
         }
+        if (rejectionReason == null) {
+            rejectionReason = validateClient(account, cmd);
+        }
         // El AML devuelve además el veredicto que LEYÓ del receptor, para que la constancia sea
         // exactamente la fila con la que se decidió y no una segunda lectura que podría diferir.
         AmlCheck aml = rejectionReason == null ? checkAml(account, cmd) : AmlCheck.notRun();
@@ -501,6 +537,12 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                 destino.beneficiaryAccountType(), destino.beneficiaryTaxId(), "DISPOSICION DE CREDITO");
 
         dispositionRepository.save(disposition);
+
+        // His payment reference on her line, from his first placement on: his receipt prints it, and a deposit to her
+        // CLABE with it lands on his installments.
+        if (type == DispositionType.THIRD_PARTY_CREDIT && cmd.beneficiaryPartyId() != null && clientReferences != null) {
+            clientReferences.ensure(account.getCreditAccountId(), account.getObligorPartyId(), cmd.beneficiaryPartyId());
+        }
 
         // BK-11 · Aquí NO sale dinero. La disposición queda PROCESSING y se publica el hecho:
         // `disposition-authorized`, que `disbursement` ya escuchaba y nadie emitía. Antes esto
@@ -589,6 +631,18 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
             return "BENEFICIARY_NAME_REQUIRED";
         }
         return null;
+    }
+
+    /**
+     * The client's side of a placement on a line that pays a distributor: the red list (with any active mark he
+     * receives nothing, from any distributor) and the branch's limits for his type (amount, term, live loans and
+     * outstanding with her). A direct credit never comes here: its amount and term are the score's.
+     */
+    private String validateClient(CreditAccount account, ProcessDispositionCommand cmd) {
+        if (clientChecks == null || cmd.beneficiaryPartyId() == null || productType(account) != DispositionType.THIRD_PARTY_CREDIT) {
+            return null;
+        }
+        return clientChecks.reject(account, cmd.beneficiaryPartyId(), cmd.amount(), cmd.termPeriods());
     }
 
     /**

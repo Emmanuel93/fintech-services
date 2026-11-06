@@ -31,8 +31,18 @@ public record PaymentAppliedOutboundPayload(
         UUID inboundCreditId,
         Integer allocationSeq,
         String allocationMode,
-        String trackingKey
+        String trackingKey,
+        /** The distributor's client who paid with his own reference; null for any other payment. */
+        UUID beneficiaryPartyId
 ) {
+    public PaymentAppliedOutboundPayload(String eventId, UUID creditAccountId, BigDecimal amount, long snapshotVersion,
+                                         LocalDate valueDate, UUID obligorPartyId, Instant receivedAt,
+                                         LocalDate operationDate, String fundingSource, UUID inboundCreditId,
+                                         Integer allocationSeq, String allocationMode, String trackingKey) {
+        this(eventId, creditAccountId, amount, snapshotVersion, valueDate, obligorPartyId, receivedAt, operationDate,
+                fundingSource, inboundCreditId, allocationSeq, allocationMode, trackingKey, null);
+    }
+
     public PaymentAppliedOutboundPayload(String eventId, UUID creditAccountId, BigDecimal amount, long snapshotVersion,
                                          LocalDate valueDate) {
         this(eventId, creditAccountId, amount, snapshotVersion, valueDate, null, null, null, "DIRECT", null, null,

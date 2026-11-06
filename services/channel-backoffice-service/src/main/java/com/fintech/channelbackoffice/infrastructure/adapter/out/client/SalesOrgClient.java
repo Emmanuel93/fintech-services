@@ -72,6 +72,35 @@ public class SalesOrgClient {
         return postMap("/api/v1/sales-org/units", body);
     }
 
+    // ── Política de colocación (línea de distribuidora) ────────────────────────
+
+    public Map<String, Object> placementPolicy(String code) {
+        return getMap("/api/v1/sales-org/units/by-code/" + code + "/placement-policy");
+    }
+
+    public Map<String, Object> setPlacementPolicy(String code, Map<String, Object> body) {
+        log.info("-> PUT sales-org /units/by-code/{}/placement-policy", code);
+        return webClient.put()
+                .uri("/api/v1/sales-org/units/by-code/{code}/placement-policy", code)
+                .headers(DomainClientSupport.staffIdentity())
+                .bodyValue(body == null ? Map.of() : body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("sales-org-service", r))
+                .bodyToMono(MAP)
+                .block();
+    }
+
+    public Map<String, Object> clearPlacementPolicy(String code) {
+        log.info("-> DELETE sales-org /units/by-code/{}/placement-policy", code);
+        return webClient.delete()
+                .uri("/api/v1/sales-org/units/by-code/{code}/placement-policy", code)
+                .headers(DomainClientSupport.staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("sales-org-service", r))
+                .bodyToMono(MAP)
+                .block();
+    }
+
     public Map<String, Object> getUnit(UUID unitId) {
         return getMap("/api/v1/sales-org/units/" + unitId);
     }

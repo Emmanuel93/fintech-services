@@ -3,6 +3,7 @@ package com.fintech.creditportfolio.application.service;
 import com.fintech.creditportfolio.application.port.in.FindCreditAccountUseCase;
 import com.fintech.creditportfolio.application.port.in.StatementViewUseCase;
 import com.fintech.creditportfolio.application.port.out.BalanceEventRepository;
+import com.fintech.creditportfolio.application.port.out.CollectionAccountProjection;
 import com.fintech.creditportfolio.application.port.out.DispositionRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.domain.BalanceEvent;
@@ -63,15 +64,17 @@ public class StatementViewService implements StatementViewUseCase {
     private final InstallmentRepository installments;
     private final DispositionRepository dispositions;
     private final ProductConfigResolver configResolver;
+    private final CollectionAccountProjection collectionAccounts;
 
     public StatementViewService(FindCreditAccountUseCase accounts, BalanceEventRepository ledger,
                                 InstallmentRepository installments, DispositionRepository dispositions,
-                                ProductConfigResolver configResolver) {
-        this.accounts       = accounts;
-        this.ledger         = ledger;
-        this.installments   = installments;
-        this.dispositions   = dispositions;
-        this.configResolver = configResolver;
+                                ProductConfigResolver configResolver, CollectionAccountProjection collectionAccounts) {
+        this.accounts           = accounts;
+        this.ledger             = ledger;
+        this.installments       = installments;
+        this.dispositions       = dispositions;
+        this.configResolver     = configResolver;
+        this.collectionAccounts = collectionAccounts;
     }
 
     @Override
@@ -90,7 +93,7 @@ public class StatementViewService implements StatementViewUseCase {
 
         List<Movement> movimientos = periodo.stream()
                 .filter(e -> !DAILY_ACCRUALS.contains(e.getEventType()))
-                .map(e -> new Movement(e.getAppliedAt(), e.getEventType(), e.getDeltaAmount(), e.getPrincipalAfter()))
+                .map(e -> new Movement(e.getAppliedAt(), e.getEventType(), e.getDeltaAmount(), e.getPrincipalAfter(), e.getBeneficiaryPartyId()))
                 .toList();
 
         List<InstallmentLine> plan = installments.findByScheduleIdOrdered(creditAccountId).stream()
@@ -145,7 +148,7 @@ public class StatementViewService implements StatementViewUseCase {
         // A quita closed the line to new placements (her exit): the statement says so instead of "pay what is overdue".
         LocalDate lineClosedOn = terms.commission() == null ? null
                 : StatementCoverage.quitaOn(ledger.paymentsOf(creditAccountId));
-        return new StatementView(account(account), from, to, hasta, apertura, cierre, totals(periodo),
+        return new StatementView(account(account, collectionClabeOf(account)), from, to, hasta, apertura, cierre, totals(periodo),
                 movimientos, plan, plans(creditAccountId, DispositionType.THIRD_PARTY_CREDIT, from, to, hasta,
                         facturableHasta, terms),
                 enPlanes, facturadoDePlanes, capitalFacturado, cargos, atraso,
@@ -358,12 +361,22 @@ public class StatementViewService implements StatementViewUseCase {
                 i.getScheduledCommission());
     }
 
-    private static Account account(CreditAccount a) {
+    /**
+     * The holder's active collection CLABE (the SPEI connector's, one per person): what their statement and their
+     * clients' receipts tell them to pay to. Never the account's {@code clabeAccount}, which is where its money goes
+     * out to: a payment sent there would never reach the line.
+     */
+    private String collectionClabeOf(CreditAccount a) {
+        if (collectionAccounts == null || a.getObligorPartyId() == null) return null;
+        return collectionAccounts.activeClabes(List.of(a.getObligorPartyId())).get(a.getObligorPartyId());
+    }
+
+    private static Account account(CreditAccount a, String collectionClabe) {
         return new Account(a.getCreditAccountId(), a.getContractNumber(), a.getProductCode(), a.getProductType(),
                 a.getProductBehavior(), a.getObligorPartyId(), a.getStatus().name(), a.getNominalRate(),
                 a.getMoratoriumRate(), a.getVatRate(), a.getCreditLimit(), a.getAvailableCredit(),
                 a.getPrincipalBalance(), a.getAccruedInterestBalance(), a.getPenaltyBalance(), a.getIvaBalance(),
-                a.getAssignedTerm(), a.getAmortizationType(), a.getActivatedAt(), a.getClabeAccount(),
+                a.getAssignedTerm(), a.getAmortizationType(), a.getActivatedAt(), collectionClabe,
                 a.getDaysDelinquent(), a.getCat());
     }
 

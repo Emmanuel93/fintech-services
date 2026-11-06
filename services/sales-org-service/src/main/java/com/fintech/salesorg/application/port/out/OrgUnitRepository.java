@@ -36,6 +36,9 @@ public interface OrgUnitRepository {
      */
     List<OrgUnit> findSubtree(String ancestorPath);
 
+    /** The unit of {@code path} and every ancestor of it, root first: the chain a policy is inherited down. */
+    List<OrgUnit> findAncestorsInclusive(String path);
+
     /** party_refs de los nodos vigentes de un nivel dado (por código) en el subárbol de un path. */
     List<UUID> findPartyRefsInSubtreeByLevel(String ancestorPath, String levelCode);
 

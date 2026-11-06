@@ -21,9 +21,12 @@ public record PaymentAppliedPayload(
         String fundingSource,
         UUID inboundCreditId,
         String allocationMode,
-        String trackingKey
+        String trackingKey,
+        /** The distributor's client who paid with his own reference (allocation BENEFICIARY); null otherwise. */
+        UUID beneficiaryPartyId
 ) {
     public PaymentFacts facts() {
-        return new PaymentFacts(receivedAt, operationDate, fundingSource, inboundCreditId, allocationMode, trackingKey);
+        return new PaymentFacts(receivedAt, operationDate, fundingSource, inboundCreditId, allocationMode, trackingKey,
+                beneficiaryPartyId);
     }
 }

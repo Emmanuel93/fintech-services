@@ -1,6 +1,7 @@
 package com.fintech.payments.infrastructure.config;
 
 import com.fintech.payments.infrastructure.adapter.in.messaging.BalanceUpdatedPayload;
+import com.fintech.payments.infrastructure.adapter.in.messaging.ClientReferenceAssignedListener;
 import com.fintech.payments.infrastructure.adapter.in.messaging.CollectionAccountAssignedListener;
 import com.fintech.payments.infrastructure.adapter.in.messaging.CreditAccountActivatedPayload;
 import com.fintech.payments.infrastructure.adapter.in.messaging.CreditReceivedListener;
@@ -53,6 +54,15 @@ public class KafkaConfig {
     creditReceivedListenerContainerFactory(KafkaProperties properties) {
         var f = new ConcurrentKafkaListenerContainerFactory<String, CreditReceivedListener.CreditReceivedPayload>();
         f.setConsumerFactory(jsonConsumerFactory(properties, CreditReceivedListener.CreditReceivedPayload.class));
+        return f;
+    }
+
+    /** The distributors' clients' references, as the portfolio assigns them. */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, ClientReferenceAssignedListener.ClientReferenceAssignedPayload>
+    clientReferenceAssignedListenerContainerFactory(KafkaProperties properties) {
+        var f = new ConcurrentKafkaListenerContainerFactory<String, ClientReferenceAssignedListener.ClientReferenceAssignedPayload>();
+        f.setConsumerFactory(jsonConsumerFactory(properties, ClientReferenceAssignedListener.ClientReferenceAssignedPayload.class));
         return f;
     }
 

@@ -21,6 +21,7 @@ import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import com.fintech.shared.time.BusinessClock;
 
@@ -87,6 +88,16 @@ public class PlacementOrchestrator {
                     : "Tu línea está bloqueada por atraso: paga lo vencido (" + MONEY.format(overdue) + ") para volver a colocar");
         }
 
+        // A client she placed before (same phone, already verified) is known: his type's limits and the red list
+        // are told at the door instead of after he went through the verification again.
+        UUID knownClient = placements.findByDistributorPartyIdOrderByCreatedAtDesc(distributorPartyId).stream()
+                .filter(p -> phone != null && phone.equals(p.getBeneficiaryPhone()) && p.getBeneficiaryPartyId() != null)
+                .map(Placement::getBeneficiaryPartyId).findFirst().orElse(null);
+        if (knownClient != null) {
+            refusalFor(line.creditAccountId(), knownClient, amount, termFortnights, distributorPartyId)
+                    .ifPresent(message -> { throw new PlacementValidationException(message); });
+        }
+
         BigDecimal available = line.availableCredit() == null ? BigDecimal.ZERO : line.availableCredit();
         BigDecimal payment = fortnightlyPayment(amount, termFortnights, line.nominalRate());
 
@@ -128,6 +139,18 @@ public class PlacementOrchestrator {
         Placement placement = lifecycle.approve(
                 placementId, distributorPartyId, riskAcknowledged, UUID.randomUUID());
 
+        // The client's side, asked before any money moves: his type's limits on her line and the red list. The
+        // portfolio decides again when it authorizes; asking here is what lets her read why, in her words.
+        if (placement.getBeneficiaryPartyId() != null) {
+            var refused = refusalFor(placement.getDistributorCreditAccountId(), placement.getBeneficiaryPartyId(),
+                    placement.getAmount(), placement.getTermFortnights(), distributorPartyId);
+            if (refused.isPresent()) {
+                log.warn("La colocación {} no se dispone: {}", placementId, refused.get());
+                lifecycle.fail(placementId, refused.get());
+                throw new PlacementValidationException(refused.get());
+            }
+        }
+
         try {
             Payee payee = payeeOf(placement);
             wallet.requestThirdPartyDisposition(
@@ -166,6 +189,14 @@ public class PlacementOrchestrator {
      * capturó al colocar: ambos son de la beneficiaria, que es lo que importa. El RFC no tiene
      * respaldo: sin party viaja vacío, que SPEI admite, en vez de inventarse o heredarse.
      */
+    /** Why the portfolio would refuse this placement to this client, in her words; empty when it fits or cannot tell. */
+    Optional<String> refusalFor(UUID lineId, UUID client, BigDecimal amount, int termFortnights, UUID distributorPartyId) {
+        return creditPortfolio.placementLimits(lineId, client, amount, termFortnights, distributorPartyId)
+                .filter(l -> !l.canPlace())
+                .map(l -> PlacementRefusal.inHerWords(l.reason(),
+                        l.flagsOrEmpty().stream().allMatch(f -> distributorPartyId.equals(f.distributorPartyId()))));
+    }
+
     Payee payeeOf(Placement placement) {
         PartyClient.PartyResponse ficha = placement.getBeneficiaryProspectId() == null
                 ? null

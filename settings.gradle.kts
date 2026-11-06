@@ -3,6 +3,8 @@ rootProject.name = "fintech-services"
 // ── Core ──────────────────────────────────────────────────────────────────────
 // El kernel compartido no es un servicio desplegable: se queda en la raíz.
 include("shared")
+// The documents every service prints (statements, payment receipts): model, formats, brand, Jasper engine, fonts.
+include("shared-documents")
 
 // ── Services ──────────────────────────────────────────────────────────────────
 // Los servicios viven bajo `services/`, pero conservan su ruta de proyecto Gradle
@@ -38,7 +40,8 @@ val services = listOf(
     "stp-service",
     "beneficiary-service",
     "compliance-service",
-    "statement-service"
+    "statement-service",
+    "receipt-service"
 )
 
 services.forEach { name ->

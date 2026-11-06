@@ -1,5 +1,7 @@
 package com.fintech.statement.application.service.assembly;
 
+import com.fintech.documents.DocumentModel;
+import com.fintech.documents.Formats;
 import com.fintech.statement.application.StatementProperties;
 import com.fintech.statement.application.port.out.StatementSource.Movement;
 import com.fintech.statement.application.port.out.StatementSource.PlacementLine;
@@ -16,10 +18,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
-import static com.fintech.statement.application.service.assembly.Formats.date;
-import static com.fintech.statement.application.service.assembly.Formats.money;
-import static com.fintech.statement.application.service.assembly.Formats.nz;
-import static com.fintech.statement.application.service.assembly.Formats.rate;
+import static com.fintech.documents.Formats.date;
+import static com.fintech.documents.Formats.money;
+import static com.fintech.documents.Formats.nz;
+import static com.fintech.documents.Formats.rate;
 
 /**
  * Fills a product's template. There is one per family ({@link StatementLayout}); what every statement of a SOFOM ENR
@@ -44,6 +46,9 @@ public abstract class StatementAssembler {
             Map.entry("DISPOSITION_PAYROLL", "Disposición de nómina"),
             Map.entry("PAYMENT_APPLIED", "Pago recibido"),
             Map.entry("PAYMENT_RETURNED", "Pago devuelto"),
+            // A distributor's commission netted against her statement: in her legal documents, her early-payment discount.
+            Map.entry("COMMISSION_NETTED", "Descuento por pronto pago aplicado"),
+            Map.entry("COMMISSION_NETTED_REVERSED", "Reverso del descuento por pronto pago"),
             Map.entry("CHARGE_OPENING_FEE", "Comisión por apertura"),
             Map.entry("CHARGE_ADMIN_FEE", "Comisión por administración"),
             Map.entry("CHARGE_PREPAYMENT_FEE", "Comisión por pago anticipado"),
@@ -179,7 +184,7 @@ public abstract class StatementAssembler {
                              || "WRITE_OFF".equals(mv.type()) || "CHARGE_REVERSED".equals(mv.type())
                              || "CHARGE_WAIVED".equals(mv.type());
             String amount = money(nz(mv.amount()).abs());
-            m.row("section", "MOV", "c1", date(mv.appliedAt(), ctx.zone()), "c2", concept(mv.type()),
+            m.row("section", "MOV", "c1", date(mv.appliedAt(), ctx.zone()), "c2", conceptOf(mv, ctx),
                   "c3", credit ? "" : amount, "c4", credit ? amount : "");
         }
         accrual(m, f, "Intereses ordinarios del periodo", t.ordinaryInterest());
@@ -188,6 +193,15 @@ public abstract class StatementAssembler {
         if (m.rows().size() == before) {
             m.row("section", "MOV", "emphasis", "EMPTY", "c1", "Sin movimientos en el periodo.");
         }
+    }
+
+    /** A payment a distributor's client made himself reads as his: «Pago directo de Rosa Elena Ibarra Salgado». */
+    static String conceptOf(Movement mv, AssemblyContext ctx) {
+        if (mv.beneficiaryPartyId() != null && mv.type() != null && mv.type().startsWith("PAYMENT_APPLIED")) {
+            var who = ctx.beneficiaries() == null ? null : ctx.beneficiaries().get(mv.beneficiaryPartyId());
+            return "Pago directo de " + (who != null && who.displayName() != null ? who.displayName() : "tu cliente");
+        }
+        return concept(mv.type());
     }
 
     private static void accrual(DocumentModel m, CutoffFacts f, String concept, BigDecimal amount) {

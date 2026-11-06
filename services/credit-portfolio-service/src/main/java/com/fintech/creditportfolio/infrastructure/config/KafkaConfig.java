@@ -1,5 +1,6 @@
 package com.fintech.creditportfolio.infrastructure.config;
 
+import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.PlacementPolicyChangedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.BusinessCalendarDayListener;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.CollectionAccountAssignedListener;
 import com.fintech.shared.trace.kafka.DeadLetters;
@@ -53,6 +54,17 @@ public class KafkaConfig {
         config.put(JsonDeserializer.VALUE_DEFAULT_TYPE, type.getName());
         config.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
         return new DefaultKafkaConsumerFactory<>(config);
+    }
+
+    // ── sales-org.placement-policy-changed ──────────────────────────────────────
+
+    /** The branch's placement policy, resolved per unit by sales-org: the portfolio's copy for authorizing placements. */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, PlacementPolicyChangedPayload>
+    placementPolicyChangedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, PlacementPolicyChangedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, PlacementPolicyChangedPayload.class));
+        return factory;
     }
 
     // ── origination.credit-product-creation-requested ────────────────────────

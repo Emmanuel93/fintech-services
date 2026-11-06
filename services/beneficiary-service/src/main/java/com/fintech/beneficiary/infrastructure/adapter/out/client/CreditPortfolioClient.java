@@ -76,6 +76,125 @@ public class CreditPortfolioClient {
     private static final ParameterizedTypeReference<List<Installment>> CUOTAS =
             new ParameterizedTypeReference<>() {};
 
+    private static final ParameterizedTypeReference<List<ClientProfile>> PROFILES = new ParameterizedTypeReference<>() {};
+    private static final ParameterizedTypeReference<List<StoredFlag>> FLAGS = new ParameterizedTypeReference<>() {};
+
+    // ── The distributor's clients: type, red list, limits ──────────────────────────────────────
+
+    /**
+     * What this client may take on her line: his type, the branch's limits for it and, with an amount and a term,
+     * whether the portfolio would authorize it. Empty when the portfolio does not answer: it decides again at
+     * authorization, so its silence never lets a placement through.
+     */
+    public Optional<PlacementLimits> placementLimits(UUID creditAccountId, UUID beneficiaryPartyId, BigDecimal amount,
+                                                     Integer termPeriods, UUID asUser) {
+        try {
+            return Optional.ofNullable(webClient.get()
+                    .uri(uri -> uri.path("/api/v1/portfolio/accounts/{id}/placement-limits")
+                            .queryParam("beneficiaryPartyId", beneficiaryPartyId)
+                            .queryParamIfPresent("amount", Optional.ofNullable(amount))
+                            .queryParamIfPresent("termPeriods", Optional.ofNullable(termPeriods))
+                            .build(creditAccountId))
+                    .header("X-User-Id", asUser.toString())
+                    .retrieve()
+                    .bodyToMono(PlacementLimits.class)
+                    .block());
+        } catch (RuntimeException e) {
+            log.warn("credit-portfolio no dio los límites del cliente {} en la línea {}: {}", beneficiaryPartyId, creditAccountId, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /** The profiles of several clients (her directory); empty when the portfolio does not answer. */
+    public List<ClientProfile> profiles(List<UUID> beneficiaryPartyIds, UUID asUser) {
+        if (beneficiaryPartyIds.isEmpty()) return List.of();
+        try {
+            List<ClientProfile> profiles = webClient.get()
+                    .uri(uri -> uri.path("/api/v1/portfolio/beneficiaries/profiles")
+                            .queryParam("partyIds", beneficiaryPartyIds.toArray())
+                            .build())
+                    .header("X-User-Id", asUser.toString())
+                    .retrieve()
+                    .bodyToMono(PROFILES)
+                    .block();
+            return profiles == null ? List.of() : profiles;
+        } catch (RuntimeException e) {
+            log.warn("credit-portfolio no dio los perfiles de {} clientes: {}", beneficiaryPartyIds.size(), e.getMessage());
+            return List.of();
+        }
+    }
+
+    public Optional<ClientProfile> profile(UUID beneficiaryPartyId, UUID asUser) {
+        return profiles(List.of(beneficiaryPartyId), asUser).stream().findFirst();
+    }
+
+    /** Every mark ever put on the client, newest first. */
+    public List<StoredFlag> flags(UUID beneficiaryPartyId, UUID asUser) {
+        List<StoredFlag> flags = webClient.get()
+                .uri("/api/v1/portfolio/beneficiaries/{id}/flags", beneficiaryPartyId)
+                .header("X-User-Id", asUser.toString())
+                .retrieve()
+                .bodyToMono(FLAGS)
+                .block();
+        return flags == null ? List.of() : flags;
+    }
+
+    /** She reports her client: the mark goes to the red list with her reason and comments. */
+    public StoredFlag report(UUID beneficiaryPartyId, UUID distributorPartyId, UUID creditAccountId, String reason, String comment) {
+        log.info("-> POST credit-portfolio /beneficiaries/{}/flags motivo={} por {}", beneficiaryPartyId, reason, distributorPartyId);
+        return webClient.post()
+                .uri("/api/v1/portfolio/beneficiaries/{id}/flags", beneficiaryPartyId)
+                .header("X-User-Id", distributorPartyId.toString())
+                .bodyValue(new ReportBody(reason, comment, "DISTRIBUTOR", distributorPartyId, creditAccountId, distributorPartyId.toString()))
+                .retrieve()
+                .bodyToMono(StoredFlag.class)
+                .block();
+    }
+
+    public StoredFlag clearFlag(UUID beneficiaryPartyId, UUID flagId, UUID clearedBy, String comment) {
+        log.info("-> POST credit-portfolio /beneficiaries/{}/flags/{}/clear por {}", beneficiaryPartyId, flagId, clearedBy);
+        return webClient.post()
+                .uri("/api/v1/portfolio/beneficiaries/{id}/flags/{flag}/clear", beneficiaryPartyId, flagId)
+                .header("X-User-Id", clearedBy.toString())
+                .bodyValue(new ClearBody(comment, clearedBy.toString()))
+                .retrieve()
+                .bodyToMono(StoredFlag.class)
+                .block();
+    }
+
+    record ReportBody(String reason, String comment, String source, UUID distributorPartyId, UUID creditAccountId, String raisedBy) {}
+
+    record ClearBody(String comment, String clearedBy) {}
+
+    /** A red-list mark as the portfolio shows it: derived (no flagId) or stored (a report). */
+    public record ClientFlag(UUID flagId, String reason, String source, Instant since, UUID distributorPartyId,
+                             UUID creditAccountId, String detail, String comment) {}
+
+    public record ClientProfile(UUID beneficiaryPartyId, String type, List<ClientFlag> flags, int loansGranted, int loansPaid,
+                                int activeLoans, BigDecimal outstanding, List<LineStanding> lines) {
+
+        public List<ClientFlag> flagsOrEmpty() { return flags == null ? List.of() : flags; }
+
+        public List<LineStanding> linesOrEmpty() { return lines == null ? List.of() : lines; }
+    }
+
+    public record LineStanding(UUID creditAccountId, UUID distributorPartyId, int activeLoans, BigDecimal outstanding,
+                               boolean voucherOverdue) {}
+
+    public record Limits(BigDecimal maxLoanAmount, BigDecimal maxOutstanding, Integer maxActiveLoans, Integer maxTerm) {}
+
+    public record PlacementLimits(UUID beneficiaryPartyId, String clientType, boolean policyConfigured, String inheritedFrom,
+                                  Limits limits, int activeLoans, BigDecimal outstanding, BigDecimal amountAvailable,
+                                  Integer loansAvailable, List<ClientFlag> flags, boolean canPlace, String reason) {
+
+        public List<ClientFlag> flagsOrEmpty() { return flags == null ? List.of() : flags; }
+    }
+
+    /** A stored mark with its history (who put it, who cleared it and why). */
+    public record StoredFlag(UUID flagId, UUID beneficiaryPartyId, String reason, String source, UUID distributorPartyId,
+                             UUID creditAccountId, String detail, String comment, Instant raisedAt, String raisedBy,
+                             Instant clearedAt, String clearedBy, String clearComment, boolean active) {}
+
     /**
      * El avance del calendario de una disposición: cuántas quincenas van y cuántos días de mora.
      *

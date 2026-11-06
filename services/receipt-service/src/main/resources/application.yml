@@ -1,0 +1,82 @@
+spring:
+  application:
+    name: receipt-service
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/fintech}
+    username: ${POSTGRES_USER:fintech}
+    password: ${POSTGRES_PASSWORD:fintech}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:8}
+
+  liquibase:
+    change-log: classpath:db/changelog/receipt/db.changelog-receipt.xml
+    enabled: true
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      # Its own group on closing.cutoff-closed: the receipts read the same cutoffs as the statements, in parallel.
+      group-id: ${KAFKA_GROUP_ID:receipt-service}
+      auto-offset-reset: earliest
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      acks: all
+      retries: 3
+      properties:
+        spring.json.add.type.headers: false
+        enable.idempotence: true
+
+server:
+  port: ${SERVER_PORT:8107}
+  error:
+    include-message: always
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+fintech:
+  test-support:
+    enabled: ${TEST_SUPPORT_ENABLED:false}
+  receipt:
+    node-id: ${HOSTNAME:local}
+    partitions: ${RECEIPT_PARTITIONS:12}
+    concurrency: ${RECEIPT_CONCURRENCY:4}
+    max-attempts: 5
+    stale-after: 10m
+    retry:
+      enabled: true
+      interval: PT2M
+    issuer:
+      name: ${RECEIPT_ISSUER_NAME:Kredius}
+      legal-name: ${RECEIPT_ISSUER_LEGAL_NAME:Fintech Services, S.A. de C.V., SOFOM, E.N.R.}
+      rfc: ${RECEIPT_ISSUER_RFC:FSE200101AB1}
+      address: ${RECEIPT_ISSUER_ADDRESS:domicilio por configurar}
+      phone: ${RECEIPT_ISSUER_PHONE:teléfono por configurar}
+      website: ${RECEIPT_ISSUER_WEBSITE:la app Kredius}
+      une-address: ${RECEIPT_ISSUER_UNE_ADDRESS:domicilio de la UNE por configurar}
+      une-email: ${RECEIPT_ISSUER_UNE_EMAIL:une@kredius.mx}
+      une-phone: ${RECEIPT_ISSUER_UNE_PHONE:teléfono de la UNE por configurar}
+      condusef-website: ${RECEIPT_CONDUSEF_WEBSITE:www.condusef.gob.mx}
+      condusef-phone: ${RECEIPT_CONDUSEF_PHONE:55 5340 0999}
+    branding:
+      logo: ${RECEIPT_BRANDING_LOGO:classpath:branding/kredius-logotipo-azul.png}
+      # Colors by role (primary, accent, ink, muted, paper, soft, line, primaryContainer, onPrimaryContainer);
+      # a role left out keeps the design system's.
+      palette: {}
+    clients:
+      credit-portfolio-url: ${CREDIT_PORTFOLIO_URL:http://localhost:8087}
+      party-url: ${PARTY_URL:http://localhost:8083}
+      timeout: PT10S
+  scheduling:
+    lock:
+      table: receipt.shedlock

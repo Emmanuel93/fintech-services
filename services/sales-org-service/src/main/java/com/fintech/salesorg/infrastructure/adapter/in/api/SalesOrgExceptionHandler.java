@@ -1,7 +1,9 @@
 package com.fintech.salesorg.infrastructure.adapter.in.api;
 
+import com.fintech.salesorg.domain.CatalogUnavailableException;
 import com.fintech.salesorg.domain.DuplicateCodeException;
 import com.fintech.salesorg.domain.InvalidHierarchyException;
+import com.fintech.salesorg.domain.InvalidPlacementPolicyException;
 import com.fintech.salesorg.domain.OrgLevelNotFoundException;
 import com.fintech.salesorg.domain.OrgUnitNotFoundException;
 import com.fintech.shared.exception.DomainException;
@@ -26,9 +28,15 @@ class SalesOrgExceptionHandler {
         return problem(HttpStatus.CONFLICT, ex);
     }
 
-    @ExceptionHandler(InvalidHierarchyException.class)
-    ProblemDetail handleInvalidHierarchy(InvalidHierarchyException ex) {
+    @ExceptionHandler({InvalidHierarchyException.class, InvalidPlacementPolicyException.class})
+    ProblemDetail handleInvalidHierarchy(DomainException ex) {
         return problem(HttpStatus.BAD_REQUEST, ex);
+    }
+
+    /** The catalog could not be read: the policy is not saved unchecked, and the caller is told to retry. */
+    @ExceptionHandler(CatalogUnavailableException.class)
+    ProblemDetail handleCatalogUnavailable(CatalogUnavailableException ex) {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, ex);
     }
 
     /** Carreras que pasan la verificación en memoria y chocan con un índice único en la base. */

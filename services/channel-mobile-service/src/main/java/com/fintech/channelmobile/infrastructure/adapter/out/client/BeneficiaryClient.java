@@ -11,6 +11,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Mono;
 
+import java.math.BigDecimal;
+import java.util.Optional;
 import java.util.Map;
 import java.util.UUID;
 
@@ -55,6 +57,24 @@ public class BeneficiaryClient {
 
     public JsonNode beneficiaries(String userId) {
         return get(userId, uri -> uri.path("/api/v1/beneficiaries").build());
+    }
+
+    /** What her client may take on her line: type, limits, headroom and, for an offer, why not (in her words). */
+    public JsonNode placementLimits(String userId, UUID beneficiaryPartyId, BigDecimal amount, Integer termPeriods) {
+        return get(userId, uri -> uri.path("/api/v1/beneficiaries/{id}/placement-limits")
+                .queryParamIfPresent("amount", Optional.ofNullable(amount))
+                .queryParamIfPresent("termPeriods", Optional.ofNullable(termPeriods))
+                .build(beneficiaryPartyId));
+    }
+
+    /** She reports her client to the red list. */
+    public JsonNode reportClient(String userId, UUID beneficiaryPartyId, Map<String, Object> body) {
+        return post(userId, "/api/v1/beneficiaries/" + beneficiaryPartyId + "/reports", body);
+    }
+
+    /** She clears her own report. */
+    public JsonNode clearReport(String userId, UUID beneficiaryPartyId, UUID flagId, Map<String, Object> body) {
+        return post(userId, "/api/v1/beneficiaries/" + beneficiaryPartyId + "/reports/" + flagId + "/clear", body);
     }
 
     public JsonNode createPlacement(String userId, Map<String, Object> body) {

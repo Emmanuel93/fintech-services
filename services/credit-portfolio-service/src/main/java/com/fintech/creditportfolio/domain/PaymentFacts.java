@@ -10,7 +10,17 @@ import java.util.UUID;
  * id, its tracking key and how this share was applied (REFERENCED, BY_RULE, CREDIT_BALANCE). Travels on to accounting.
  */
 public record PaymentFacts(Instant receivedAt, LocalDate operationDate, String fundingSource, UUID inboundCreditId,
-                           String allocationMode, String trackingKey) {
+                           String allocationMode, String trackingKey, UUID beneficiaryPartyId) {
 
-    public static final PaymentFacts NONE = new PaymentFacts(null, null, null, null, null, null);
+    public static final PaymentFacts NONE = new PaymentFacts(null, null, null, null, null, null, null);
+
+    public PaymentFacts(Instant receivedAt, LocalDate operationDate, String fundingSource, UUID inboundCreditId,
+                        String allocationMode, String trackingKey) {
+        this(receivedAt, operationDate, fundingSource, inboundCreditId, allocationMode, trackingKey, null);
+    }
+
+    /** A distributor's client paid it himself, with his own reference: it covers his installments first. */
+    public boolean byAClient() {
+        return beneficiaryPartyId != null;
+    }
 }

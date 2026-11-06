@@ -6,5 +6,7 @@ package com.fintech.payments.domain.allocation;
  * arrived; it stays as the payer's balance in favor until a due installment uses it or it is refunded.
  */
 public enum AllocationMode {
-    REFERENCED, BY_RULE, CREDIT_BALANCE
+    REFERENCED, BY_RULE, CREDIT_BALANCE,
+    /** A distributor's client paid with his own reference: to her line, covering his installments first. */
+    BENEFICIARY
 }

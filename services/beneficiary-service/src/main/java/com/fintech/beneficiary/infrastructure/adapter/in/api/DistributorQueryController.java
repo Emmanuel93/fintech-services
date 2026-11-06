@@ -1,5 +1,13 @@
 package com.fintech.beneficiary.infrastructure.adapter.in.api;
 
+import java.util.Objects;
+
+import java.util.HashMap;
+
+import java.time.Instant;
+
+import com.fintech.beneficiary.infrastructure.adapter.out.client.CreditPortfolioClient;
+
 import com.fintech.beneficiary.application.port.out.PlacementRepository;
 import com.fintech.beneficiary.application.service.PlacementOrchestrator;
 import com.fintech.beneficiary.domain.Placement;
@@ -37,10 +45,13 @@ class DistributorQueryController {
 
     private final PlacementOrchestrator orchestrator;
     private final PlacementRepository placements;
+    private final CreditPortfolioClient portfolio;
 
-    DistributorQueryController(PlacementOrchestrator orchestrator, PlacementRepository placements) {
+    DistributorQueryController(PlacementOrchestrator orchestrator, PlacementRepository placements,
+                               CreditPortfolioClient portfolio) {
         this.orchestrator = orchestrator;
         this.placements   = placements;
+        this.portfolio    = portfolio;
     }
 
     @Operation(summary = "Mi línea de distribuidor",
@@ -77,7 +88,15 @@ class DistributorQueryController {
         List<BeneficiaryResponse> rows = new ArrayList<>();
         byPerson.forEach((phone, list) -> rows.add(toRow(list)));
         rows.sort(Comparator.comparing(BeneficiaryResponse::fullName));
-        return ResponseEntity.ok(new BeneficiaryListResponse(rows));
+
+        // His type and the red list, one portfolio call for the whole directory. She sees her own marks; another
+        // distributor's mark only tells her that Kredius cannot lend to him today.
+        List<UUID> ids = rows.stream().map(BeneficiaryResponse::partyId).filter(Objects::nonNull).distinct().toList();
+        Map<UUID, CreditPortfolioClient.ClientProfile> profiles = new HashMap<>();
+        portfolio.profiles(ids, distributorPartyId).forEach(pr -> profiles.put(pr.beneficiaryPartyId(), pr));
+        List<BeneficiaryResponse> withProfile = rows.stream()
+                .map(r -> r.withProfile(profiles.get(r.partyId()), distributorPartyId)).toList();
+        return ResponseEntity.ok(new BeneficiaryListResponse(withProfile));
     }
 
     private BeneficiaryResponse toRow(List<Placement> history) {
@@ -127,7 +146,8 @@ class DistributorQueryController {
                 summaryOf(latest, history.size()),
                 status,
                 history.size(),
-                facts);
+                facts,
+                null, true, List.of());
     }
 
     /** Lo que ganaría si cobra todo a tiempo — el dato útil cuando todavía no ha cobrado nada. */
@@ -178,9 +198,49 @@ class DistributorQueryController {
 
     record BeneficiaryListResponse(List<BeneficiaryResponse> beneficiaries) {}
 
+    /**
+     * @param clientType           NUEVO or REVOLVENTE: which of her branch's limits apply to him; null until his KYC
+     * @param canReceivePlacements no red-list mark on him, hers or anyone's
+     * @param warnings             the red-list marks that are hers to see (her reports, her line's arrears)
+     */
     record BeneficiaryResponse(
             UUID partyId, String fullName, String phoneMask, String summary,
-            String status, int placementsCount, List<FactResponse> facts) {}
+            String status, int placementsCount, List<FactResponse> facts,
+            String clientType, boolean canReceivePlacements, List<WarningResponse> warnings) {
+
+        BeneficiaryResponse withProfile(CreditPortfolioClient.ClientProfile profile, UUID her) {
+            if (profile == null) return this;
+            List<WarningResponse> hers = profile.flagsOrEmpty().stream()
+                    .filter(f -> her.equals(f.distributorPartyId()))
+                    .map(WarningResponse::of).toList();
+            return new BeneficiaryResponse(partyId, fullName, phoneMask, summary, status, placementsCount, facts,
+                    profile.type(), profile.flagsOrEmpty().isEmpty(), hers);
+        }
+    }
+
+    /** One red-list mark as she reads it. */
+    record WarningResponse(UUID flagId, String reason, String label, Instant since, String comment) {
+
+        static WarningResponse of(CreditPortfolioClient.ClientFlag f) {
+            return new WarningResponse(f.flagId(), f.reason(), labelOf(f), f.since(), f.comment());
+        }
+
+        private static String labelOf(CreditPortfolioClient.ClientFlag f) {
+            return switch (f.reason() == null ? "" : f.reason()) {
+                case "DISTRIBUTOR_REPORT" -> "Lo reportaste: " + switch (f.detail() == null ? "" : f.detail()) {
+                    case "VOUCHER_UNPAID" -> "no te ha pagado su vale";
+                    case "REFUSES_TO_PAY" -> "se niega a pagar";
+                    case "NOT_LOCATABLE" -> "no se le localiza";
+                    case "MISCONDUCT" -> "mala conducta";
+                    case "SUSPECTED_FRAUD" -> "sospecha de fraude";
+                    default -> "otro motivo";
+                };
+                case "VOUCHER_IN_ARREARS" -> "Tiene cuotas vencidas";
+                case "DISTRIBUTOR_IN_ARREARS" -> "Tu línea tiene pagos vencidos: sus cuotas siguen sin pagar";
+                default -> "En lista roja";
+            };
+        }
+    }
 
     /** Valores ya formateados: son de lectura, no de cálculo. */
     record FactResponse(String label, String value, boolean good, boolean bad) {}

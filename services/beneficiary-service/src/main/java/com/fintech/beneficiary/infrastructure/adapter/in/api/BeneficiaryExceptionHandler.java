@@ -1,5 +1,6 @@
 package com.fintech.beneficiary.infrastructure.adapter.in.api;
 
+import com.fintech.beneficiary.domain.ClientNotYoursException;
 import com.fintech.beneficiary.domain.DuplicateLivePlacementException;
 import com.fintech.beneficiary.domain.InsufficientLineException;
 import com.fintech.beneficiary.domain.InvalidPlacementTransitionException;
@@ -23,6 +24,11 @@ class BeneficiaryExceptionHandler {
     @ExceptionHandler(PlacementNotFoundException.class)
     ProblemDetail handleNotFound(PlacementNotFoundException ex) {
         return problem(HttpStatus.NOT_FOUND, ex);
+    }
+
+    @ExceptionHandler(ClientNotYoursException.class)
+    ProblemDetail handleClientNotYours(ClientNotYoursException ex) {
+        return problem(HttpStatus.FORBIDDEN, ex);
     }
 
     @ExceptionHandler(PlacementAccessDeniedException.class)

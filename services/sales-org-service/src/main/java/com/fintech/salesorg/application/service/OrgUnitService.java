@@ -2,6 +2,7 @@ package com.fintech.salesorg.application.service;
 
 import com.fintech.salesorg.application.port.in.CreateOrgUnitCommand;
 import com.fintech.salesorg.application.port.in.OrgUnitUseCase;
+import com.fintech.salesorg.application.port.in.PlacementPolicyUseCase;
 import com.fintech.salesorg.application.port.out.OrgLevelRepository;
 import com.fintech.salesorg.application.port.out.OrgUnitRepository;
 import com.fintech.salesorg.domain.DuplicateCodeException;
@@ -12,6 +13,8 @@ import com.fintech.salesorg.domain.OrgUnit;
 import com.fintech.salesorg.domain.OrgUnitNotFoundException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.Nullable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,10 +29,19 @@ public class OrgUnitService implements OrgUnitUseCase {
 
     private final OrgUnitRepository unitRepository;
     private final OrgLevelRepository levelRepository;
+    /** Publishes what placement policy reaches a unit that is created or moved; null where the tree is managed alone. */
+    private final PlacementPolicyUseCase placementPolicies;
 
     public OrgUnitService(OrgUnitRepository unitRepository, OrgLevelRepository levelRepository) {
+        this(unitRepository, levelRepository, null);
+    }
+
+    @Autowired
+    public OrgUnitService(OrgUnitRepository unitRepository, OrgLevelRepository levelRepository,
+                          @Nullable PlacementPolicyUseCase placementPolicies) {
         this.unitRepository = unitRepository;
         this.levelRepository = levelRepository;
+        this.placementPolicies = placementPolicies;
     }
 
     @Override
@@ -66,7 +78,11 @@ public class OrgUnitService implements OrgUnitUseCase {
         OrgUnit unit = OrgUnit.create(cmd.levelId(), cmd.parentUnitId(), cmd.code(), cmd.name(),
                 path, cmd.partyRef(), cmd.createdBy());
         log.info("Creating org unit code={} path={} level={}", cmd.code(), path, level.getCode());
-        return unitRepository.save(unit);
+        OrgUnit saved = unitRepository.save(unit);
+        // A new distributor under a branch with a policy places under it from her first day: her resolved copy goes
+        // out now, not when someone next edits the branch.
+        if (placementPolicies != null) placementPolicies.republish(saved);
+        return saved;
     }
 
     /**
@@ -134,6 +150,8 @@ public class OrgUnitService implements OrgUnitUseCase {
 
         log.info("Moved org unit {} from path {} to {} ({} descendientes reescritos)",
                 unit.getCode(), previousPath, newPath, Math.max(0, rama.size() - 1));
+        // The branch now inherits from another parent: what applies to every unit in it may have changed.
+        if (placementPolicies != null) placementPolicies.republish(unit);
         return unit;
     }
 

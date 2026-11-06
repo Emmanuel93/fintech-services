@@ -66,7 +66,7 @@ public class KafkaPaymentEventPublisher implements PaymentEventPublisher {
                 order.getCreditAccountId(), order.getAmount(), order.getSnapshotVersion(),
                 LocalDate.ofInstant(receivedAt, zone), order.getObligorPartyId(), receivedAt,
                 order.getOperationDate(), order.fundingSource().name(), order.getInboundCreditId(),
-                order.getAllocationSeq(), order.getAllocationMode(), order.getTrackingKey());
+                order.getAllocationSeq(), order.getAllocationMode(), order.getTrackingKey(), order.getBeneficiaryPartyId());
         afterCommit(() -> kafkaTemplate.send(TOPIC_PAYMENT_APPLIED, order.getCreditAccountId().toString(), payload)
                 .whenComplete((result, ex) -> {
                     if (ex != null) {

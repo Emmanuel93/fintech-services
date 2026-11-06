@@ -1,5 +1,7 @@
 package com.fintech.statement.application.service.assembly;
 
+import com.fintech.documents.DocumentModel;
+import com.fintech.documents.Formats;
 import com.fintech.statement.application.port.out.StatementSource;
 import com.fintech.statement.application.port.out.StatementSource.DistributorCommission;
 import com.fintech.statement.application.port.out.StatementSource.EarnedCommission;
@@ -22,10 +24,10 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.stream.Stream;
 
-import static com.fintech.statement.application.service.assembly.Formats.date;
-import static com.fintech.statement.application.service.assembly.Formats.money;
-import static com.fintech.statement.application.service.assembly.Formats.nz;
-import static com.fintech.statement.application.service.assembly.Formats.share;
+import static com.fintech.documents.Formats.date;
+import static com.fintech.documents.Formats.money;
+import static com.fintech.documents.Formats.nz;
+import static com.fintech.documents.Formats.share;
 
 /**
  * A distributor's line. What the distributor needs to know is how much to collect from each client this fortnight,

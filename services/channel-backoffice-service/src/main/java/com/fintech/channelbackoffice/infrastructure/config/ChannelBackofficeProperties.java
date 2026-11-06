@@ -35,6 +35,8 @@ public class ChannelBackofficeProperties {
     @NotBlank private String salesOrgServiceUrl;
     @NotBlank private String beneficiaryServiceUrl;
     @NotBlank private String statementServiceUrl;
+    /** The payment receipts of the distributors' clients. */
+    @NotBlank private String receiptServiceUrl;
     /** La mesa de cumplimiento (D16): cola de identidad y listas. */
     @NotBlank private String complianceServiceUrl;
     /** Bancos / Tesorería: cuentas propias, rutas de pago y la traza del dinero. */
@@ -139,6 +141,8 @@ public class ChannelBackofficeProperties {
     public void setBeneficiaryServiceUrl(String v) { this.beneficiaryServiceUrl = v; }
     public String getStatementServiceUrl() { return statementServiceUrl; }
     public void setStatementServiceUrl(String v) { this.statementServiceUrl = v; }
+    public String getReceiptServiceUrl() { return receiptServiceUrl; }
+    public void setReceiptServiceUrl(String v) { this.receiptServiceUrl = v; }
     public String getComplianceServiceUrl() { return complianceServiceUrl; }
     public void setComplianceServiceUrl(String v) { this.complianceServiceUrl = v; }
 

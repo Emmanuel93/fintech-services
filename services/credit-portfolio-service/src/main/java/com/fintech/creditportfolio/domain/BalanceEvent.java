@@ -84,6 +84,10 @@ public class BalanceEvent {
     @Column(name = "penalty_delta", updatable = false)
     private BigDecimal penaltyDelta;
 
+    /** The distributor's client who paid it with his own reference; null for any other entry. */
+    @Column(name = "beneficiary_party_id", updatable = false)
+    private UUID beneficiaryPartyId;
+
     protected BalanceEvent() {}
 
     /** Un movimiento del día de hoy (en hora de negocio). */
@@ -128,6 +132,14 @@ public class BalanceEvent {
         this.dayCloseDate = businessDate;
         return this;
     }
+
+    /** A payment a distributor's client made himself, with his own reference. */
+    public BalanceEvent paidBy(UUID beneficiaryPartyId) {
+        this.beneficiaryPartyId = beneficiaryPartyId;
+        return this;
+    }
+
+    public UUID getBeneficiaryPartyId() { return beneficiaryPartyId; }
 
     /** Records what the entry moved in each bucket (signed). */
     public BalanceEvent withBreakdown(BigDecimal principal, BigDecimal interest, BigDecimal iva, BigDecimal penalty) {

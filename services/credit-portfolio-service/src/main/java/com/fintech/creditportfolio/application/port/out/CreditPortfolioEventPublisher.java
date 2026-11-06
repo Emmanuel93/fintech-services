@@ -1,5 +1,6 @@
 package com.fintech.creditportfolio.application.port.out;
 
+import com.fintech.creditportfolio.domain.event.ClientReferenceAssignedEvent;
 import com.fintech.creditportfolio.domain.event.BalanceUpdatedEvent;
 import com.fintech.creditportfolio.domain.event.CreditAccountActivatedEvent;
 import com.fintech.creditportfolio.domain.event.CreditAccountCancelledEvent;
@@ -47,6 +48,9 @@ public interface CreditPortfolioEventPublisher {
     /** El titular difirió una compra: charges reversa lo devengado como revolvente (BK-26). */
     void publishDispositionDeferred(DispositionDeferredEvent event);
     void publishDispositionRejected(DispositionRejectedEvent event);
+
+    /** A client received his payment reference on a distributor's line; payments keeps the directory. */
+    default void publishClientReferenceAssigned(ClientReferenceAssignedEvent event) {}
 
     /** A disposition's payment did not happen, for good, and was compensated (D63). */
     void publishDispositionFailed(DispositionFailedEvent event);

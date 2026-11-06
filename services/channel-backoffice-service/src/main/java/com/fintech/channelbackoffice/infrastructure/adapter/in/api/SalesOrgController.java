@@ -107,6 +107,33 @@ class SalesOrgController {
         return salesOrgClient.setUnitVatRate(code, rate);
     }
 
+    // ── Política de colocación de la línea de distribuidora ─────────────────────
+    //
+    // Lo que una distribuidora puede colocarle a cada tipo de cliente (nuevo / revolvente). Se declara en la sucursal
+    // y lo hereda su subárbol; una distribuidora sólo puede ser más estricta. Los créditos directos no la leen: su
+    // monto lo define el score.
+
+    @GetMapping("/units/by-code/{code}/placement-policy")
+    @Operation(summary = "La política de colocación de una unidad: lo que declara y lo que le aplica por herencia")
+    Map<String, Object> placementPolicy(@PathVariable String code) {
+        return salesOrgClient.placementPolicy(code);
+    }
+
+    @PutMapping("/units/by-code/{code}/placement-policy")
+    @Operation(summary = "Declara la política de colocación de una unidad (su subárbol la hereda)")
+    Map<String, Object> setPlacementPolicy(@PathVariable String code,
+                                           @RequestBody(required = false) Map<String, Object> body) {
+        requireOrgAdmin();
+        return salesOrgClient.setPlacementPolicy(code, body);
+    }
+
+    @DeleteMapping("/units/by-code/{code}/placement-policy")
+    @Operation(summary = "Retira la política propia de una unidad: vuelve a heredar")
+    Map<String, Object> clearPlacementPolicy(@PathVariable String code) {
+        requireOrgAdmin();
+        return salesOrgClient.clearPlacementPolicy(code);
+    }
+
     @PostMapping("/units")
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Crear una unidad (admin de estructura, dentro del propio alcance)")

@@ -17,6 +17,8 @@ RUN chmod +x gradlew
 # Cache root build files and shared module (common dependency for all services)
 COPY build.gradle.kts settings.gradle.kts ./
 COPY shared/ shared/
+# The documents library (statements, receipts): copied for every service, since settings.gradle.kts includes it.
+COPY shared-documents/ shared-documents/
 
 # Copy only the target service source
 # Los servicios viven bajo `services/`; la ruta del proyecto Gradle sigue
@@ -37,7 +39,7 @@ RUN addgroup -S fintech && adduser -S fintech -G fintech
 
 # JasperReports mide el texto con AWT, y en Alpine AWT necesita freetype y fontconfig aunque la fuente
 # venga empaquetada en el jar. Sólo el servicio que genera PDF las lleva; los demás no cambian.
-RUN if [ "$SERVICE" = "statement-service" ]; then apk add --no-cache fontconfig freetype ttf-dejavu; fi
+RUN if [ "$SERVICE" = "statement-service" ] || [ "$SERVICE" = "receipt-service" ]; then apk add --no-cache fontconfig freetype ttf-dejavu; fi
 
 ADD https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_AGENT_VERSION}/opentelemetry-javaagent.jar /otel/opentelemetry-javaagent.jar
 RUN chown fintech:fintech /otel/opentelemetry-javaagent.jar

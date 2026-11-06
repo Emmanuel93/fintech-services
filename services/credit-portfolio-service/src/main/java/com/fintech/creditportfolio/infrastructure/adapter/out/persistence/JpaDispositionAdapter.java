@@ -20,6 +20,7 @@ class JpaDispositionAdapter implements DispositionRepository {
     @Override public Disposition save(Disposition d) { return jpa.save(d); }
     @Override public Optional<Disposition> findById(UUID id) { return jpa.findById(id); }
     @Override public List<Disposition> findByCreditAccountId(UUID id) { return jpa.findByCreditAccountId(id); }
+    @Override public List<Disposition> findByBeneficiaryPartyId(UUID beneficiaryPartyId) { return jpa.findByBeneficiaryPartyIdOrderByCreatedAtAsc(beneficiaryPartyId); }
 
     @Override public List<Disposition> findByCreditAccountIdIn(java.util.Collection<UUID> ids) {
         if (ids == null || ids.isEmpty()) return List.of();

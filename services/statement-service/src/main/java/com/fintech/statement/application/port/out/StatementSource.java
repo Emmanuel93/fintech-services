@@ -193,7 +193,12 @@ public interface StatementSource {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record Movement(Instant appliedAt, String type, BigDecimal amount, BigDecimal principalAfter) {}
+    record Movement(Instant appliedAt, String type, BigDecimal amount, BigDecimal principalAfter, UUID beneficiaryPartyId) {
+
+        public Movement(Instant appliedAt, String type, BigDecimal amount, BigDecimal principalAfter) {
+            this(appliedAt, type, amount, principalAfter, null);
+        }
+    }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     /** @param originalDueDate the date it had before it moved (to a business day, or by a skip); null if it never did */

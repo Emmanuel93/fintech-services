@@ -648,6 +648,46 @@ services:
     networks:
       - fintech-network
 
+
+  receipt-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: receipt-service
+    image: fintech/receipt-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: [*otel-agent, *plataforma]
+      OTEL_SERVICE_NAME: "receipt-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
+      RECEIPT_CONCURRENCY: ${RECEIPT_CONCURRENCY:-4}
+      RECEIPT_PARTITIONS: ${RECEIPT_PARTITIONS:-12}
+    # Like statement-service: it renders PDFs with Jasper (one per client of each distributor line, 4 lines at a time),
+    # with Inter and the logotype in memory.
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 384M
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
   charges-service:
     build:
       context: .
@@ -1203,6 +1243,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # The product catalog: a placement policy is validated against the distributor line's envelope.
+      CREDIT_PRODUCT_SERVICE_URL: http://credit-product-service:8080
     <<: *app-mem
     depends_on:
       postgres:

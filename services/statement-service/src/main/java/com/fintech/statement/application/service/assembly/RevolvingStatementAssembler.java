@@ -1,5 +1,7 @@
 package com.fintech.statement.application.service.assembly;
 
+import com.fintech.documents.DocumentModel;
+import com.fintech.documents.Formats;
 import com.fintech.statement.application.port.out.StatementSource.InstallmentLine;
 import com.fintech.statement.application.port.out.StatementSource.PlacementLine;
 import com.fintech.statement.application.port.out.StatementSource.SourceView;
@@ -12,9 +14,9 @@ import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.List;
 
-import static com.fintech.statement.application.service.assembly.Formats.date;
-import static com.fintech.statement.application.service.assembly.Formats.money;
-import static com.fintech.statement.application.service.assembly.Formats.nz;
+import static com.fintech.documents.Formats.date;
+import static com.fintech.documents.Formats.money;
+import static com.fintech.documents.Formats.nz;
 
 /**
  * A credit card or a revolving line (personal or business). Besides what every statement carries, a card's must show

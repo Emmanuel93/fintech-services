@@ -10,6 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.util.Map;
 import java.util.UUID;
 
@@ -104,6 +105,35 @@ public class PlacementController {
                                            @RequestBody(required = false) Map<String, Object> body) {
         return ResponseEntity.ok(beneficiary.cancel(userId, placementId,
                 body == null ? Map.of() : body));
+    }
+
+    @Operation(summary = "Lo que mi cliente puede recibir en mi línea",
+               description = "Su tipo (nuevo o revolvente), los límites de mi sucursal para él y, con monto y plazo, "
+                           + "si se autorizaría y por qué no.")
+    @GetMapping("/beneficiaries/{partyId}/placement-limits")
+    public ResponseEntity<JsonNode> placementLimits(@RequestHeader("X-User-Id") String userId,
+                                                    @PathVariable UUID partyId,
+                                                    @RequestParam(required = false) BigDecimal amount,
+                                                    @RequestParam(required = false) Integer termPeriods) {
+        return ResponseEntity.ok(beneficiary.placementLimits(userId, partyId, amount, termPeriods));
+    }
+
+    @Operation(summary = "Reportar a mi cliente (lista roja)",
+               description = "Motivo del catálogo y comentarios. Mientras la marca siga, nadie le presta.")
+    @PostMapping("/beneficiaries/{partyId}/reports")
+    public ResponseEntity<JsonNode> reportClient(@RequestHeader("X-User-Id") String userId,
+                                                 @PathVariable UUID partyId,
+                                                 @RequestBody Map<String, Object> body) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(beneficiary.reportClient(userId, partyId, body));
+    }
+
+    @Operation(summary = "Levantar mi reporte")
+    @PostMapping("/beneficiaries/{partyId}/reports/{flagId}/clear")
+    public ResponseEntity<JsonNode> clearReport(@RequestHeader("X-User-Id") String userId,
+                                                @PathVariable UUID partyId,
+                                                @PathVariable UUID flagId,
+                                                @RequestBody(required = false) Map<String, Object> body) {
+        return ResponseEntity.ok(beneficiary.clearReport(userId, partyId, flagId, body == null ? Map.of() : body));
     }
 
     @Operation(summary = "Mis beneficiarios")

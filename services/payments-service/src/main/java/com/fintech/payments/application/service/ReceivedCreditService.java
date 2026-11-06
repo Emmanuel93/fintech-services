@@ -2,6 +2,7 @@ package com.fintech.payments.application.service;
 
 import com.fintech.payments.application.port.in.ApplyReceivedCreditUseCase;
 import com.fintech.payments.application.port.out.AccountBalanceSnapshotRepository;
+import com.fintech.payments.application.port.out.ClientReferenceDirectory;
 import com.fintech.payments.application.port.out.PaymentEventPublisher;
 import com.fintech.payments.application.port.out.PaymentOrderRepository;
 import com.fintech.payments.application.port.out.ReceivedCreditRepository;
@@ -14,6 +15,8 @@ import com.fintech.payments.domain.allocation.LoanDebt;
 import com.fintech.payments.domain.balance.BalanceMovementType;
 import com.fintech.payments.domain.credit.CreditAllocation;
 import com.fintech.payments.domain.credit.ReceivedCredit;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -22,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -45,16 +49,27 @@ public class ReceivedCreditService implements ApplyReceivedCreditUseCase {
     private final PaymentEventPublisher events;
     private final CustomerBalanceService balances;
     private final AllocationStrategy strategy;
+    /** The distributors' clients' references; null where it is not wired (a deposit is then hers, as before). */
+    private final ClientReferenceDirectory clientReferences;
 
     public ReceivedCreditService(ReceivedCreditRepository credits, AccountBalanceSnapshotRepository snapshots,
                                  PaymentOrderRepository orders, PaymentEventPublisher events,
                                  CustomerBalanceService balances, AllocationStrategy strategy) {
+        this(credits, snapshots, orders, events, balances, strategy, null);
+    }
+
+    @Autowired
+    public ReceivedCreditService(ReceivedCreditRepository credits, AccountBalanceSnapshotRepository snapshots,
+                                 PaymentOrderRepository orders, PaymentEventPublisher events,
+                                 CustomerBalanceService balances, AllocationStrategy strategy,
+                                 @Nullable ClientReferenceDirectory clientReferences) {
         this.credits = credits;
         this.snapshots = snapshots;
         this.orders = orders;
         this.events = events;
         this.balances = balances;
         this.strategy = strategy;
+        this.clientReferences = clientReferences;
     }
 
     @Override
@@ -66,7 +81,7 @@ public class ReceivedCreditService implements ApplyReceivedCreditUseCase {
         List<AccountBalanceSnapshot> loans = snapshots.findByObligorPartyId(c.partyId());
         Map<UUID, AccountBalanceSnapshot> byId = loans.stream()
                 .collect(Collectors.toMap(AccountBalanceSnapshot::getCreditAccountId, Function.identity()));
-        AllocationPlan plan = strategy.allocate(c.amount(), c.numericReference(), candidates(loans, c));
+        AllocationPlan plan = clientPlan(c, loans).orElseGet(() -> strategy.allocate(c.amount(), c.numericReference(), candidates(loans, c)));
         credits.save(ReceivedCredit.applied(c.inboundCreditId(), c.partyId(), c.amount(), c.receivedAt(),
                 c.operationDate(), c.trackingKey(), c.numericReference(), plan));
 
@@ -75,7 +90,8 @@ public class ReceivedCreditService implements ApplyReceivedCreditUseCase {
                 AccountBalanceSnapshot loan = byId.get(line.creditAccountId());
                 PaymentOrder order = orders.save(PaymentOrder.forReceivedCredit(loan.getCreditAccountId(),
                         loan.getObligorPartyId(), line.amount(), c.inboundCreditId(), line.sequence(), line.mode(),
-                        c.receivedAt(), c.operationDate(), c.trackingKey(), loan.getBalanceVersion()));
+                        c.receivedAt(), c.operationDate(), c.trackingKey(), loan.getBalanceVersion(),
+                        line.beneficiaryPartyId()));
                 credits.save(CreditAllocation.of(c.inboundCreditId(), line, order.getPaymentOrderId()));
                 events.publishPaymentApplied(order);
             } else {
@@ -87,6 +103,26 @@ public class ReceivedCreditService implements ApplyReceivedCreditUseCase {
         }
         log.info("Abono {} de {} aplicado: {} a créditos, {} a favor (referencia {})", c.trackingKey(), c.amount(),
                 plan.toLoans(), plan.toCreditBalance(), plan.referenceStatus());
+    }
+
+    /**
+     * A deposit to a distributor's CLABE with the reference of one of her clients: his payment for his loans with her,
+     * to her line (up to its debt; beyond it, in her favor). A client's reference on someone else's CLABE, or on a line
+     * that no longer takes payments, is not his payment here: the deposit is treated as the payer's own.
+     */
+    private Optional<AllocationPlan> clientPlan(ReceivedCreditCommand c, List<AccountBalanceSnapshot> loans) {
+        if (clientReferences == null || c.numericReference() == null) return Optional.empty();
+        return clientReferences.find(c.numericReference())
+                .filter(ref -> Objects.equals(ref.obligorPartyId(), c.partyId()))
+                .flatMap(ref -> loans.stream()
+                        .filter(l -> l.getCreditAccountId().equals(ref.creditAccountId()) && l.isAccountActive())
+                        .findFirst()
+                        .map(l -> {
+                            log.info("Abono {} con la referencia {} del cliente {}: a la línea {} de su distribuidora",
+                                    c.trackingKey(), c.numericReference(), ref.beneficiaryPartyId(), ref.creditAccountId());
+                            return strategy.allocateForClient(c.amount(), new LoanDebt(l.getCreditAccountId(),
+                                    l.getPaymentReference(), l.getActivatedAt(), l.getTotalDebt()), ref.beneficiaryPartyId());
+                        }));
     }
 
     /**

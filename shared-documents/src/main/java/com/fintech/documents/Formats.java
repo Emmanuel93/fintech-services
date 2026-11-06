@@ -1,4 +1,4 @@
-package com.fintech.statement.application.service.assembly;
+package com.fintech.documents;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
