@@ -129,6 +129,23 @@ no un contador ni un azar.
 | `GET` | `/units/{unitId}/executives` · `/distributors` | Hojas por tipo |
 | `PUT` | `/units/{unitId}/parent` | Reorganizar: mueve la rama y recalcula paths |
 | `GET` · `PUT` | `/units/by-code/{code}/vat-rate` | Tasa de IVA de la unidad |
+| `GET` · `PUT` · `DELETE` | `/units/by-code/{code}/placement-policy` | Política de colocación de la línea de distribuidora (ver abajo) |
+| `GET` | `/units/by-code/{code}/placement-policy/effective` | Lo que aplica en la unidad, ya resuelta la herencia |
+
+### Política de colocación (sólo la línea de distribuidora)
+
+Lo que las distribuidoras de una rama pueden colocarle a cada **tipo de cliente** (NUEVO / REVOLVENTE, que tipifica
+cartera): monto por préstamo, saldo con la distribuidora sumando sus préstamos vivos, préstamos vivos a la vez y plazo
+máximo. Los créditos directos no la leen: su monto lo define el score.
+
+- **Heredada como el IVA**: se declara en la sucursal (o más arriba) y la toma todo su subárbol; un límite vacío se
+  hereda. El alta de una sucursal acepta la política en el mismo `POST /units` (`placementPolicy`).
+- **La distribuidora sólo puede ser más estricta**: en un nodo DISTRIBUTOR la propia se combina con la heredada tomando
+  el menor de cada límite, y declarar uno más amplio responde 400.
+- **Validada contra el producto**: al guardar se lee la línea de distribuidora del catálogo (credit-product) y la
+  política tiene que caber en su envolvente (monto y plazo); si el catálogo no responde, 503 y no se guarda.
+- **Publicada resuelta**: cada cambio —y cada unidad nueva o movida— publica `sales-org.placement-policy-changed` por
+  cada unidad del subárbol, ya resuelta; cartera guarda la copia y autoriza contra ella sin llamar.
 
 ### Asignaciones
 
@@ -150,7 +167,8 @@ no un contador ni un azar.
 
 **Consume:** `credit-portfolio.credit-account-activated`.
 
-**Produce:** `sales-org.portfolio-assigned` → credit-portfolio, party.
+**Produce:** `sales-org.portfolio-assigned` → credit-portfolio, party · `sales-org.placement-policy-changed` (llave = unidad,
+una por unidad tocada, ya resuelta) → credit-portfolio.
 
 **Reintentos:** régimen por defecto, sin DLT.
 Ver [README raíz §5.4](../../README.md#54-política-de-reintentos-y-dlt-kafka).

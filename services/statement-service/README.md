@@ -89,7 +89,7 @@ Banxico. Todas las plantillas llevan, en este orden:
 | **Movimientos del periodo** con fecha y descripción (todos los productos) | tabla 2 | 35-IV |
 | **Comisiones cobradas** con fecha y concepto, y el **recuadro con su total** aunque sea cero | tabla 3 | 35-V/VI |
 | **Costos de tu crédito**: CAT «Sin IVA» con un decimal, tasas ordinaria y moratoria anuales, intereses e IVA del periodo y su base de cálculo | recuadro | 36-IV/IX; 37; LTOSF 9; Banxico C21/2009 |
-| Cómo pagar; **aclaraciones** (90 días naturales, folio) y el **aviso UNE/CONDUSEF** | cierre | 35-VII/VIII; LTOSF 23 |
+| Cómo pagar (la **CLABE de cobro** del titular, la de STP que cartera manda como `collectionClabe`, con la referencia del crédito); **aclaraciones** (90 días naturales, folio) y el **aviso UNE/CONDUSEF** | cierre | 35-VII/VIII; LTOSF 23 |
 | Leyendas: incumplimiento, historial crediticio (consumo), pago mínimo (revolvente de consumo), obligado solidario (grupal) | cierre | 36-X; 6-IV |
 | Leyenda de SOFOM ENR (sin autorización de SHCP; supervisión de CNBV sólo para el art. 56) | pie | LGOAAC 87-J |
 | No es comprobante fiscal: el CFDI de intereses y comisiones se emite aparte | pie | CFF 29; RMF 2.7.1.13 no aplica a ENR |
@@ -173,6 +173,10 @@ no arrancaba, y en las pruebas —que sí tienen JDK— no se notaba. `jasperrep
 todos los ambientes (ECJ 3.40, que conoce Java 21) y `TemplateCompilerTest` compila con él la plantilla de cada producto.
 
 ### La marca
+
+El modelo, los formatos, la paleta, el motor Jasper, Inter y el logotipo viven en
+[`shared-documents`](../../shared-documents/README.md), que comparte con receipt-service (los recibos de pago de los
+clientes de las distribuidoras); las plantillas de los estados siguen aquí.
 
 Las nueve plantillas comparten una sola composición, la del **design system de Kredius**: logotipo arriba a
 la izquierda, azul Kredius `#0D47A1` en títulos y reglas, el verde del logo `#00B894` como único acento,

@@ -125,6 +125,15 @@ app:
     overpayment-strategy: RETURN_TO_PAYER   # o APPLY_NEXT_INSTALLMENT
 ```
 
+### El cliente de una distribuidora paga directo (`BENEFICIARY`)
+
+Un abono a la CLABE de cobro de una distribuidora con la **referencia de uno de sus clientes** (directorio
+`client_references`, alimentado por `credit-portfolio.client-reference-assigned`) es ese cliente pagando sus préstamos
+con ella: va a la línea de ella como `BENEFICIARY` hasta lo que la línea debe, con su `beneficiaryPartyId` en la orden,
+en la asignación y en `payments.payment-applied`; lo que sobra queda **a favor de ella**. Nunca paga otro crédito de
+ella. Una referencia de cliente de otra línea, o una que no es de nadie, no es su cliente: el abono sigue la regla de
+siempre (`NOT_FOUND` → prelación). Cartera cubre con él primero las cuotas facturadas de ese cliente.
+
 ---
 
 ## 4. API REST

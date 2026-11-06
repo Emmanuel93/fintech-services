@@ -131,6 +131,11 @@ de diferir la compra de otro ni de saltarle el pago.
 | `GET` | `/placements/{placementId}` · `/bureau` | Detalle · reporte de buró |
 | `POST` | `/placements/{placementId}/approve` · `/reject` · `/resend` · `/cancel` | Decisión del distribuidor |
 | `GET` | `/beneficiaries` | Beneficiarias del distribuidor |
+| `GET` | `/beneficiaries/{partyId}/placement-limits` | Lo que su cliente puede recibir (tipo, límites de su sucursal, lista roja) |
+| `POST` | `/beneficiaries/{partyId}/reports` · `/reports/{flagId}/clear` | Reportar a su cliente a la lista roja · levantar su reporte |
+
+`POST /credit/dispose` en una línea de distribuidora pregunta antes los límites del cliente y responde 422 con el motivo
+en palabras de ella (cartera decide de nuevo al autorizar).
 
 ### Soporte (dev-only)
 

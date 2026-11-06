@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Generates the JasperReports 7 template of the account statement for every product.
+"""Generates the JasperReports 7 template of the account statement for every product, and the payment receipt.
 
-    python3 tools/estados-de-cuenta/gen_plantillas.py services/statement-service/src/main/resources/reports
+    python3 tools/estados-de-cuenta/gen_plantillas.py services/statement-service/src/main/resources/reports \
+        services/receipt-service/src/main/resources/reports
+
+The second directory is optional: given, the payment receipt of a distributor's client (receipt-service) is written
+there with the same design system.
 
 The nine templates share one layout — Kredius design system: Inter, blue #0D47A1, the green accent of the
 logo, ink, paper — and differ in their product title, product section and "what you should know" box. The
@@ -482,7 +486,202 @@ templates = {
                "disponible para seguir colocando."),
 }
 
+# ── The payment receipt of a distributor's client (receipt-service) ──────────────────────────────────────────────
+#
+# One per client and statement: what he pays this fortnight for every loan he has with her, without her discount
+# (that is hers), how to pay it (her CLABE with his reference lands on his loans), and who he owes: the obligation is
+# with his distributor; Kredius prints the receipt and may mark him so other distributors know his payment behaviour.
+
+RECEIPT_FIELDS = ["section", "c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9", "c10", "emphasis"]
+
+PRESTAMOS = dict(key="PREST", title="Tus préstamos con tu distribuidora",
+                 columns=[("c1", "Préstamo", 46, "Center"), ("c2", "Colocado", 56, "Left"), ("c3", "Monto", 56, "Right"),
+                          ("c4", "Pago", 44, "Center"), ("c5", "Capital", 52, "Right"), ("c6", "Interés", 50, "Right"),
+                          ("c7", "IVA", 42, "Right"), ("c8", "A pagar", 58, "Right"), ("c9", "Saldo insoluto", 66, "Right"),
+                          ("c10", "Vencidos", 65, "Center")])
+LIQUIDADOS = dict(key="LIQ", title="Préstamos que terminaste de pagar en el periodo",
+                  columns=[("c1", "Préstamo", 107, "Center"), ("c2", "Colocado", 107, "Left"), ("c3", "Monto", 107, "Right"),
+                           ("c4", "Plazo", 107, "Center"), ("c5", "Liquidado el", 107, "Left")])
+
+RECEIPT_PARAMS = ["ISSUER_NAME", "ISSUER_LEGAL_NAME", "ISSUER_DETAILS", "ISSUER_CONTACT", "CLIENT_NAME", "CLIENT_RFC",
+                  "CLIENT_TYPE_LABEL", "RECEIPT_FOLIO", "DISTRIBUTOR_NAME", "PERIOD", "CUTOFF_DATE", "DUE_DATE", "DUE_NOTICE",
+                  "CYCLE", "PAY_TITLE", "PAY_CLABE", "PAY_REFERENCE", "PAY_BENEFICIARY", "PAY_NOTE", "RED_LIST_WARNING",
+                  "PRODUCT_NOTE", "LEGAL_RECEIPT", "CLARIFICATIONS_NOTICE", "UNE_NOTICE", "REGULATORY_LEGEND",
+                  "GENERATED_AT"] + [f"BOX{n}_{k}" for n in range(1, 4) for k in ("LABEL", "VALUE")]
+
+
+def receipt_header():
+    e = []
+    e.append('<element kind="image" x="0" y="0" width="130" height="30" scaleImage="RetainShape" '
+             'hImageAlign="Left" vImageAlign="Middle" onErrorType="Blank">'
+             '<printWhenExpression><![CDATA[$P{LOGO} != null]]></printWhenExpression>'
+             '<expression><![CDATA[$P{LOGO}]]></expression></element>')
+    e.append(tf(0, 0, 200, 30, "$P{ISSUER_NAME}", size=18, color=PRIMARY, font=FONT_DISPLAY, when="$P{LOGO} == null"))
+    e.append(label(300, 0, W - 300, 18, "Recibo de pago", size=13, bold=True, color=INK, align="Right"))
+    e.append(label(300, 18, W - 300, 12, "Crédito con tu distribuidora", size=8, bold=True, color=PRIMARY, align="Right"))
+    e.append(hline(0, 34, W, PRIMARY))
+    e.append(rect(0, 33, 56, 3, ACCENT))
+    e.append(tf(0, 39, W, 10, "$P{ISSUER_LEGAL_NAME}", size=7.5, bold=True, color=INK))
+    e.append(tf(0, 49, W, 9, "$P{ISSUER_DETAILS}", size=6.5, color=MUTED, extra='textAdjust="ScaleFont"'))
+    e.append(tf(0, 58, W, 9, "$P{ISSUER_CONTACT}", size=6.5, color=MUTED, extra='textAdjust="ScaleFont"'))
+    # The client and his type
+    top = 74
+    e.append(label(0, top, 270, 11, "Cliente", size=7, color=MUTED))
+    e.append(tf(0, top + 11, 270, 16, "$P{CLIENT_NAME}", size=12, bold=True, color=INK, extra='textAdjust="ScaleFont"'))
+    e.append(tf(0, top + 28, 270, 12, '"RFC: " + ($P{CLIENT_RFC} == null ? "—" : $P{CLIENT_RFC})', size=8))
+    e.append(tf(0, top + 40, 270, 12, "$P{CLIENT_TYPE_LABEL}", size=8, bold=True, color=PRIMARY))
+    e.append(tf(0, top + 52, 270, 12, '"Folio: " + $P{RECEIPT_FOLIO}', size=8, color=MUTED))
+    rows = [("Distribuidora", "$P{DISTRIBUTOR_NAME}"), ("Periodo", "$P{PERIOD}"), ("Fecha de corte", "$P{CUTOFF_DATE}"),
+            ("Fecha límite de pago", "$P{DUE_DATE}")]
+    for i, (lab, val) in enumerate(rows):
+        y = top + i * 15
+        e.append(label(285, y, 100, 15, lab, size=7, color=MUTED, bg=SOFT, box=pad(6, 4, LINE)))
+        e.append(tf(385, y, W - 385, 15, val, size=8, bold=True, color=INK, align="Right", bg=SOFT,
+                    box=pad(4, 6, LINE), extra='textAdjust="ScaleFont"'))
+    e.append(tf(285, top + 61, W - 285, 9, "$P{DUE_NOTICE}", size=6, color=MUTED, align="Right",
+                extra='textAdjust="ScaleFont"'))
+    # Three figures on top: what he pays, by when, and how many loans he has with her.
+    by = 146
+    bw = (W - 2 * 10) // 3
+    for i in range(3):
+        x = i * (bw + 10)
+        n = i + 1
+        if n == 1:
+            e.append(rect(x, by, bw, 48, PRIMARY, radius=6))
+            e.append(rect(x + 10, by, 36, 2, ACCENT))
+            e.append(tf(x + 10, by + 4, bw - 20, 12, f"$P{{BOX{n}_LABEL}}", size=7, color=WHITE))
+            e.append(tf(x + 10, by + 17, bw - 20, 26, f"$P{{BOX{n}_VALUE}}", size=15, color=WHITE, font=FONT_DISPLAY,
+                        extra='textAdjust="ScaleFont"'))
+        else:
+            e.append(rect(x, by, bw, 48, PRIMARY_CONTAINER, radius=6))
+            e.append(tf(x + 10, by + 4, bw - 20, 12, f"$P{{BOX{n}_LABEL}}", size=7, color=ON_PRIMARY_CONTAINER))
+            e.append(tf(x + 10, by + 17, bw - 20, 26, f"$P{{BOX{n}_VALUE}}", size=13, bold=True,
+                        color=ON_PRIMARY_CONTAINER, extra='textAdjust="ScaleFont"'))
+    # How to pay: her collection CLABE at Kredius (held by the issuer, as her statement says) with his reference.
+    py = 204
+    e.append(rect(0, py, W, 62, SOFT, radius=6))
+    e.append(rect(0, py, 4, 62, ACCENT))
+    e.append(tf(14, py + 5, W - 28, 12, "$P{PAY_TITLE}", size=9, bold=True, color=PRIMARY))
+    e.append(label(14, py + 19, 180, 10, "CLABE de cobro de tu distribuidora", size=6.5, color=MUTED))
+    e.append(tf(14, py + 29, 180, 16, "$P{PAY_CLABE}", size=12, color=INK, font=FONT_DISPLAY, extra='textAdjust="ScaleFont"'))
+    e.append(label(200, py + 19, 120, 10, "Tu referencia", size=6.5, color=MUTED))
+    e.append(tf(200, py + 29, 120, 16, "$P{PAY_REFERENCE}", size=12, color=INK, font=FONT_DISPLAY, extra='textAdjust="ScaleFont"'))
+    e.append(label(330, py + 19, W - 344, 10, "A nombre de", size=6.5, color=MUTED))
+    e.append(tf(330, py + 29, W - 344, 16, "$P{PAY_BENEFICIARY}", size=8.5, bold=True, color=INK, extra='textAdjust="ScaleFont"'))
+    e.append(tf(14, py + 47, W - 28, 12, "$P{PAY_NOTE}", size=6.8, color=INK, extra='textAdjust="ScaleFont"'))
+    # The red-list warning, only when he is marked.
+    wy = py + 68
+    e.append(tf(0, wy, W, 22, "$P{RED_LIST_WARNING}", size=7.5, bold=True, color=ON_PRIMARY_CONTAINER, bg=PRIMARY_CONTAINER,
+                box=f'<box leftPadding="10" rightPadding="8" topPadding="3" bottomPadding="3"><leftPen lineWidth="3.0" lineColor="{PRIMARY}"/></box>',
+                when="$P{RED_LIST_WARNING} != null", extra='textAdjust="ScaleFont"'))
+    return "\n      ".join(e), wy + 28
+
+
+def receipt_summary():
+    e = []
+    y = 8
+    notice_box = (f'<box leftPadding="10" rightPadding="8" topPadding="4" bottomPadding="4">'
+                  f'<leftPen lineWidth="3.0" lineColor="{ACCENT}"/></box>')
+    e.append(section_title(y, '"Si pagas tarde"', float_=True))
+    y += 18
+    e.append(tf(0, y, W, 12, "$P{PRODUCT_NOTE}", size=7.5, color=INK, stretch=True, float_=True))
+    y += 16
+    e.append(section_title(y, '"Quién te presta"', float_=True))
+    y += 18
+    e.append(tf(0, y, W, 24, "$P{LEGAL_RECEIPT}", size=7.5, color=INK, bg=SOFT, stretch=True, box=notice_box, float_=True))
+    y += 30
+    e.append(section_title(y, '"Aclaraciones y quejas"', float_=True))
+    y += 18
+    e.append(tf(0, y, W, 12, "$P{CLARIFICATIONS_NOTICE}", size=7.5, color=INK, stretch=True, float_=True))
+    y += 14
+    e.append(tf(0, y, W, 12, "$P{UNE_NOTICE}", size=7.5, color=INK, stretch=True, float_=True))
+    y += 14
+    e.append(hline(0, y + 2, W, LINE, 0.5, float_=True))
+    y += 6
+    e.append(tf(0, y, W, 10, "$P{REGULATORY_LEGEND}", size=6, color=MUTED, stretch=True, float_=True))
+    y += 11
+    return "\n      ".join(e), y + 4
+
+
+def receipt_detail_bands(sections):
+    bands = []
+    for s in sections:
+        cond = f'"{s["key"]}".equals($F{{section}}) && !"EMPTY".equals($F{{emphasis}}) && !"TOTAL".equals($F{{emphasis}})'
+        els, x = [], 0
+        for field, title, width, align in s["columns"]:
+            els.append(tf(x, 0, width, 13, f"$F{{{field}}}", size=7.5, align=align, stretch=True, style="fila",
+                          box=pad(4, 4, LINE)))
+            x += width
+        bands.append(f'<band height="13"><printWhenExpression><![CDATA[{cond}]]></printWhenExpression>'
+                     + "\n        " + "\n        ".join(els) + "\n      </band>")
+    # The total of what he pays, under his loans.
+    total = [tf(0, 0, W - 189, 16, "$F{c1}", size=8.5, bold=True, color=INK, bg=PAPER, box=pad(6, 4)),
+             tf(W - 189, 0, 58, 16, "$F{c8}", size=8.5, bold=True, color=INK, align="Right", bg=PAPER, box=pad(4, 4)),
+             tf(W - 131, 0, 131, 16, '""', size=8.5, bg=PAPER)]
+    bands.append('<band height="18"><printWhenExpression><![CDATA["TOTAL".equals($F{emphasis})]]></printWhenExpression>'
+                 + "\n        " + "\n        ".join(total) + "\n      </band>")
+    empty = tf(0, 0, W, 14, "$F{c1}", size=7.5, color=MUTED, box=pad(4, 4, LINE))
+    bands.append('<band height="14"><printWhenExpression><![CDATA["EMPTY".equals($F{emphasis})]]></printWhenExpression>'
+                 + "\n        " + empty + "\n      </band>")
+    return "\n      ".join(bands)
+
+
+def receipt_report(name):
+    sections = [PRESTAMOS, LIQUIDADOS]
+    head, head_h = receipt_header()
+    summary, summary_h = receipt_summary()
+    fields = "\n  ".join(f'<field name="{f}" class="java.lang.String"/>' for f in RECEIPT_FIELDS)
+    declared = "\n  ".join(f'<parameter name="{p}" class="java.lang.String"/>' for p in RECEIPT_PARAMS)
+    footer = [
+        hline(0, 2, W, LINE, 0.5),
+        tf(0, 6, 360, 12, '"Folio " + $P{RECEIPT_FOLIO} + " · Generado " + $P{GENERATED_AT}', size=6, color=MUTED),
+        tf(360, 6, 140, 12, '"Página " + $V{PAGE_NUMBER} + " de"', size=6, color=MUTED, align="Right"),
+        tf(500, 6, 35, 12, '" " + $V{PAGE_NUMBER}', size=6, color=MUTED, extra='evaluationTime="Report"'),
+    ]
+    j = lambda els: "\n      ".join(els)
+    return f'''<?xml version="1.0" encoding="UTF-8"?>
+<!-- Recibo de pago del cliente de una distribuidora: lo que paga en la quincena por cada préstamo que tiene con ella,
+     sin el descuento por pronto pago (ése es de la distribuidora), cómo pagarlo (la CLABE de ella con la referencia de
+     él) y con quién es la obligación. Generated by tools/estados-de-cuenta/gen_plantillas.py in the JasperReports 7
+     format; colors are the Kredius design system's defaults, swapped for the configured palette at compile time. -->
+<jasperReport name="{name}" language="java" pageWidth="595" pageHeight="842" columnWidth="{W}" leftMargin="30" rightMargin="30" topMargin="28" bottomMargin="24" whenNoDataType="AllSectionsNoDetail">
+  <style name="base" default="true" fontName="{FONT}" fontSize="8.0" forecolor="{INK}"/>
+  <style name="fila" fontName="{FONT}" fontSize="7.5" forecolor="{INK}" mode="Opaque" backcolor="{WHITE}">
+    <conditionalStyle mode="Opaque" backcolor="{SOFT}">
+      <conditionExpression><![CDATA["1".equals($F{{emphasis}})]]></conditionExpression>
+    </conditionalStyle>
+  </style>
+  {declared}
+  <parameter name="LOGO" class="java.awt.Image"/>
+  {fields}
+  <group name="seccion" minHeightToStartNewPage="64">
+    <expression><![CDATA[$F{{section}}]]></expression>
+    <groupHeader>
+      {group_header_bands(sections)}
+    </groupHeader>
+  </group>
+  <title height="{head_h}">
+      {head}
+  </title>
+  <detail>
+      {receipt_detail_bands(sections)}
+  </detail>
+  <pageFooter height="20">
+      {j(footer)}
+  </pageFooter>
+  <summary height="{summary_h}">
+      {summary}
+  </summary>
+</jasperReport>
+'''
+
+
 for name, spec in templates.items():
     with open(f"{OUT}/{name}.jrxml", "w", encoding="utf-8") as f:
         f.write(report(name, spec))
     print("ok", name)
+
+if len(sys.argv) > 2:
+    with open(f"{sys.argv[2]}/recibo-pago-distribuidora.jrxml", "w", encoding="utf-8") as f:
+        f.write(receipt_report("recibo-pago-distribuidora"))
+    print("ok recibo-pago-distribuidora")

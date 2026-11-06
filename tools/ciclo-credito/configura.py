@@ -53,6 +53,15 @@ EJECUTIVOS = {
     "S_E2E_CTR": [("e2e.ejecutivo.ctr1@kredius.mx", "Ejecutivo Centro Uno"), ("e2e.ejecutivo.ctr2@kredius.mx", "Ejecutivo Centro Dos")],
 }
 
+# The branches' placement policy (distributor line only): what a distributor may place to each kind of client. Wide
+# enough for every placement the scenarios already make (measured: a client still NUEVO reaches 3 live loans and
+# $12,865 owed, a REVOLVENTE 3 loans and $12,276, because a renewal comes three days after the last cutoff, before that
+# statement is paid); the refusals are exercised by a distributor with her own, stricter policy (D13).
+POLITICA_DE_COLOCACION = {
+    "nuevo": {"maxLoanAmount": 10_000, "maxOutstanding": 25_000, "maxActiveLoans": 4, "maxTerm": 24},
+    "revolvente": {"maxLoanAmount": 10_000, "maxOutstanding": 30_000, "maxActiveLoans": 5, "maxTerm": 24},
+}
+
 # The staff that takes the run's decisions, by function.
 PERSONAL = [
     ("e2e.cumplimiento@kredius.mx", "Oficialía de Cumplimiento E2E", ["OPS_SUPERVISOR"]),
@@ -165,6 +174,21 @@ def estructura(token) -> dict:
     return {"sucursales": [c for c, _ in SUCURSALES], "ejecutivos": ejecutivos}
 
 
+def politica_de_colocacion(token) -> list[str]:
+    """Each branch declares the same placement policy; its distributors inherit it the day they are created."""
+    lineas = []
+    for codigo, _ in SUCURSALES:
+        r = http("PUT", f"/sales-org/units/by-code/{codigo}/placement-policy", POLITICA_DE_COLOCACION, token)
+        e = r.get("effective") or {}
+        if not r.get("configured") or e.get("nuevo", {}).get("maxLoanAmount") != POLITICA_DE_COLOCACION["nuevo"]["maxLoanAmount"]:
+            sys.exit(f"✗ la política de colocación de {codigo} no quedó como se declaró: {r}")
+        n, v = e["nuevo"], e["revolvente"]
+        lineas.append(f"{codigo}: nuevo hasta ${n['maxLoanAmount']:,} por préstamo, ${n['maxOutstanding']:,} de saldo, "
+                      f"{n['maxActiveLoans']} vivos, {n['maxTerm']} quincenas · revolvente ${v['maxLoanAmount']:,}, "
+                      f"${v['maxOutstanding']:,}, {v['maxActiveLoans']} vivos, {v['maxTerm']} quincenas")
+    return lineas
+
+
 def personal(token) -> list[str]:
     existentes = {s["email"]: s["staffUserId"] for s in (http("GET", "/staff?size=500", token=token) or [])}
     hechos = []
@@ -208,6 +232,8 @@ def main():
           "colocaciones de 12 a 24 quincenas, comisión 18/14/11/7 % de lo cobrado neteada de la entrega")
     e = estructura(token)
     print(f"  estructura comercial: {', '.join(e['sucursales'])} · {e['ejecutivos']} ejecutivos")
+    for linea in politica_de_colocacion(token):
+        print(f"  política de colocación: {linea}")
     for linea in personal(token):
         print(f"  personal: {linea}")
     if not espera_matriz_de_permisos(token):

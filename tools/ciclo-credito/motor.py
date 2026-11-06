@@ -56,7 +56,7 @@ PG = ["docker", "exec", "-i", "fintech-services-postgres-1", "psql", "-U", "fint
 # carries the disbursement on; the dispatcher decides by business time when an order is due, and treasury judges a
 # trace stopped by its business today. Left on the real clock, both depended on the hour and the day the run was
 # launched (D66).
-CON_RELOJ = ["credit-portfolio-service", "charges-service", "closing-service", "statement-service",
+CON_RELOJ = ["credit-portfolio-service", "charges-service", "closing-service", "statement-service", "receipt-service",
              "accounting-service", "payments-service", "origination-service", "collections-service",
              "risk-service", "commission-service", "invoicing-service", "scoring-service",
              "beneficiary-service", "wallet-service", "stp-service", "banking-service", "disbursement-service"]
@@ -363,6 +363,11 @@ class Corrida:
             self.anota(clave, "error", "la distribuidora no pudo darse de alta (rol, nodo o ejecutivo)", persona=d.nombre_completo)
             return
         self.cobro_de_comisiones(clave, d, e)
+        # Her own placement policy, stricter than her branch's (only the backoffice declares it, on her node).
+        if e.get("politica_propia"):
+            r = self.altas.admin("PUT", f"/sales-org/units/by-code/D_{clave}/placement-policy", e["politica_propia"]) or {}
+            self.anota(clave, "política propia", f"más estricta que su sucursal: viene de {r.get('inheritedFrom')}",
+                       politica=json.dumps(r.get("effective"), ensure_ascii=False))
         # The line's credit decision is the committee's, with its own session; the scenario may ask for its size.
         desenlace = self.altas.solicita(d, "DISTRIBUTOR_LINE", monto=e.get("linea"), promotor=d.prospect_id)
         linea = self.altas.cuenta(d, "DISTRIBUTOR_LINE") if desenlace == "desembolsado" else None
@@ -586,6 +591,109 @@ class Corrida:
         st["compras"].append({"fecha": self.hoy.isoformat(), "monto": monto, "plazo": plazo, "beneficiario": b["persona"]})
         self.anota(clave, "colocación", f"a {b['persona']} a {plazo} quincenas", monto=monto)
 
+    # ── her clients: the red list, their own payments ──
+    def _clientes(self, clave, e, st, dia):
+        """Her reports to the red list and their clearing, a client paying his installments with his own reference, and
+        a deposit to her CLABE with a reference that is nobody's."""
+        for indice, motivo, comentario in e.get("reportes", {}).get(dia, []):
+            self.reporta(clave, st, indice, motivo, comentario)
+        for indice in e.get("levanta", {}).get(dia, []):
+            self.levanta(clave, st, indice)
+        for indice, monto in e.get("pagos_cliente", {}).get(dia, []):
+            self.paga_cliente(clave, st, indice, monto)
+        monto = e.get("referencia_ajena", {}).get(dia)
+        if monto:
+            self.pago_con_referencia_ajena(clave, st, monto)
+
+    def reporta(self, clave, st, indice, motivo, comentario):
+        b = st["beneficiarios"][indice]
+        try:
+            r = altas.http("POST", f"{MOBILE}/beneficiaries/{b['prospect']}/reports", {"reason": motivo, "comment": comentario},
+                           token=self.token_de(st)) or {}
+        except urllib.error.HTTPError as ex:
+            self.anota(clave, "error", f"reporte de {b['persona']}: HTTP {ex.code} {ex.read().decode(errors='replace')[:200]}")
+            return
+        st.setdefault("reportes", {})[str(indice)] = r.get("flagId")
+        self.anota(clave, "reporte a lista roja", f"{b['persona']}: {motivo} «{comentario}»", marca=r.get("flagId"))
+
+    def levanta(self, clave, st, indice):
+        b = st["beneficiarios"][indice]
+        marca = (st.get("reportes") or {}).get(str(indice))
+        if not marca:
+            self.anota(clave, "error", f"no hay reporte de {b['persona']} que levantar")
+            return
+        try:
+            altas.http("POST", f"{MOBILE}/beneficiaries/{b['prospect']}/reports/{marca}/clear",
+                       {"comment": "Ya lo localicé y se puso de acuerdo conmigo"}, token=self.token_de(st))
+        except urllib.error.HTTPError as ex:
+            self.anota(clave, "error", f"levantar el reporte de {b['persona']}: HTTP {ex.code} {ex.read().decode(errors='replace')[:200]}")
+            return
+        self.anota(clave, "reporte levantado", b["persona"], marca=marca)
+
+    def referencia_del_cliente(self, st, indice) -> int | None:
+        b = st["beneficiarios"][indice]
+        fila = psql(f"""SELECT payment_reference FROM credit_portfolio.client_payment_references
+                         WHERE credit_account_id = '{st["cuenta"]}' AND beneficiary_party_id = '{b["prospect"]}'""")
+        return int(fila[0][0]) if fila and fila[0] and fila[0][0] else None
+
+    def paga_cliente(self, clave, st, indice, monto):
+        """Her client deposits to HER collection CLABE with HIS reference: his receipt's total ("recibo") or an amount.
+        The deposit pays his installments first; she then delivers her statement less what he already paid."""
+        b = st["beneficiarios"][indice]
+        referencia = self.referencia_del_cliente(st, indice)
+        recibos = svc("receipt-service", "GET", f"/api/v1/receipts?creditAccountId={st['cuenta']}&partyId={b['prospect']}&limit=1") or []
+        recibo = recibos[0] if recibos else None
+        # He pays where his receipt tells him to: a receipt that printed another CLABE sends his money elsewhere
+        # (STP returns it and the run says so). Without a receipt yet, her collection CLABE.
+        clabe = (recibo or {}).get("clabe") or self.cobro_de(st)[0]
+        if monto == "recibo":
+            monto = float(recibo["totalDue"]) if recibo and recibo.get("totalDue") is not None else 0.0
+        monto = round(float(monto), 2)
+        if not referencia or not clabe or monto <= 0:
+            self.anota(clave, "error", f"pago directo de {b['persona']}: referencia {referencia}, CLABE {clabe}, monto {monto}")
+            return
+        r = svc("stp-service", "POST", "/internal/test-support/spei/abonos",
+                {"clabe": clabe, "amount": monto, "numericReference": referencia, "paymentType": 1,
+                 "payerName": b["persona"].upper()[:39], "payerAccount": "012180009876543210", "payerInstitution": 40012,
+                 "concept": "PAGO DE MI VALE"}) or {}
+        if r.get("decision") != "CONFIRMED":
+            self.anota(clave, "error", f"pago directo de {b['persona']}: STP lo devolvió con causa {r.get('returnCause')}")
+            return
+        orden = self.orden_del_abono(r["inboundCreditId"], st["cuenta"])
+        ciclo = int(recibo["cycleNumber"]) if recibo else None
+        # What he paid of her statement: she delivers that statement less it (the motor counts it like her own payment).
+        if ciclo is not None:
+            st.setdefault("pagos_por_corte", []).append({"ciclo": ciclo, "fecha": self.hoy.isoformat(), "monto": monto, "cliente": True})
+        st.setdefault("pagos_cliente", []).append({"fecha": self.hoy.isoformat(), "cliente": b["prospect"], "monto": monto,
+                                                   "referencia": referencia, "orden": orden, "ciclo": ciclo})
+        self.anota(clave, "pago directo del cliente", f"{b['persona']} con su referencia {referencia}"
+                   + (f" (su recibo del corte {ciclo})" if ciclo else ""), monto=monto, orden=orden)
+
+    def pago_con_referencia_ajena(self, clave, st, monto):
+        """A deposit to her CLABE with a valid reference that names no loan and no client: it is hers, by the rule."""
+        clabe, _ = self.cobro_de(st)
+        r = svc("stp-service", "POST", "/internal/test-support/spei/abonos",
+                {"clabe": clabe, "amount": round(float(monto), 2), "numericReference": 9999996, "paymentType": 1,
+                 "payerName": "PERSONA SIN REFERENCIA", "payerAccount": "012180001111111111", "payerInstitution": 40012,
+                 "concept": "PAGO"}) or {}
+        if r.get("decision") != "CONFIRMED":
+            self.anota(clave, "error", f"abono con referencia ajena: STP lo devolvió con causa {r.get('returnCause')}")
+            return
+        orden = self.orden_del_abono(r["inboundCreditId"], st["cuenta"])
+        st.setdefault("referencia_ajena", []).append({"fecha": self.hoy.isoformat(), "monto": float(monto), "abono": r["inboundCreditId"]})
+        # It paid part of the statement she is about to pay (the rule applies it to what is due first): she sees it
+        # applied and delivers that much less, as with a client's direct payment. Paying it again would leave it ahead.
+        # Once she paid it, the deposit stays ahead and her next statement already subtracts it.
+        pendiente = max((int(s.get("cycleNumber") or 0) for s in self.estados_de_cuenta(st["cuenta"])
+                         if s.get("cutoffDate") and str(s["cutoffDate"]) < self.hoy.isoformat()), default=None)
+        ya_lo_pago = any(p.get("ciclo") == pendiente and not p.get("cliente") and not p.get("ajena")
+                         for p in st.get("pagos_por_corte", []))
+        if pendiente and not ya_lo_pago:
+            st.setdefault("pagos_por_corte", []).append({"ciclo": pendiente, "fecha": self.hoy.isoformat(),
+                                                         "monto": float(monto), "ajena": True})
+        self.anota(clave, "abono con referencia ajena", "la referencia 9999996 no es de nadie: se aplica como pago de ella",
+                   monto=float(monto), orden=orden)
+
     def saltar_cuota(self, clave, numero: int):
         st = self.estado[clave]
         token = self.token_de(st)
@@ -780,6 +888,8 @@ class Corrida:
         compra = e.get("compras", {}).get(dia)
         if compra:
             self.comprar(clave, *compra)
+        # Her clients' side first: a report lands before a placement of the same day.
+        self._clientes(clave, e, st, dia)
         for indice, monto, plazo in e.get("colocaciones", {}).get(dia, []):
             self.colocar(clave, indice, monto, plazo)
         if dia in e.get("difiere", {}):
@@ -796,8 +906,10 @@ class Corrida:
             emitidos = [s for s in (self.estados_de_cuenta(st["cuenta"]) if st.get("cuenta") else [])
                         if s.get("cutoffDate") and s["cutoffDate"] < self.hoy.isoformat()]
             comision, tasa = (0.0, None)
+            # Hers to pay until she pays it: what a client paid directly or a deposit by the rule paid only part of it.
             pendiente = next((s for s in sorted(emitidos, key=lambda s: -int(s.get("cycleNumber") or 0))
                               if not any(p["ciclo"] == int(s.get("cycleNumber") or 0) and p["fecha"] > str(s.get("cutoffDate"))
+                                         and not p.get("cliente") and not p.get("ajena")
                                          for p in st.get("pagos_por_corte", []))), None)
             if pendiente is not None and st.get("tipo") == "distribuidora":
                 comision, tasa = self.comision_al_pagar(st, pendiente, self.hoy)

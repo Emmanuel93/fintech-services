@@ -100,6 +100,24 @@ def estados_pdf(cuenta: str, destino: pathlib.Path) -> list[dict]:
     return filas
 
 
+def recibos_pdf(cuenta: str, destino: pathlib.Path) -> list[dict]:
+    """The receipts of her clients on this line: one PDF per client and statement, named by cutoff and folio."""
+    filas = csv_sql(f"""SELECT receipt_id, cycle_number, cutoff_date, payment_due_date, beneficiary_party_id, client_name,
+                               client_type, live_loans, total_due, payment_reference, clabe, folio, status, template_version
+                          FROM receipt.receipts WHERE credit_account_id = '{cuenta}'
+                         ORDER BY cycle_number, client_name""")
+    destino.mkdir(parents=True, exist_ok=True)
+    for f in filas:
+        if f["status"] != "GENERATED":
+            continue
+        pdf = svc("receipt-service", "GET", f"/api/v1/receipts/{f['receipt_id']}/pdf")
+        nombre = f"{f['cutoff_date']}-corte-{int(f['cycle_number']):02d}-{slug(f['client_name'] or f['beneficiary_party_id'][:8])}.pdf"
+        (destino / nombre).write_bytes(pdf)
+        f["archivo"] = nombre
+        f["sha256"] = hashlib.sha256(pdf).hexdigest()
+    return filas
+
+
 def paso_a_paso(clave, st, foto, libro, cargos, polizas, cortes, estados, bitacora) -> str:
     """One row per day the account moved or was photographed: the chain, readable."""
     por_dia = defaultdict(lambda: {"cargos": [], "libro": [], "polizas": [], "ops": [], "corte": None, "estado": None, "foto": None})
@@ -310,6 +328,8 @@ def entrega_cuenta(clave: str, st: dict, carpeta: pathlib.Path, bitacora: list[d
     (carpeta / "flujo-mes-a-mes.md").write_text(flujo_md(clave, st, flujo), encoding="utf-8")
     if st.get("tipo") == "distribuidora":
         escribe_csv(carpeta / "planes-de-colocaciones.csv", planes_de_colocaciones(cuenta))
+        # Her clients' payment receipts, one per client and statement, as receipt-service generated them.
+        escribe_csv(carpeta / "recibos.csv", recibos_pdf(cuenta, carpeta / "recibos"))
     try:
         escribe_json(carpeta / "riesgo.json", svc("risk-service", "GET", f"/api/v1/risk/accounts/{cuenta}"))
     except motor.HttpError:

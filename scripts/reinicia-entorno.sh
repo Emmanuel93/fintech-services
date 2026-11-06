@@ -103,9 +103,9 @@ for ruta in "/sales-org/levels" "/products" "/clients?page=0&size=1" "/accountin
 done
 set +f
 # Every service with test support must answer before a run shifts its clock.
-for s in credit-portfolio-service charges-service closing-service statement-service accounting-service payments-service \
-         origination-service collections-service risk-service commission-service invoicing-service scoring-service \
-         beneficiary-service wallet-service; do
+for s in credit-portfolio-service charges-service closing-service statement-service receipt-service accounting-service \
+         payments-service origination-service collections-service risk-service commission-service invoicing-service \
+         scoring-service beneficiary-service wallet-service; do
   for i in $(seq 1 60); do
     code=$(docker compose exec -T "$s" wget -qO- --server-response "http://localhost:8080/internal/test-support/clock" 2>&1 | grep -c "HTTP/1.1 200" || true)
     [ "$code" != "0" ] && break
@@ -113,7 +113,7 @@ for s in credit-portfolio-service charges-service closing-service statement-serv
     sleep 3
   done
 done
-echo "      reloj de pruebas en los 14 servicios  ok"
+echo "      reloj de pruebas en los 15 servicios  ok"
 
 if [ "$SOLO_PLATAFORMA" = "1" ]; then
   # The catalog, the policies and the calendars came with the migrations; the structure and the staff are the

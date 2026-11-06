@@ -145,7 +145,12 @@ def juzga_escenario(j: Juicio, clave: str, e: dict, st: dict, bitacora: list[dic
     rechazadas = [b for b in filas if b.get("accion") == "colocación rechazada"]
     j.compara(clave, "colocaciones rechazadas en la puerta (línea bloqueada, fuera del producto)",
               espera.get("colocaciones_rechazadas", 0), len(rechazadas))
-    if rechazadas and espera.get("colocaciones_rechazadas", 0):
+    if rechazadas and espera.get("rechazos_con"):
+        # Refused for the client's side (his type's limits, the red list): each expected reason, in her words.
+        for motivo in espera["rechazos_con"]:
+            dichas = [b for b in rechazadas if motivo in str(b.get("detalle", ""))]
+            j.compara(clave, f"una colocación rechazada dice «{motivo}»", "≥1", len(dichas), ok=bool(dichas))
+    elif rechazadas and espera.get("colocaciones_rechazadas", 0):
         bloqueo = [b for b in rechazadas if "bloqueada" in str(b.get("detalle", "")) or "cerrada" in str(b.get("detalle", ""))]
         j.compara(clave, "las colocaciones rechazadas dicen por qué: la línea estaba bloqueada por atraso o cerrada por la quita",
                   len(rechazadas), len(bloqueo))
@@ -169,6 +174,18 @@ def juzga_escenario(j: Juicio, clave: str, e: dict, st: dict, bitacora: list[dic
         j.compara(clave, "modo de interés según el producto", modo, real)
     if "estatus" in espera:
         j.compara(clave, "estatus de la cuenta", espera["estatus"], cuenta.get("status"))
+    # Every statement tells its holder to pay to their collection CLABE (the SPEI connector's): never to the account's
+    # disbursement CLABE, where a payment would never reach the loan.
+    clabes = _filas(f"""
+        SELECT count(*),
+               count(*) FILTER (WHERE s.snapshot->'view'->'account'->>'clabe' IS DISTINCT FROM c.clabe)
+          FROM statement.statements s
+          JOIN credit_portfolio.credit_accounts a ON a.credit_account_id = s.credit_account_id
+          LEFT JOIN credit_portfolio.collection_accounts c ON c.party_id = a.obligor_party_id AND c.status = 'ACTIVE'
+         WHERE s.credit_account_id = '{st['cuenta']}' AND s.status = 'GENERATED'""")[0]
+    if int(clabes[0]):
+        j.compara(clave, "cada estado de cuenta dice pagar a la CLABE de cobro de su titular", f"0 de {clabes[0]}",
+                  f"{clabes[1]} de {clabes[0]}", ok=int(clabes[1]) == 0)
     dpd, vencidas = _al_cierre(st["cuenta"], cuenta, fin)
     if espera.get("al_corriente"):
         j.compara(clave, "al corriente al cierre de FIN (días de atraso, cuotas vencidas)", "0, 0", f"{dpd}, {vencidas}",
@@ -260,6 +277,124 @@ def juzga_escenario(j: Juicio, clave: str, e: dict, st: dict, bitacora: list[dic
         j.compara(clave, "estados de cuenta generados", f"≥ {espera['estados_de_cuenta']}", n, ok=n >= espera["estados_de_cuenta"])
     if espera.get("quincenal"):
         juzga_quincenal(j, clave, st["cuenta"], cuenta, fin, espera.get("escalones"))
+    if e.get("producto") == "DISTRIBUTOR_LINE":
+        juzga_recibos(j, clave, st, espera)
+
+
+# ── a distributor's clients: receipts, types, red list, their own payments ─────────────────────────
+
+def juzga_recibos(j: Juicio, clave: str, st: dict, espera: dict):
+    """
+    Her clients' receipts: one per client billed in each statement, generated; together they add up, to the cent, to
+    what the statement says her clients pay (its rows' «A pagar»); each one prints her collection CLABE and the
+    client's own reference; every client's first receipt calls him NEW. And what a scenario declares of her clients:
+    her own policy copied, a client's direct payment, a report cleared, a deposit with a reference that is nobody's,
+    a client's type over time.
+    """
+    cuenta = st["cuenta"]
+    por_estado = _filas(f"""
+        WITH e AS (
+            SELECT s.cycle_number,
+                   (SELECT count(DISTINCT p->>'beneficiaryPartyId')
+                      FROM jsonb_array_elements(coalesce(s.snapshot->'view'->'placements', '[]'::jsonb)) p
+                     WHERE (p->>'outstandingPrincipal')::numeric > 0
+                       AND jsonb_array_length(coalesce(p->'dueInPeriod', '[]'::jsonb)) > 0) AS clientes,
+                   (SELECT coalesce(sum((i->>'total')::numeric), 0)
+                      FROM jsonb_array_elements(coalesce(s.snapshot->'view'->'placements', '[]'::jsonb)) p,
+                           jsonb_array_elements(coalesce(p->'dueInPeriod', '[]'::jsonb)) i
+                     WHERE (p->>'outstandingPrincipal')::numeric > 0) AS pagos
+              FROM statement.statements s
+             WHERE s.credit_account_id = '{cuenta}' AND s.status = 'GENERATED'),
+        r AS (
+            SELECT cycle_number, count(*) FILTER (WHERE status = 'GENERATED') AS generados, count(*) AS todos,
+                   coalesce(sum(total_due) FILTER (WHERE status = 'GENERATED'), 0) AS suma
+              FROM receipt.receipts WHERE credit_account_id = '{cuenta}' GROUP BY cycle_number)
+        SELECT count(*),
+               count(*) FILTER (WHERE coalesce(r.generados, 0) <> e.clientes OR coalesce(r.todos, 0) <> e.clientes),
+               count(*) FILTER (WHERE abs(coalesce(r.suma, 0) - e.pagos) > 0.005),
+               coalesce(string_agg(e.cycle_number || ': ' || coalesce(r.generados, 0) || ' de ' || e.clientes || ', '
+                                   || coalesce(r.suma, 0) || ' contra ' || e.pagos, '; ')
+                        FILTER (WHERE coalesce(r.generados, 0) <> e.clientes OR abs(coalesce(r.suma, 0) - e.pagos) > 0.005), ''),
+               coalesce(sum(e.clientes), 0)
+          FROM e LEFT JOIN r ON r.cycle_number = e.cycle_number""")[0]
+    estados, mal_contados, mal_sumados, detalle, recibos = int(por_estado[0]), int(por_estado[1]), int(por_estado[2]), por_estado[3], int(por_estado[4])
+    j.compara(clave, "un recibo generado por cliente con cuotas en cada estado de cuenta", f"0 de {estados} estados",
+              f"{mal_contados} de {estados} ({recibos} recibos)" + (f" ({detalle[:200]})" if detalle else ""), ok=mal_contados == 0)
+    j.compara(clave, "los recibos de cada estado suman, al centavo, los pagos de sus clientes del estado (sin su descuento)",
+              f"0 de {estados}", f"{mal_sumados} de {estados}", ok=mal_sumados == 0)
+    datos = _filas(f"""
+        SELECT count(*),
+               count(*) FILTER (WHERE r.clabe IS DISTINCT FROM (SELECT c.clabe FROM credit_portfolio.collection_accounts c
+                                                                 WHERE c.party_id = r.distributor_party_id)),
+               count(*) FILTER (WHERE r.payment_reference IS DISTINCT FROM (
+                   SELECT x.payment_reference FROM credit_portfolio.client_payment_references x
+                    WHERE x.credit_account_id = r.credit_account_id AND x.beneficiary_party_id = r.beneficiary_party_id)),
+               count(*) FILTER (WHERE r.client_type IS NULL),
+               count(DISTINCT r.folio) = count(*)
+          FROM receipt.receipts r WHERE r.credit_account_id = '{cuenta}' AND r.status = 'GENERATED'""")[0]
+    total, otra_clabe, otra_referencia, sin_tipo, folios_unicos = int(datos[0]), int(datos[1]), int(datos[2]), int(datos[3]), datos[4] == "t"
+    j.compara(clave, "cada recibo trae su CLABE de cobro y la referencia de su cliente; folios únicos; tipo de cliente",
+              f"0 de {total}", f"{otra_clabe} CLABE, {otra_referencia} referencias, {sin_tipo} sin tipo de {total}"
+              + ("" if folios_unicos else ", folios repetidos"),
+              ok=otra_clabe == 0 and otra_referencia == 0 and sin_tipo == 0 and folios_unicos)
+    primeros = _filas(f"""
+        SELECT count(*) FILTER (WHERE client_type <> 'NUEVO'), count(*)
+          FROM (SELECT DISTINCT ON (beneficiary_party_id) client_type FROM receipt.receipts
+                 WHERE credit_account_id = '{cuenta}' AND status = 'GENERATED'
+                 ORDER BY beneficiary_party_id, cycle_number) x""")[0]
+    j.compara(clave, "el primer recibo de cada cliente lo llama nuevo", f"0 de {primeros[1]}", f"{primeros[0]} de {primeros[1]}",
+              ok=int(primeros[0]) == 0)
+
+    benef = st.get("beneficiarios") or []
+    for indice, (primero, ultimo) in (espera.get("tipos") or {}).items():
+        cliente = benef[int(indice)]["prospect"] if int(indice) < len(benef) else None
+        fila = _filas(f"""SELECT (array_agg(client_type ORDER BY cycle_number))[1],
+                                 (array_agg(client_type ORDER BY cycle_number DESC))[1]
+                            FROM receipt.receipts WHERE credit_account_id = '{cuenta}' AND beneficiary_party_id = '{cliente}'
+                             AND status = 'GENERATED'""")[0]
+        j.compara(clave, f"el cliente {indice} empieza {primero.lower()} y termina {ultimo.lower()}",
+                  f"{primero} → {ultimo}", f"{fila[0]} → {fila[1]}", ok=fila[0] == primero and fila[1] == ultimo)
+    if espera.get("politica_propia"):
+        tope = _uno(f"""SELECT new_max_loan_amount FROM credit_portfolio.placement_policies
+                         WHERE party_ref = (SELECT obligor_party_id FROM credit_portfolio.credit_accounts
+                                             WHERE credit_account_id = '{cuenta}') AND configured""")
+        esperado = espera["politica_propia"]["nuevo"]
+        j.compara(clave, "su política propia llegó a cartera (cliente nuevo hasta …)", esperado,
+                  float(tope) if tope else None, ok=tope is not None and abs(float(tope) - esperado) < 0.005)
+    if espera.get("pago_directo") is not None:
+        cliente = benef[int(espera["pago_directo"])]["prospect"]
+        directo = _filas(f"""
+            SELECT (SELECT count(*) FROM credit_portfolio.balance_events
+                     WHERE credit_account_id = '{cuenta}' AND event_type = 'PAYMENT_APPLIED' AND beneficiary_party_id = '{cliente}'),
+                   (SELECT count(*) FROM payments.credit_allocations
+                     WHERE credit_account_id = '{cuenta}' AND mode = 'BENEFICIARY' AND beneficiary_party_id = '{cliente}'),
+                   (SELECT count(*) FROM statement.statements s,
+                           jsonb_array_elements(coalesce(s.snapshot->'view'->'movements', '[]'::jsonb)) m
+                     WHERE s.credit_account_id = '{cuenta}' AND m->>'beneficiaryPartyId' = '{cliente}')""")[0]
+        j.compara(clave, "su cliente pagó directo: asiento a su nombre, asignación BENEFICIARY y su estado lo nombra",
+                  "≥1, ≥1, ≥1", f"{directo[0]}, {directo[1]}, {directo[2]}", ok=all(int(x) >= 1 for x in directo))
+        pagos = st.get("pagos_cliente") or []
+        ciclo = next((p.get("ciclo") for p in pagos if p.get("cliente") == cliente and p.get("ciclo")), None)
+        if ciclo:
+            pagada = _uno(f"""SELECT count(*) FILTER (WHERE i.status = 'PAID') || ' de ' || count(*)
+                               FROM credit_portfolio.installments i JOIN credit_portfolio.dispositions d ON d.disposition_id = i.schedule_id
+                              WHERE d.credit_account_id = '{cuenta}' AND d.beneficiary_party_id = '{cliente}' AND i.billed_cycle = {int(ciclo)}""")
+            j.compara(clave, f"la cuota de su cliente del corte {ciclo} quedó pagada", "todas", pagada,
+                      ok=pagada is not None and pagada.split(" de ")[0] == pagada.split(" de ")[1] and pagada != "0 de 0")
+    if espera.get("lista_roja_levantada") is not None:
+        cliente = benef[int(espera["lista_roja_levantada"])]["prospect"]
+        marcas = _filas(f"""SELECT count(*), count(*) FILTER (WHERE cleared_at IS NOT NULL AND clear_comment IS NOT NULL)
+                              FROM credit_portfolio.beneficiary_flags WHERE beneficiary_party_id = '{cliente}'""")[0]
+        j.compara(clave, "su reporte a lista roja quedó levantado, con comentario", "1, 1", f"{marcas[0]}, {marcas[1]}",
+                  ok=marcas[0] == "1" and marcas[1] == "1")
+    if espera.get("referencia_ajena"):
+        ajena = _filas(f"""SELECT r.reference_status, a.mode FROM payments.received_credits r
+                             JOIN payments.credit_allocations a ON a.inbound_credit_id = r.inbound_credit_id
+                            WHERE r.numeric_reference = 9999996 AND r.party_id = (SELECT obligor_party_id FROM credit_portfolio.credit_accounts
+                                                                                  WHERE credit_account_id = '{cuenta}')""")
+        modos = sorted({f[1] for f in ajena})
+        j.compara(clave, "el abono con una referencia que no es de nadie se aplicó a ella por la regla", "NOT_FOUND · BY_RULE",
+                  f"{ajena[0][0] if ajena else '—'} · {', '.join(modos) or '—'}", ok=bool(ajena) and ajena[0][0] == "NOT_FOUND" and modos == ["BY_RULE"])
 
 
 # ── the distributor line: its fortnights ────────────────────────────────────────────────────────

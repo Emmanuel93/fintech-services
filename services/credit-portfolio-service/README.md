@@ -173,7 +173,10 @@ cuenta pasa a `CLOSED` (`closure_reason = QUITA`, `closed_at`; migración 049), 
 cierre la dan por terminada. Monto y plazo se validan contra los límites del producto (`AMOUNT_BELOW/ABOVE_*`,
 `TERM_*`): $1,000–$10,000 y 12–24 quincenas en pasos de 2; el paso de $500 del monto es del selector de la app, no
 de cartera. La vista del estado (`statement-view`) trae la comisión de cada cuota (`InstallmentLine.commission`) y el
-día en que una quita cerró la línea (`lineClosedOn`).
+día en que una quita cerró la línea (`lineClosedOn`). Su cuenta trae `collectionClabe`: la CLABE de cobro activa de la
+titular (la que asignó STP, `collection_accounts`), que es a la que estados de cuenta y recibos dicen pagar. Nunca la
+`clabe_account` de la cuenta, que es a donde sale su dinero: hasta «dist12» la vista mandaba ésa y los documentos
+imprimían una CLABE donde un pago no llegaba a la línea.
 
 **La base del moratorio es el capital vencido.** En la línea de distribuidora el estado pide capital, interés e IVA;
 la foto diaria toma como `overdue_principal` sólo el capital de las cuotas que ese estado facturó y sigue sin pagar
@@ -415,6 +418,37 @@ Apagados salvo `TEST_SUPPORT_ENABLED=true`; el gateway **no** enruta `/internal/
 | `POST` | `/dispositions/{id}/age-schedule` | Envejecer un plan completo |
 
 ---
+
+## 6b. Los clientes de una distribuidora: tipo, límites, lista roja, referencia y pago directo
+
+Cartera es dueña de lo que se sabe de cada cliente (beneficiario) porque tiene sus colocaciones y sus planes.
+
+- **Tipo de cliente** (`BeneficiaryTyping`): REVOLVENTE desde que tiene una colocación con cualquier distribuidora
+  totalmente pagada; NUEVO antes. Quebranto y quita no cuentan como pagado. Se lee del historial, nadie lo captura.
+- **Límites por tipo** (`ClientLimits`, copia de la política de colocación de sales-org en `placement_policies`): al
+  autorizar una colocación de una línea de distribuidora, `validateClient` rechaza `AMOUNT_ABOVE_CLIENT_LIMIT`,
+  `CLIENT_OUTSTANDING_LIMIT`, `CLIENT_ACTIVE_LOANS_LIMIT` o `TERM_ABOVE_CLIENT_LIMIT`. La política de la línea es la de
+  su nodo de distribuidora (si declaró una propia) o la de su sucursal de origen.
+- **Lista roja** (`beneficiary_flags` y marcas derivadas): «vale en mora» (su cuota facturada vencida sin pagar con la
+  línea de ella al corriente), «su distribuidora está en mora» (la misma cuota con la línea de ella atrasada, castigada o
+  reestructurada) y «reporte» (de la distribuidora o del backoffice, con motivo del catálogo y comentarios; se levanta
+  con comentario, nunca se borra). **Con cualquier marca no se le coloca** (`CLIENT_RED_LISTED`). Las derivadas se
+  quitan solas al ponerse al día.
+- **Referencia de pago del cliente** (`client_payment_references`): una por línea y cliente, de la misma secuencia y
+  Luhn que las de préstamo; se asigna con su primera colocación (y un respaldo al arrancar para los anteriores) y se
+  publica `credit-portfolio.client-reference-assigned` para el directorio de payments.
+- **Pago directo** (`DirectPayments`): un pago aplicado con `beneficiaryPartyId` (payments `BENEFICIARY`) queda en el
+  libro a nombre del cliente; al conciliar el calendario cubre primero **sus** cuotas ya facturadas cuando llegó el
+  dinero, de la más vieja a la más nueva, aunque el estado de ella no esté completo. Lo que sobra es de la línea. El
+  descuento de ella se netea como siempre, al completarse su estado.
+
+| Método | Ruta | Qué |
+|---|---|---|
+| `GET` | `/api/v1/portfolio/beneficiaries/{partyId}/profile` · `/profiles?partyIds=` | Tipo, marcas y cómo va con cada línea |
+| `GET` · `POST` | `/api/v1/portfolio/beneficiaries/{partyId}/flags` | Historial de marcas · reportar |
+| `POST` | `/api/v1/portfolio/beneficiaries/{partyId}/flags/{flagId}/clear` | Levantar un reporte, con comentario |
+| `GET` | `/api/v1/portfolio/beneficiaries/by-line/{id}/references` · `/references/{n}` | Referencias de los clientes de una línea · de quién es una |
+| `GET` | `/api/v1/portfolio/accounts/{id}/placement-limits?beneficiaryPartyId=&amount=&termPeriods=` | Lo que ese cliente puede recibir en esa línea y por qué no |
 
 ## 7. Dependencias externas y sus simuladores locales
 

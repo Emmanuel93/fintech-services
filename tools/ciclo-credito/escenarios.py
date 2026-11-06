@@ -465,6 +465,35 @@ DISTRIBUIDORAS = {
                 espera=dict(**AL_CORRIENTE, **QUINCENAL, eventos=["CHARGE_MORATORIUM_INTEREST", "AGREEMENT_RESTRUCTURE"],
                             caso={"estatus": "CLOSED", "promesas": "≥1", "convenios": "≥1", "contactos": "≥3"},
                             forborne=True, colocaciones_rechazadas=1, acciones=["reestructura"])),
+    # Her own placement policy, stricter than her branch's: a NEW client up to $3,000, one live loan, 12 fortnights; a
+    # REVOLVING one (he fully paid a loan) up to $6,000, two live loans, 16 fortnights. Four placements refused at the
+    # door, each saying why in her words; she reports a client (red list) and clears him; another client pays his own
+    # installment with his reference (his receipt), so she delivers that statement less what he paid; and a deposit
+    # with a reference that is nobody's is hers by the rule.
+    "D13": dict(titulo="Distribuidora con política propia más estricta: límites por tipo de cliente, lista roja y un cliente que paga directo", producto=DISTRIBUIDORA,
+                alta=_dia("2025-04-07"), linea=80_000, beneficiarios=3, puntual=True, paga=["exigible"],
+                politica_propia={"nuevo": {"maxLoanAmount": 3_000, "maxOutstanding": 3_000, "maxActiveLoans": 1, "maxTerm": 12},
+                                 "revolvente": {"maxLoanAmount": 6_000, "maxOutstanding": 8_000, "maxActiveLoans": 2, "maxTerm": 16}},
+                colocaciones=_colocaciones(
+                    _una(0, "2025-04-11", 5_000, 12),                       # refused: a new client up to $3,000
+                    _una(0, "2025-04-11", 3_000, 12),
+                    _una(1, "2025-04-14", 3_000, 18),                       # refused: up to 12 fortnights
+                    _una(1, "2025-04-14", 2_500, 12),
+                    _una(2, "2025-04-21", 2_000, 12),
+                    _una(0, "2025-05-12", 1_000, 12),                       # refused: one live loan
+                    _una(2, "2025-06-09", 1_000, 12),                       # refused: she reported him (and one live)
+                    _una(0, "2025-10-27", 6_000, 16),                       # REVOLVENTE: his first loan is paid
+                    _una(2, "2025-11-10", 1_500, 12)),                      # REVOLVENTE and cleared
+                reportes={_dia("2025-06-02"): [(2, "NOT_LOCATABLE", "No contesta desde mayo")]},
+                levanta={_dia("2025-07-01"): [2]},
+                pagos_cliente={_dia("2025-06-10"): [(1, "recibo")]},
+                referencia_ajena={_dia("2025-08-11"): 150.00},
+                espera=dict(**AL_CORRIENTE, **QUINCENAL, colocaciones_rechazadas=4,
+                            rechazos_con=["le puedes prestar hasta $3,000.00 por préstamo", "hasta 1 préstamo vivo",
+                                          "a lo más a 12 quincenas", "lista roja"],
+                            politica_propia={"nuevo": 3_000}, pago_directo=1, lista_roja_levantada=2, referencia_ajena=True,
+                            tipos={0: ("NUEVO", "REVOLVENTE"), 2: ("NUEVO", "REVOLVENTE")},
+                            acciones=["reporte a lista roja", "reporte levantado", "pago directo del cliente"])),
 }
 
 # ── The STP simulator's scenarios ────────────────────────────────────────────────────────────────

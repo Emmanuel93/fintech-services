@@ -36,6 +36,7 @@ PUERTOS = {
     18104: ("banking-service", 8080),
     18105: ("disbursement-service", 8080),
     18106: ("statement-service", 8080),
+    18107: ("receipt-service", 8080),
 }
 
 URL = {servicio: f"http://localhost:{puerto}" for puerto, (servicio, _) in PUERTOS.items()}

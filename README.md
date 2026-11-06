@@ -12,7 +12,7 @@ Este README es el **documento único de arquitectura y proceso** (incluye la dec
 
 1. [Decisión de arquitectura](#1-decisión-de-arquitectura)
 2. [API Gateway — capa de entrada](#2-api-gateway--capa-de-entrada)
-3. [Servicios (27 + gateway + observabilidad) — estado](#3-servicios-27--gateway--observabilidad--estado)
+3. [Servicios (29 + gateway + observabilidad) — estado](#3-servicios-29--gateway--observabilidad--estado)
 4. [El proceso de adquisición end-to-end](#4-el-proceso-de-adquisición-end-to-end)
    · [4.b Los controles de KYC y AML](#4b--los-controles-de-kyc-y-aml)
 5. [Comunicación entre servicios](#5-comunicación-entre-servicios)
@@ -261,7 +261,7 @@ Doc completa: [services/gateway-service/README.md](services/gateway-service/READ
 
 ---
 
-## 3. Servicios (27 + gateway + observabilidad) — estado
+## 3. Servicios (29 + gateway + observabilidad) — estado
 
 > **Puertos:** en Docker **todos los servicios de dominio corren en `:8080` internos** y se direccionan por nombre (`http://<servicio>:8080`); sólo el gateway (`:8080→host`), `channel-mobile` (`:8085`) y `channel-backoffice` (`:8099`) difieren. Los puertos distintos (8081–8101) de la columna son los **defaults de `bootRun`** para desarrollo local sin Docker.
 
@@ -269,6 +269,7 @@ Doc completa: [services/gateway-service/README.md](services/gateway-service/READ
 |---|---|---|---|---|---|
 | GW | **gateway-service** | **:80 → host :8080** | — | ✅ | [README](services/gateway-service/README.md) — OpenResty JWT RS256 + rate limit + audit log |
 | — | shared | — | — | ✅ | [shared/](shared/) — `DomainEvent`, `DomainException`, handler RFC 7807 |
+| — | shared-documents | — | — | ✅ | [README](shared-documents/README.md) — lo común de los PDF que imprime la plataforma (estados de cuenta, recibos): modelo del documento, formatos de importe y fecha, paleta de marca, motor Jasper, tipografía Inter y logotipo |
 | T1 | identity-service | 8080 | `identity` | ✅ | [README](services/identity-service/README.md) — auth, JWT RS256 (PKCS#8), credenciales |
 | T3 | **audit-service** | 8090 | `audit` | ✅ | [README](services/audit-service/README.md) — suscriptor global Kafka, log regulatorio append-only, CNBV/CONDUSEF/UIF |
 | T5 | configuration-service | 8080 | `configuration` | ✅ | [README](services/configuration-service/README.md) — parámetros maker-checker |
@@ -289,7 +290,9 @@ Doc completa: [services/gateway-service/README.md](services/gateway-service/READ
 | D13 | **beneficiary-service** | 8102 | `beneficiary` | 🔄 | [README](services/beneficiary-service/README.md) — colocación B2B2C: agregado `Placement` (11 estados, 16 aristas), liga de KYC, buró **sin filtrar por score** y disposición THIRD_PARTY_CREDIT. Mesa de KYC con **dictamen manual de identidad** y bandera `MANUAL`/`AUTOMATIC` que degrada a revisión humana si el proveedor falla. **Falta la evidencia que mirar** (OCR, prueba de vida, RENAPO) ([dominio](docs/dominios/13_beneficiary_domain.md) · [plan](docs/BENEFICIARY_SERVICE_PLAN.md)) |
 | D11 | **disbursement-service** | 8080/8100 | `disbursement` | ✅ | [README](services/disbursement-service/README.md) — payouts multi-rail y multi-empresa; **interno, no publicado en el gateway**; backoff+DLT ([dominio](docs/dominios/10_disbursement_domain.md)) |
 | D12 | **stp-service** | 8101 | `stp` | ✅ | [README](services/stp-service/README.md) — conector SPEI: cadena original, firma, poller de conciliación; **sin internet, sin webhooks**; backoff+DLT ([dominio](docs/dominios/11_stp_connector_domain.md)) |
-| D14 | **closing-service** | 8103 | `closing` | ✅ | [README](services/closing-service/README.md) — motor de **cierres y cortes**: seis fases por cuenta, reparto entre pods con candado Redis y **sello** del día. Saca el barrido nocturno del pool de cartera ([dominio](docs/dominios/14_closing_domain.md)) |
+| D14 | **closing-service** | 8103 | `closing` | ✅ | [README](services/closing-service/README.md) — motor de **cierres y cortes**: seis fases por cuenta, reparto entre pods con candado Redis y **sello** del día. Saca el barrido nocturno del pool de cartera. El **corte corre repartido por cuenta** y cierra la cadena del día (desde las 00:05 de D+1, en serie y con compuertas: cargos devenga D → cartera cuadra el interés y calcula la mora → closing corta D con el saldo al cierre de D → cargos sigue con D+1): planifica con una sentencia SQL, despacha una cuenta por mensaje a `closing.cutoff-due` y cada pod corta las de sus particiones ([dominio](docs/dominios/14_closing_domain.md) · [corte y estados de cuenta](docs/CORTE_Y_ESTADOS_DE_CUENTA.md)) |
+| D19 | **statement-service** | 8106 | `statement` | 🔄 | [README](services/statement-service/README.md) — **estados de cuenta**: un PDF (JasperReports) por cada corte sellado, con **una plantilla por producto** (personal, nómina, grupal, micro, PyME, tarjeta, línea revolvente, empresarial, distribuidora). Escucha `closing.cutoff-closed`, lee la vista del período en cartera y publica `statement.statement-generated`. Escala con particiones y réplicas |
+| D20 | **receipt-service** | 8107 | `receipt` | 🔄 | [README](services/receipt-service/README.md) — **recibos de pago** de los clientes de una distribuidora: uno por cliente y corte, sin el descuento de ella, con la referencia del cliente y la CLABE de la línea para que pueda pagar directo. Escucha `closing.cutoff-closed` (sólo líneas de distribuidora), lee la vista del período en cartera y publica `receipt.receipt-generated`. No depende de statement-service; comparte con él `shared-documents` |
 | D15 | **banking-service** | 8104 | `banking` | 🔄 | [README](services/banking-service/README.md) — **tesorería**: cuentas propias, **de cuál sale cada pago**, conciliación bancaria y la cadena del dinero consultable en ambos sentidos. No conoce el dominio de crédito ([dominio](docs/dominios/15_banking_domain.md)) |
 | D16 | **compliance-service** | 8105 | `compliance` | 🔄 | [README](services/compliance-service/README.md) — **quién puede operar y quién no**: corre KYC y AML sobre cada persona al alta, mantiene las listas de gobierno cargadas y versionadas, y emite el veredicto que consultan las compuertas de originación y de disposición. Decide; la constancia la lleva `audit` ([brief](docs/BRIEF_CONTROLES_KYC_AML.md)) |
 | T2 | notifications-service | 8098 | `notifications` | ✅ | [README](services/notifications-service/README.md) — comunicaciones multicanal disparadas por eventos (sin `@Scheduled` que revise cuentas) |
@@ -323,9 +326,34 @@ el entorno los encienda (`TEST_SUPPORT_ENABLED=true`), y el gateway no enruta
 
 | Servicio | Para qué |
 |---|---|
-| charges-service | correr el devengo diario |
-| credit-portfolio-service | disparar el corte, marcar vencidas, recalcular mora, mover la fecha de una mensualidad |
+| charges-service | cerrar un día completo (`run-day-close`: devengo, moratorio y la cadena hasta el corte), correr el devengo diario |
+| credit-portfolio-service | cerrar la parte de cartera de un día (`run-day-close`), marcar vencidas, recalcular mora, mover la fecha de una mensualidad |
 | origination-service | llevar una solicitud a revisión manual o a comité sin depender del score |
+
+Todo servicio con el soporte encendido expone además dos endpoints comunes (de `shared`) que una corrida determinista
+consulta antes de mover el reloj:
+
+| Endpoint | Para qué |
+|---|---|
+| `GET /internal/test-support/scheduling` | si sus crones de negocio están en pausa (`BUSINESS_CRONS_PAUSED`) y cuáles de recuperación siguen encendidos: el E2E no arranca si uno no lo está |
+| `GET /internal/test-support/quiescence` | si cada grupo de sus listeners consumió hasta el final de sus tópicos (la misma compuerta `ConsumerCatchUp` del cierre) y si sus colas propias no guardan trabajo vencido (`PendingWork`: la cola de despacho de desembolsos, el outbox de STP); el E2E espera ese reposo antes de cada movimiento del reloj |
+
+### Autoverificación
+
+El sistema se revisa a sí mismo. Además del cierre de mes de contabilidad (sus comprobaciones contra sus copias de cada
+subledger), cuatro servicios exponen `GET .../self-checks` con el mismo contrato (`SelfCheck` en `shared`: código,
+título, en orden, debe cumplirse, partidas, importe, detalle), cada uno contra **sus propios datos**:
+
+| Servicio | Ruta | Qué revisa |
+|---|---|---|
+| commission-service | `/api/v1/commissions/self-checks` | cada lote contra sus registros y su neto, retenciones por régimen, reversas sin exceso, el arrastre de la última corrida; informa lotes sin desenlace y por reintentar |
+| banking-service | `/api/v1/treasury/self-checks` | fondeo contra sus movimientos, intereses a su tasa y sin días repetidos, órdenes liquidadas en caja y en su traza, caja nunca en negativo; informa pagos detenidos |
+| credit-portfolio-service | `/api/v1/portfolio/self-checks` | deuda igual a sus movimientos, fotos diarias sin brecha, cierres del día terminados, saldos no negativos; informa disposiciones sin desenlace |
+| statement-service | `/api/v1/statements/self-checks` | un estado por cuenta cerrada en cada corte, el saldo de su corte, su documento íntegro, ninguno sin generar |
+
+La consola los junta en **Contabilidad → Autoverificación** (BFF `GET /accounting/self-checks`), y el veredicto del E2E
+los lee en vez de recalcularlos; la conciliación de la cadena (`tools/ciclo-credito/concilia.sql`) queda como auditor
+externo que cruza esquemas.
 
 ### El expediente: de la cámara al analista
 
@@ -703,7 +731,11 @@ Consumidores tomados de los `@KafkaListener` reales del código; los tópicos si
 | `credit-portfolio.installment-due` | credit-portfolio | notifications, wallet |
 | `credit-portfolio.installment-upcoming` | credit-portfolio | collections |
 | `credit-portfolio.disposition-completed` | credit-portfolio | beneficiary, notifications, wallet |
-| `credit-portfolio.disposition-rejected` | credit-portfolio | *ninguno* — wallet lo maneja hoy por `balance-updated` |
+| `credit-portfolio.disposition-rejected` | credit-portfolio | beneficiary (cierra la colocación con el motivo, dicho a la distribuidora) |
+| `credit-portfolio.client-reference-assigned` | credit-portfolio | payments (directorio de referencias: el depósito con la referencia del cliente paga sus cuotas) |
+| `sales-org.placement-policy-changed` | sales-org | credit-portfolio (copia de la política de colocación resuelta por unidad) |
+| `closing.cutoff-closed` | closing | credit-portfolio, statement, receipt |
+| `statement.statement-generated` / `receipt.receipt-generated` | statement / receipt | *ninguno todavía* (aviso al cliente pendiente) |
 | `credit-portfolio.payment-rejected` | credit-portfolio | payments, audit |
 | `credit-portfolio.charge-rejected` | credit-portfolio | charges, audit |
 | `charges.charge-applied` / `charge-reversed` | charges | credit-portfolio, audit |
@@ -894,7 +926,7 @@ monto** (`.00` liquida, `.02` rechazo PLD, `.06` nunca aparece, `.08` sello alte
 | **`@ConditionalOnProperty`** | `MockCirculoAdapter`, `NoopEmailAdapter`/`SmtpEmailAdapter` | El bean simplemente no existe si la bandera no está puesta |
 | **`WARN` en cada llamada** | `MockCirculoAdapter`, `NoopPacAdapter`, `NoopSpeiDispatchAdapter`… | Ningún log queda limpio mientras haya un simulador activo |
 | **Bandera de simulación de KYC** | `KycSimulationController` | Responde error explícito cuando `BENEFICIARY_KYC_SIMULATION_ENABLED=false` |
-| **`TEST_SUPPORT_ENABLED`** | charges · credit-portfolio · origination · risk | Los `/internal/test-support/*` van apagados por default, y **el gateway no enruta `/internal/*`** |
+| **`TEST_SUPPORT_ENABLED`** | los 18 servicios que mueve o espera el E2E (reloj, crones, reposo, sus disparadores) | Los `/internal/test-support/*` van apagados por default, y **el gateway no enruta `/internal/*`** |
 
 > **Un stub de pagos silenciosamente activo en producción es la peor clase de incidente:** todo se ve
 > verde y no sale un peso. Por eso la protección es de arranque y no de configuración.

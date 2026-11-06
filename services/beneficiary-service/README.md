@@ -196,6 +196,15 @@ se cambia sin redeploy.
 Los dos topes se aplican juntos y responden preguntas distintas: el del producto dice cuánto es
 prudente prestarle a una persona (422), el de la línea dice cuánto le queda a él (409).
 
+### Por tipo de cliente y lista roja
+
+Además del producto, cada colocación respeta la **política de colocación** de la sucursal (o la propia, más estricta,
+de la distribuidora) para el **tipo del cliente** —NUEVO o REVOLVENTE— y la **lista roja**: con cualquier marca, nadie
+le presta. Lo decide cartera al autorizar; aquí se pregunta antes (`placement-limits`) para decirlo en palabras de la
+distribuidora (`PlacementRefusal`): al crear una colocación a una clienta ya conocida (mismo celular), y al aprobar,
+antes de que salga dinero. Una marca que no es de ella (el reporte de otra distribuidora) no se le explica: lee que
+Kredius no puede prestarle por ahora.
+
 ## API REST
 
 ### Privada — el distribuidor (JWT vía gateway, `X-User-Id`)
@@ -209,6 +218,8 @@ prudente prestarle a una persona (422), el de la línea dice cuánto le queda a 
 | `GET` | `/api/v1/placements/{id}/bureau` | ✅ — historial completo, sin filtrar por score |
 | `POST` | `/api/v1/placements/{id}/approve` · `/reject` | ✅ |
 | `GET` | `/api/v1/beneficiaries` · `/distributor/line-summary` | ✅ (`DistributorQueryController`) |
+| `GET` | `/api/v1/beneficiaries/{partyId}/placement-limits?amount=&termPeriods=` | ✅ — tipo, límites, holgura y por qué no |
+| `POST` | `/api/v1/beneficiaries/{partyId}/reports` · `/reports/{flagId}/clear` | ✅ — reportar a su cliente (lista roja) y levantar su reporte |
 
 ### Backoffice — la mesa de KYC
 
