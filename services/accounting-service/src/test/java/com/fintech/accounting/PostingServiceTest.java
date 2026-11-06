@@ -1,8 +1,10 @@
 package com.fintech.accounting;
 
+import com.fintech.accounting.application.service.AccountBirthNotSeenException;
 import com.fintech.accounting.application.AccountingProperties;
 import com.fintech.accounting.application.port.out.*;
 import com.fintech.accounting.application.service.BillingService;
+import com.fintech.accounting.application.service.FeeDeferralService;
 import com.fintech.accounting.application.service.PostingService;
 import com.fintech.accounting.application.service.VoucherPostingService;
 import com.fintech.accounting.application.service.VoucherPostingService.Pair;
@@ -22,8 +24,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.never;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.*;
+import static org.mockito.Mockito.lenient;
 
 /**
  * Las pruebas se hacen contra los <b>pares</b> que se le entregan al mayor, no contra las filas que
@@ -38,6 +43,7 @@ class PostingServiceTest {
     @Mock ProvisionLedgerRepository provisionLedgerRepository;
     @Mock VoucherPostingService ledger;
     @Mock BillingService billingService;
+    @Mock FeeDeferralService feeDeferral;
 
     PostingService service;
     final AccountingProperties properties = new AccountingProperties();
@@ -48,7 +54,7 @@ class PostingServiceTest {
     @BeforeEach
     void setUp() {
         service = new PostingService(shadowRepository, postingRuleRepository,
-                provisionLedgerRepository, ledger, billingService, properties);
+                provisionLedgerRepository, ledger, billingService, properties, feeDeferral);
     }
 
     @SuppressWarnings("unchecked")
@@ -283,9 +289,10 @@ class PostingServiceTest {
             assertThat(p.creditAccount()).isEqualTo(AccountCodes.LINEAS_POR_DISPONER);
             assertThat(p.amount()).isEqualByComparingTo("250000");
         });
+        // The money goes out by SPEI: it waits in SPEI to settle until the bank reports the order on its operation date.
         assertThat(pairs.getAllValues().get(1)).singleElement().satisfies(p -> {
             assertThat(p.debitAccount()).isEqualTo(AccountCodes.CARTERA_VIGENTE);
-            assertThat(p.creditAccount()).isEqualTo(AccountCodes.BANCOS);
+            assertThat(p.creditAccount()).isEqualTo(AccountCodes.SPEI_POR_LIQUIDAR);
             assertThat(p.amount()).isEqualByComparingTo("250000");
         });
 
@@ -321,41 +328,40 @@ class PostingServiceTest {
     }
 
     /**
-     * El defecto que producía «comisiones» del tamaño del préstamo.
-     *
-     * <p>Contabilidad conoce la cuenta a media vida: su shadow está en cero pero cartera ya va por la
-     * versión 7. El delta contra cero es el saldo acumulado, no el importe del hecho — y antes se le
-     * atribuía al hecho que casualmente llegó primero.
+     * A charge processed before its account's birth (the activation travels on another topic, consumed in
+     * parallel) waits for the birth: nothing is posted and the listener's error handler retries it. It used to be
+     * booked as a "mid-life incorporation" against equity: the opening fee ended in 3901 as "moratorios
+     * incorporados" (E2E 3 Nov, 245 in two accounts).
      */
     @Test
-    void accountSeenMidLife_postsOpeningBalance_notTheTriggerAmount() {
+    void chargeBeforeTheAccountsBirth_waitsForIt_andPostsNothing() {
         given(shadowRepository.findById(ca)).willReturn(Optional.empty());
 
-        // Un crédito de 20 000 de capital y 200 de interés, del que sólo vemos la comisión.
-        service.onBalanceUpdated("evt-tarde", ca, party, new BigDecimal("20000"), new BigDecimal("200"),
-                BigDecimal.ZERO, new BigDecimal("20200"), "CHARGE_OPENING_FEE", 7L,
-                "S_CUL", Instant.now());
+        assertThatThrownBy(() -> service.onBalanceUpdated("evt-fee", ca, party, new BigDecimal("12000"), BigDecimal.ZERO,
+                new BigDecimal("120"), new BigDecimal("12120"), "CHARGE_OPENING_FEE", 2L, "S_CUL", Instant.now()))
+                .isInstanceOf(AccountBirthNotSeenException.class)
+                .hasMessageContaining(ca.toString());
+
+        then(ledger).shouldHaveNoInteractions();
+        then(shadowRepository).should(never()).save(any());
+        then(billingService).shouldHaveNoInteractions();
+    }
+
+    /** The disposition of the money opens an account's accounting life even before the activation is seen. */
+    @Test
+    void dispositionOnAnUnknownAccount_opensItsLife() {
+        given(shadowRepository.findById(ca)).willReturn(Optional.empty());
+        PostingRule rule = mock(PostingRule.class);
+        given(rule.getDebitAccount()).willReturn("1201");
+        given(rule.getCreditAccount()).willReturn("1101");
+        given(postingRuleRepository.findByTriggerEvent("DISPOSITION_SELF_USE")).willReturn(Optional.of(rule));
+
+        service.onBalanceUpdated("evt-disp", ca, party, new BigDecimal("4000"), BigDecimal.ZERO,
+                BigDecimal.ZERO, new BigDecimal("4000"), "DISPOSITION_SELF_USE", 1L, "S_CUL", Instant.now());
 
         ArgumentCaptor<VoucherRequest> req = ArgumentCaptor.forClass(VoucherRequest.class);
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<Pair>> pairs = ArgumentCaptor.forClass(List.class);
-        then(ledger).should().post(req.capture(), pairs.capture());
-
-        // No se etiqueta como comisión, y no toca ingresos.
-        assertThat(req.getValue().triggerEvent()).isEqualTo("OPENING_BALANCE");
-        assertThat(pairs.getValue()).hasSize(2);
-        assertThat(pairs.getValue()).allSatisfy(p ->
-                assertThat(p.creditAccount()).isEqualTo(AccountCodes.SALDO_INICIAL));
-        assertThat(pairs.getValue()).anySatisfy(p -> {
-            assertThat(p.debitAccount()).isEqualTo(AccountCodes.CARTERA_VIGENTE);
-            assertThat(p.amount()).isEqualByComparingTo("20000");
-        });
-        assertThat(pairs.getValue()).anySatisfy(p -> {
-            assertThat(p.debitAccount()).isEqualTo(AccountCodes.INTERESES_POR_COBRAR);
-            assertThat(p.amount()).isEqualByComparingTo("200");
-        });
-        // Y no se factura: incorporar un saldo no devenga ingreso.
-        then(billingService).shouldHaveNoInteractions();
+        then(ledger).should().post(req.capture(), any());
+        assertThat(req.getValue().triggerEvent()).isEqualTo("DISPOSITION_SELF_USE");
     }
 
     /** Una cuenta que nace con contabilidad escuchando NO es una incorporación. */
@@ -389,13 +395,227 @@ class PostingServiceTest {
     }
 
     @Test
-    void recoveryPayment_postsBancosToRecovery() {
+    void recoveryPayment_postsBancosToRecovery_andLowersTheWrittenOffMemo() {
         service.onRecoveryPayment("RECOVERY-1", ca, party, new BigDecimal("250"), Instant.now());
 
-        List<Pair> pairs = capturedPairs();
-        assertThat(pairs).singleElement().satisfies(p -> {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Pair>> captor = ArgumentCaptor.forClass(List.class);
+        then(ledger).should(times(2)).post(any(VoucherRequest.class), captor.capture());
+        assertThat(captor.getAllValues().get(0)).singleElement().satisfies(p -> {
             assertThat(p.debitAccount()).isEqualTo(AccountCodes.BANCOS);
             assertThat(p.creditAccount()).isEqualTo(AccountCodes.RECUPERACION_CASTIGADA);
         });
+        assertThat(captor.getAllValues().get(1)).singleElement().satisfies(p -> {
+            assertThat(p.debitAccount()).isEqualTo(AccountCodes.CONTROL_CASTIGADA);
+            assertThat(p.creditAccount()).isEqualTo(AccountCodes.CARTERA_CASTIGADA);
+            assertThat(p.amount()).isEqualByComparingTo("250");
+        });
+    }
+
+    @Test
+    void paymentReturned_isTheMirrorOfThePayment_backToWhatItHadCovered() {
+        // 2 Nov, E06: the bank returned the first installment; nothing reached the ledger, the payment stayed in 1101.
+        AccountBalanceShadow shadow = AccountBalanceShadow.init(ca, party);
+        shadow.applyAndComputeDelta(new BigDecimal("14666.96"), BigDecimal.ZERO, BigDecimal.ZERO,
+                new BigDecimal("14666.96"), 5L);
+        given(shadowRepository.findById(ca)).willReturn(Optional.of(shadow));
+
+        service.onBalanceUpdated("ret-1", ca, party, new BigDecimal("17215.84"), new BigDecimal("480.00"),
+                new BigDecimal("304.16"), new BigDecimal("18000.00"), "PAYMENT_RETURNED", 6L, "S_CUL", Instant.now(),
+                new BigDecimal("3333.04"), new BigDecimal("2548.88"), new BigDecimal("480.00"), new BigDecimal("304.16"),
+                new BigDecimal("76.80"), null);
+
+        List<Pair> pairs = capturedPairs();
+        assertThat(pairs).allSatisfy(x -> assertThat(x.creditAccount()).isEqualTo(AccountCodes.BANCOS));
+        assertThat(pairs).anySatisfy(x -> {
+            assertThat(x.debitAccount()).isEqualTo(AccountCodes.CARTERA_VIGENTE);
+            assertThat(x.amount()).isEqualByComparingTo("2548.88");
+        });
+        assertThat(pairs.stream().filter(x -> x.debitAccount().equals(AccountCodes.INTERESES_POR_COBRAR))
+                .map(Pair::amount).reduce(BigDecimal.ZERO, BigDecimal::add)).isEqualByComparingTo("784.16");
+        assertThat(pairs.stream().map(Pair::amount).reduce(BigDecimal.ZERO, BigDecimal::add))
+                .as("what left the bank is the returned payment").isEqualByComparingTo("3333.04");
+    }
+
+    @Test
+    void chargeReversal_undoesTheAccountTheChargeWasBookedTo_andAWaiverIsAnExpense() {
+        given(shadowRepository.findById(ca)).willReturn(Optional.of(AccountBalanceShadow.init(ca, party)));
+
+        service.onBalanceUpdated("rev-int", ca, party, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, "CHARGE_REVERSED", 2L, "S_CUL", Instant.now(), new BigDecimal("-100"),
+                BigDecimal.ZERO, new BigDecimal("-100"), BigDecimal.ZERO, null, "ORDINARY_INTEREST");
+        service.onBalanceUpdated("rev-iva", ca, party, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, "CHARGE_REVERSED", 3L, "S_CUL", Instant.now(), new BigDecimal("-16"),
+                BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("-16"), new BigDecimal("-16"), "IVA");
+        service.onBalanceUpdated("wv-mor", ca, party, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, "CHARGE_WAIVED", 4L, "S_CUL", Instant.now(), new BigDecimal("-50"),
+                BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("-50"), null, "MORATORIUM_INTEREST");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Pair>> captor = ArgumentCaptor.forClass(List.class);
+        then(ledger).should(times(3)).post(any(VoucherRequest.class), captor.capture());
+        List<List<Pair>> polizas = captor.getAllValues();
+        assertThat(polizas.get(0).get(0).debitAccount()).isEqualTo(AccountCodes.INGRESOS_INTERESES);
+        assertThat(polizas.get(1).get(0).debitAccount()).as("reversed IVA is no longer owed to the SAT").isEqualTo(AccountCodes.IVA_POR_PAGAR);
+        assertThat(polizas.get(2).get(0).debitAccount()).as("a waiver is an expense").isEqualTo(AccountCodes.GASTO_CONDONACIONES);
+        assertThat(polizas).allSatisfy(x -> assertThat(x.get(0).creditAccount()).isEqualTo(AccountCodes.INTERESES_POR_COBRAR));
+        then(billingService).shouldHaveNoInteractions();
+    }
+
+    @Test
+    void writeOff_releasesTheReserveItDidNotNeed_inTheSameFact() {
+        // Risk no longer publishes a zero for a written-off loan (arriving first, it sent the loss to expense).
+        AccountBalanceShadow shadow = AccountBalanceShadow.init(ca, party);
+        shadow.applyAndComputeDelta(new BigDecimal("1000"), BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("1000"), 1L);
+        given(shadowRepository.findById(ca)).willReturn(Optional.of(shadow));
+        ProvisionLedgerEntry provision = ProvisionLedgerEntry.init(ca);
+        provision.book(new BigDecimal("1100"));
+        given(provisionLedgerRepository.findById(ca)).willReturn(Optional.of(provision));
+
+        service.onBalanceUpdated("wo-3", ca, party, BigDecimal.ZERO, BigDecimal.ZERO,
+                BigDecimal.ZERO, BigDecimal.ZERO, "WRITE_OFF", 2L, "S_CUL", Instant.now());
+
+        ArgumentCaptor<VoucherRequest> req = ArgumentCaptor.forClass(VoucherRequest.class);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Pair>> captor = ArgumentCaptor.forClass(List.class);
+        then(ledger).should(times(3)).post(req.capture(), captor.capture());
+        assertThat(captor.getAllValues().get(0)).singleElement().satisfies(x -> {
+            assertThat(x.debitAccount()).isEqualTo(AccountCodes.ESTIMACION_PREVENTIVA);
+            assertThat(x.amount()).isEqualByComparingTo("1000");
+        });
+        assertThat(req.getAllValues().get(2).triggerEvent()).isEqualTo("PROVISION_EPR");
+        assertThat(captor.getAllValues().get(2)).singleElement().satisfies(x -> {
+            assertThat(x.debitAccount()).isEqualTo(AccountCodes.ESTIMACION_PREVENTIVA);
+            assertThat(x.creditAccount()).isEqualTo(AccountCodes.GASTO_ESTIMACION);
+            assertThat(x.amount()).isEqualByComparingTo("100");
+        });
+        assertThat(provision.getLastBookedProvision()).isEqualByComparingTo("0");
+    }
+
+    // ── Stage 3 interest on a net basis (IFRS 9 §5.4.1(b)) ──────────────────────────────────────────
+
+    private PostingRule interestRule() {
+        PostingRule rule = mock(PostingRule.class);
+        // Lenient: a redelivery never gets as far as reading the rule's accounts.
+        lenient().when(rule.getDebitAccount()).thenReturn("1203");
+        lenient().when(rule.getCreditAccount()).thenReturn("4101");
+        lenient().when(rule.getDescription()).thenReturn("Devengo de interés ordinario");
+        given(postingRuleRepository.findByTriggerEvent("CHARGE_ORDINARY_INTEREST")).willReturn(Optional.of(rule));
+        return rule;
+    }
+
+    private ProvisionLedgerEntry reserve(String stage, String ead, String provision) {
+        ProvisionLedgerEntry e = ProvisionLedgerEntry.init(ca);
+        e.observe(stage, new BigDecimal(ead));
+        e.book(new BigDecimal(provision));
+        given(provisionLedgerRepository.findById(ca)).willReturn(Optional.of(e));
+        return e;
+    }
+
+    @Test
+    void stage3Interest_isRevenueOnlyOnTheAmortisedCost_theRestJoinsTheAllowance() {
+        given(shadowRepository.findById(ca)).willReturn(Optional.of(AccountBalanceShadow.init(ca, party)));
+        interestRule();
+        // Reserve 6,000 on an exposure of 10,000: coverage 60 %. A 100 charge is 40 of revenue and 60 to 1290.
+        ProvisionLedgerEntry reserva = reserve("STAGE_3", "10000", "6000");
+
+        service.onBalanceUpdated("int-3", ca, party, BigDecimal.ZERO, new BigDecimal("100"), BigDecimal.ZERO,
+                new BigDecimal("100"), "CHARGE_ORDINARY_INTEREST", 1L, "S_CUL", Instant.parse("2026-08-13T06:00:00Z"));
+
+        List<Pair> pairs = capturedPairs();
+        assertThat(pairs).anySatisfy(p -> {
+            assertThat(p.debitAccount()).isEqualTo("1203");
+            assertThat(p.creditAccount()).isEqualTo("4101");
+            assertThat(p.amount()).isEqualByComparingTo("40.00");
+        });
+        assertThat(pairs).anySatisfy(p -> {
+            assertThat(p.debitAccount()).isEqualTo("1203");
+            assertThat(p.creditAccount()).isEqualTo(AccountCodes.ESTIMACION_PREVENTIVA);
+            assertThat(p.amount()).isEqualByComparingTo("60.00");
+        });
+        assertThat(pairs).anySatisfy(p -> {
+            assertThat(p.debitAccount()).isEqualTo(AccountCodes.INTERESES_ETAPA3_ORDEN);
+            assertThat(p.creditAccount()).isEqualTo(AccountCodes.CONTRA_INTERESES_ETAPA3);
+            assertThat(p.amount()).isEqualByComparingTo("60.00");
+        });
+        // The receivable is charged with the whole contractual interest, and the client is invoiced all of it.
+        assertThat(pairs.stream().filter(p -> "1203".equals(p.debitAccount())).map(Pair::amount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add)).isEqualByComparingTo("100");
+        then(billingService).should().accrue(eq("int-3"), eq(party), eq(ca), eq("ORDINARY_INTEREST"),
+                eq(new BigDecimal("100")), eq(false), eq("202608"));
+        // The reserve booked grows by what went to 1290: the night's assessment books only the rest.
+        assertThat(reserva.getLastBookedProvision()).isEqualByComparingTo("6060.00");
+    }
+
+    @Test
+    void stage1Interest_isRevenueInFull() {
+        given(shadowRepository.findById(ca)).willReturn(Optional.of(AccountBalanceShadow.init(ca, party)));
+        interestRule();
+        ProvisionLedgerEntry reserva = reserve("STAGE_1", "10000", "300");
+
+        service.onBalanceUpdated("int-1", ca, party, BigDecimal.ZERO, new BigDecimal("100"), BigDecimal.ZERO,
+                new BigDecimal("100"), "CHARGE_ORDINARY_INTEREST", 1L, "S_CUL", Instant.parse("2026-08-13T06:00:00Z"));
+
+        List<Pair> pairs = capturedPairs();
+        assertThat(pairs).hasSize(1);
+        assertThat(pairs.get(0).creditAccount()).isEqualTo("4101");
+        assertThat(pairs.get(0).amount()).isEqualByComparingTo("100");
+        assertThat(reserva.getLastBookedProvision()).isEqualByComparingTo("300");
+    }
+
+    @Test
+    void stage3Interest_redelivered_doesNotAddToTheAllowanceTwice() {
+        given(shadowRepository.findById(ca)).willReturn(Optional.of(AccountBalanceShadow.init(ca, party)));
+        interestRule();
+        ProvisionLedgerEntry reserva = reserve("STAGE_3", "10000", "6000");
+        given(ledger.isPosted("int-dup")).willReturn(true);
+
+        service.onBalanceUpdated("int-dup", ca, party, BigDecimal.ZERO, new BigDecimal("100"), BigDecimal.ZERO,
+                new BigDecimal("100"), "CHARGE_ORDINARY_INTEREST", 1L, "S_CUL", Instant.parse("2026-08-13T06:00:00Z"));
+
+        then(ledger).should(never()).post(any(VoucherRequest.class), any());
+        assertThat(reserva.getLastBookedProvision()).isEqualByComparingTo("6000");
+    }
+
+    // ── Opening fee over the life of the loan (IFRS 9) ───────────────────────────────────────────
+
+    private void openingFeeRule() {
+        PostingRule rule = mock(PostingRule.class);
+        given(rule.getDebitAccount()).willReturn("1203");
+        given(rule.getCreditAccount()).willReturn(AccountCodes.COMISIONES_POR_DEVENGAR);
+        lenient().when(rule.getDescription()).thenReturn("Comisión de apertura");
+        given(postingRuleRepository.findByTriggerEvent("CHARGE_OPENING_FEE")).willReturn(Optional.of(rule));
+    }
+
+    @Test
+    void openingFee_isChargedTo2150_andDeferredOverTheLoansLife() {
+        AccountBalanceShadow shadow = AccountBalanceShadow.init(ca, party);
+        shadow.learnTerm(12);
+        given(shadowRepository.findById(ca)).willReturn(Optional.of(shadow));
+        openingFeeRule();
+
+        service.onBalanceUpdated("fee-1", ca, party, BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("600"),
+                new BigDecimal("600"), "CHARGE_OPENING_FEE", 1L, "S_CUL", Instant.parse("2026-03-02T18:00:00Z"));
+
+        List<Pair> pairs = capturedPairs();
+        assertThat(pairs).singleElement().satisfies(p -> {
+            assertThat(p.creditAccount()).isEqualTo(AccountCodes.COMISIONES_POR_DEVENGAR);
+            assertThat(p.amount()).isEqualByComparingTo("600");
+        });
+        then(feeDeferral).should().defer(eq("fee-1"), eq(ca), eq(party), eq("S_CUL"), eq(new BigDecimal("600")), eq(12), eq("202603"));
+    }
+
+    @Test
+    void openingFee_withoutAKnownLife_isRecognizedAtOnce() {
+        given(shadowRepository.findById(ca)).willReturn(Optional.of(AccountBalanceShadow.init(ca, party)));
+        openingFeeRule();
+
+        service.onBalanceUpdated("fee-2", ca, party, BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("600"),
+                new BigDecimal("600"), "CHARGE_OPENING_FEE", 1L, "S_CUL", Instant.parse("2026-03-02T18:00:00Z"));
+
+        then(feeDeferral).shouldHaveNoInteractions();
+        ArgumentCaptor<VoucherRequest> req = ArgumentCaptor.forClass(VoucherRequest.class);
+        then(ledger).should(times(2)).post(req.capture(), any());
+        assertThat(req.getAllValues()).extracting(VoucherRequest::sourceEventId).containsExactly("fee-2", "fee-2:inmediata");
     }
 }

@@ -1,5 +1,6 @@
 package com.fintech.audit;
 
+import com.fintech.audit.application.service.failure.FailedMessageService;
 import com.fintech.audit.application.service.AuditService;
 import com.fintech.audit.application.service.DocumentArchiveService;
 import com.fintech.audit.application.service.UIFReportService;
@@ -24,6 +25,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -36,6 +38,7 @@ class AuditControllerTest {
     @MockitoBean AuditService auditService;
     @MockitoBean DocumentArchiveService documentArchiveService;
     @MockitoBean UIFReportService uifReportService;
+    @MockitoBean FailedMessageService failedMessageService;
 
     private static final String AUDITOR_HEADER_USER  = "X-User-Id";
     private static final String AUDITOR_HEADER_ROLES = "X-Roles";
@@ -115,5 +118,22 @@ class AuditControllerTest {
                 .andExpect(jsonPath("$.auditEntries").isArray())
                 .andExpect(jsonPath("$.documents").isArray())
                 .andExpect(jsonPath("$.uifReports").isArray());
+    }
+
+    // ── Failure registry: reading is audit's, replaying is operations' ───────────────────────────
+
+    @Test
+    void failures_auditorCanSearch() throws Exception {
+        when(failedMessageService.search(any(), any(), any(), anyInt(), anyInt())).thenReturn(List.of());
+        mvc.perform(get("/api/v1/audit/failures").param("correlationId", "pago-1")
+                        .header(AUDITOR_HEADER_USER, "auditor-1").header(AUDITOR_HEADER_ROLES, "AUDITOR"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    void failures_auditorCannotReplay() throws Exception {
+        mvc.perform(post("/api/v1/audit/failures/" + UUID.randomUUID() + "/replay")
+                        .header(AUDITOR_HEADER_USER, "auditor-1").header(AUDITOR_HEADER_ROLES, "AUDITOR"))
+                .andExpect(status().isForbidden());
     }
 }

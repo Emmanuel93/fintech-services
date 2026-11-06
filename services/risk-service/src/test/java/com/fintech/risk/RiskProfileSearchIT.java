@@ -3,6 +3,8 @@ package com.fintech.risk;
 import com.fintech.risk.application.port.in.GetRiskProfileUseCase;
 import com.fintech.risk.application.port.out.RiskProfileRepository;
 import com.fintech.risk.domain.Ifrs9Stage;
+import com.fintech.risk.domain.DelinquencyBucket;
+import com.fintech.risk.domain.ProvisionPolicy;
 import com.fintech.risk.domain.RiskProfile;
 import com.fintech.risk.domain.RiskProfileStatus;
 import jakarta.persistence.EntityManagerFactory;
@@ -23,6 +25,8 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.math.BigDecimal;
+import java.util.Map;
+import java.util.EnumMap;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -92,7 +96,7 @@ class RiskProfileSearchIT {
 
         RiskProfile late = RiskProfile.create(UUID.randomUUID(), p, "SME_LOAN");
         late.syncDaysDelinquent(120);
-        late.reassess(30, 90, 6, new BigDecimal("0.60"), Instant.now());  // → STAGE_3
+        late.reassess(30, 90, 6, 90, 30, flatPolicy("0.60"), Instant.now());  // → STAGE_3
         profileRepository.save(late);
 
         RiskProfile closed = RiskProfile.create(UUID.randomUUID(), p, "PAYROLL_LOAN");
@@ -150,5 +154,11 @@ class RiskProfileSearchIT {
 
     private RiskProfile seed(UUID partyId, String productType) {
         return profileRepository.save(RiskProfile.create(UUID.randomUUID(), partyId, productType));
+    }
+
+    private static ProvisionPolicy flatPolicy(String rate) {
+        Map<DelinquencyBucket, BigDecimal> m = new EnumMap<>(DelinquencyBucket.class);
+        for (DelinquencyBucket b : DelinquencyBucket.values()) m.put(b, new BigDecimal(rate));
+        return ProvisionPolicy.create("SME_LOAN", 1, m);
     }
 }

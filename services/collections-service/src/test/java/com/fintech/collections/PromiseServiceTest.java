@@ -1,5 +1,6 @@
 package com.fintech.collections;
 
+import com.fintech.collections.application.PaymentOrigin;
 import com.fintech.collections.application.CreatePaymentPromiseCommand;
 import com.fintech.collections.application.port.out.CollectionCaseRepository;
 import com.fintech.collections.application.port.out.CollectionsEventPublisher;
@@ -103,7 +104,7 @@ class PromiseServiceTest {
         given(promiseRepository.findActiveByCaseId(c.getCaseId())).willReturn(Optional.of(promise));
 
         UUID paymentId = UUID.randomUUID();
-        service.onPaymentApplied(creditAccountId, paymentId, new BigDecimal("300"), "SPEI");
+        service.onPaymentApplied(creditAccountId, paymentId, new BigDecimal("300"), new PaymentOrigin("SPEI", null));
 
         assertThat(promise.getStatus()).isEqualTo(PromiseStatus.KEPT);
         then(promiseRepository).should().save(promise);
@@ -117,7 +118,7 @@ class PromiseServiceTest {
         given(caseRepository.findActiveByCreditAccountId(creditAccountId)).willReturn(Optional.of(c));
         given(promiseRepository.findActiveByCaseId(c.getCaseId())).willReturn(Optional.of(promise));
 
-        service.onPaymentApplied(creditAccountId, UUID.randomUUID(), new BigDecimal("100"), "SPEI");
+        service.onPaymentApplied(creditAccountId, UUID.randomUUID(), new BigDecimal("100"), new PaymentOrigin("SPEI", null));
 
         assertThat(promise.isActive()).isTrue();
         then(promiseRepository).should(never()).save(any());
@@ -130,10 +131,11 @@ class PromiseServiceTest {
                 new BigDecimal("1000"), BigDecimal.ZERO, BigDecimal.ZERO, "ops", "REF-1", WriteOffReason.UNRECOVERABLE);
         given(writeOffRepository.findByCreditAccountId(creditAccountId)).willReturn(Optional.of(writeOff));
 
-        service.onPaymentApplied(creditAccountId, UUID.randomUUID(), new BigDecimal("200"), "SPEI");
+        UUID payment = UUID.randomUUID();
+        service.onPaymentApplied(creditAccountId, payment, new BigDecimal("200"), new PaymentOrigin("SPEI", null));
 
         then(eventPublisher).should().publishRecoveryPaymentApplied(writeOff.getWriteOffId(), creditAccountId,
-                new BigDecimal("200"), "SPEI");
+                new BigDecimal("200"), new PaymentOrigin("SPEI", null), payment);
     }
 
     @Test
@@ -141,7 +143,7 @@ class PromiseServiceTest {
         given(caseRepository.findActiveByCreditAccountId(creditAccountId)).willReturn(Optional.empty());
         given(writeOffRepository.findByCreditAccountId(creditAccountId)).willReturn(Optional.empty());
 
-        service.onPaymentApplied(creditAccountId, UUID.randomUUID(), new BigDecimal("200"), "SPEI");
+        service.onPaymentApplied(creditAccountId, UUID.randomUUID(), new BigDecimal("200"), new PaymentOrigin("SPEI", null));
 
         then(eventPublisher).shouldHaveNoInteractions();
     }

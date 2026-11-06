@@ -5,6 +5,8 @@ import com.fintech.creditportfolio.application.port.in.SkipPaymentUseCase.Saltar
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.DispositionRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
+import com.fintech.creditportfolio.application.service.BankingCalendar;
+import com.fintech.creditportfolio.application.service.PlanDeferral;
 import com.fintech.creditportfolio.application.service.ProductConfigResolver;
 import com.fintech.creditportfolio.application.service.SkipPaymentService;
 import com.fintech.creditportfolio.domain.CreditAccount;
@@ -69,7 +71,8 @@ class SkipInstallmentTest {
 
     @BeforeEach
     void init() {
-        servicio = new SkipPaymentService(accounts, installments, dispositions, configResolver);
+        servicio = new SkipPaymentService(accounts, installments, dispositions, configResolver,
+                new PlanDeferral(BankingCalendar.weekendsOnly()));
 
         account = CreditAccount.fromSnapshot(
                 UUID.randomUUID(), "CTR-PL-1", UUID.randomUUID(),

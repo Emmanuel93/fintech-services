@@ -79,6 +79,11 @@ class ChargeReversalServiceTest {
         assertThat(iva.getStatus()).isEqualTo("REVERSED");
         // Both the charge and IVA saved
         then(chargeRecordRepo).should(times(2)).save(any());
+        // And both reach the portfolio, each with its own type: the IVA is owed there too.
+        then(eventPublisher).should().publishChargeReversed(eq(charge.getChargeId().toString()), eq(accountId),
+                eq("ORDINARY_INTEREST"), any(), eq(false));
+        then(eventPublisher).should().publishChargeReversed(eq(iva.getChargeId().toString()), eq(accountId),
+                eq("IVA"), any(), eq(false));
     }
 
     // ── waive ─────────────────────────────────────────────────────────────────

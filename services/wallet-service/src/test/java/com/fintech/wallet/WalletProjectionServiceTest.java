@@ -187,4 +187,16 @@ class WalletProjectionServiceTest {
 
         assertThat(result).hasSize(2);
     }
+
+    @Test
+    void dispositionCompleted_redelivered_isCreditedOnce() {
+        UUID accountId = UUID.randomUUID();
+        UUID disposition = UUID.randomUUID();
+        given(movementRepository.existsByTypeAndReference("DISPOSITION", disposition.toString())).willReturn(true);
+
+        service.onDispositionCompleted(accountId, disposition, new BigDecimal("5000"), "SELF_USE");
+
+        then(walletViewRepository).should(never()).creditWalletBalance(any(), any());
+        then(movementRepository).should(never()).save(any());
+    }
 }

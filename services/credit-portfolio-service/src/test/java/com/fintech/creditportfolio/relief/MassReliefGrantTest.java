@@ -1,17 +1,23 @@
 package com.fintech.creditportfolio.relief;
 
+import com.fintech.creditportfolio.application.service.BankingCalendar;
+import com.fintech.creditportfolio.application.service.PlanDeferral;
+import com.fintech.creditportfolio.application.service.ProductConfigResolver;
+import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import com.fintech.creditportfolio.application.port.in.ManageReliefProgramUseCase.Proponer;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.application.port.out.ReliefProgramRepository;
 import com.fintech.creditportfolio.application.service.relief.ReliefProgramService;
+import com.fintech.creditportfolio.calendar.MexicanBankHolidays;
 import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.CreditAccountStatus;
 import com.fintech.creditportfolio.domain.Installment;
 import com.fintech.creditportfolio.domain.event.ReliefGrantedEvent;
 import com.fintech.creditportfolio.domain.relief.ReliefEnrollment;
 import com.fintech.creditportfolio.domain.relief.ReliefProgram;
+import com.fintech.shared.time.BusinessClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -33,6 +39,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -48,6 +56,7 @@ class MassReliefGrantTest {
     @Mock CreditAccountRepository accounts;
     @Mock InstallmentRepository installments;
     @Mock CreditPortfolioEventPublisher eventPublisher;
+    @Mock ProductConfigResolver configResolver;
 
     ReliefProgramService service;
 
@@ -65,7 +74,7 @@ class MassReliefGrantTest {
      * vencimiento quedaba en el 15 de septiembre de 2026 — y la prueba se escribió el 14. Al día
      * siguiente empezó a fallar, no porque nada cambiara en el código sino porque <b>pasó el tiempo</b>.
      *
-     * <p>El DPD lo recalcula producción contra {@code LocalDate.now()}, y eso está bien: es un dato
+     * <p>El DPD lo recalcula producción contra el día de negocio ({@code BusinessClock}), y eso está bien: es un dato
      * del calendario real. Lo que estaba mal era afirmar un resultado dependiente de hoy sobre un
      * calendario fijo en el pasado. Anclado a hoy, el escenario —una cuenta con vencimientos
      * atrasados a la que el apoyo los corre hasta el futuro— se sostiene el día que se corra.
@@ -73,7 +82,8 @@ class MassReliefGrantTest {
      * <p>Queda a dos meses atrás: las primeras cuotas nacen vencidas (que es el escenario) y al
      * correrlas tres períodos todas caen en el futuro con un mes de margen.
      */
-    private static final LocalDate FIRST_DUE_DATE = LocalDate.now().minusMonths(2).withDayOfMonth(15);
+    private static final LocalDate FIRST_DUE_DATE = BusinessClock.current().today().minusMonths(2).withDayOfMonth(15);
+    private static final BankingCalendar WEEKENDS = BankingCalendar.weekendsOnly();
 
     /** Repositorio en memoria: lo que se prueba es la regla, no el mapeo. */
     private final ReliefProgramRepository programs = new ReliefProgramRepository() {
@@ -100,7 +110,8 @@ class MassReliefGrantTest {
 
     @BeforeEach
     void init() {
-        service = new ReliefProgramService(programs, accounts, installments, eventPublisher);
+        service = new ReliefProgramService(programs, accounts, installments, eventPublisher, configResolver,
+                new PlanDeferral(BankingCalendar.weekendsOnly()));
         saved.clear(); enrollments.clear(); schedules.clear();
         lenient().when(installments.findByScheduleIdOrdered(any()))
                 .thenAnswer(inv -> schedules.getOrDefault(inv.getArgument(0), List.of()));
@@ -132,6 +143,28 @@ class MassReliefGrantTest {
         return service.authorize(p.getId(), "luis.direccion");
     }
 
+    /** A relieved installment is due on a business day: the plan's date moved, rolled as the plan was built. */
+    private static LocalDate businessDay(LocalDate planDate) {
+        return WEEKENDS.onOrAfter(planDate);
+    }
+
+    @Test
+    @DisplayName("un período es el del producto: tres períodos de un plan semanal son tres semanas")
+    void aWeeklyPlanShiftsByWeeks() {
+        CreditAccount c = account("MICRO_LOAN", 0);
+        ProductConfigVersion semanal = mock(ProductConfigVersion.class);
+        when(semanal.getPaymentFrequency()).thenReturn("WEEKLY");
+        when(configResolver.resolveForAccount(any(), any())).thenReturn(Optional.of(semanal));
+        lenient().when(accounts.findAllByStatus(CreditAccountStatus.ACTIVE)).thenReturn(List.of(c));
+        ReliefProgram p = authorized(null);
+
+        assertThat(service.grant(p.getId())).isEqualTo(1);
+
+        List<Installment> plan = schedules.get(c.getCreditAccountId());
+        assertThat(plan.get(0).getDueDate()).isEqualTo(businessDay(FIRST_DUE_DATE.plusWeeks(3)));
+        assertThat(plan.get(5).getDueDate()).isEqualTo(businessDay(FIRST_DUE_DATE.plusMonths(5).plusWeeks(3)));
+    }
+
     @Test
     @DisplayName("otorgar corre TRES períodos a todas las cuotas pendientes")
     void itshiftsThreePeriods() {
@@ -142,11 +175,39 @@ class MassReliefGrantTest {
         assertThat(service.grant(p.getId())).isEqualTo(1);
 
         List<Installment> plan = schedules.get(c.getCreditAccountId());
-        assertThat(plan.get(0).getDueDate()).isEqualTo(FIRST_DUE_DATE.plusMonths(3));
+        assertThat(plan.get(0).getDueDate()).isEqualTo(businessDay(FIRST_DUE_DATE.plusMonths(3)));
         assertThat(plan.get(0).getOriginalDueDate()).isEqualTo(FIRST_DUE_DATE);
         // TODAS se corren, no sólo las tres primeras: dejar las de atrás quietas amontonaría los
         // vencimientos justo cuando la vigencia termina.
-        assertThat(plan.get(5).getDueDate()).isEqualTo(FIRST_DUE_DATE.plusMonths(5).plusMonths(3));
+        assertThat(plan.get(5).getDueDate()).isEqualTo(businessDay(FIRST_DUE_DATE.plusMonths(5).plusMonths(3)));
+    }
+
+    @Test
+    @DisplayName("the demo's case: two months to a plan of the 1st with 1 May a holiday leave every installment on a "
+            + "business day, the first on Wednesday 1 July and not on Saturday 4 July")
+    void reliefLeavesEveryInstallmentOnABusinessDay() {
+        BankingCalendar mexico = MexicanBankHolidays.calendar();
+        service = new ReliefProgramService(programs, accounts, installments, eventPublisher, configResolver,
+                new PlanDeferral(mexico));
+        CreditAccount c = account("PERSONAL_LOAN", 0);
+        List<Installment> plan = new ArrayList<>();
+        for (int n = 1; n <= 36; n++) {
+            plan.add(Installment.of(c.getCreditAccountId(), n, LocalDate.of(2026, 5, 1).plusMonths(n - 1L),
+                    new BigDecimal("333"), new BigDecimal("30")));
+        }
+        mexico.followBusinessDays(plan);
+        schedules.put(c.getCreditAccountId(), plan);
+        lenient().when(accounts.findAllByStatus(CreditAccountStatus.ACTIVE)).thenReturn(List.of(c));
+        ReliefProgram p = service.authorize(service.propose(new Proponer("Apoyo por contingencia", "NATURAL_DISASTER", 2,
+                LocalDate.of(2026, 4, 1), LocalDate.of(2026, 6, 30), null, null, null, 30,
+                LocalDate.of(2026, 3, 31), "ACCRUES"), "ana.riesgos").getId(), "luis.direccion");
+
+        assertThat(service.grant(p.getId())).isEqualTo(1);
+
+        assertThat(plan.get(0).getDueDate()).isEqualTo(LocalDate.of(2026, 7, 1));
+        assertThat(plan).allMatch(i -> mexico.isBusinessDay(i.getDueDate()));
+        assertThat(enrollments.get(0).getFirstDueBefore()).isEqualTo(LocalDate.of(2026, 5, 4));
+        assertThat(enrollments.get(0).getFirstDueAfter()).isEqualTo(LocalDate.of(2026, 7, 1));
     }
 
     @Test
@@ -214,7 +275,7 @@ class MassReliefGrantTest {
         assertThat(e.deferredPeriods()).isEqualTo(3);
         assertThat(e.reason()).isEqualTo("NATURAL_DISASTER");
         assertThat(e.firstDueBefore()).isEqualTo(FIRST_DUE_DATE);
-        assertThat(e.firstDueAfter()).isEqualTo(FIRST_DUE_DATE.plusMonths(3));
+        assertThat(e.firstDueAfter()).isEqualTo(businessDay(FIRST_DUE_DATE.plusMonths(3)));
     }
 
     @Test
@@ -231,7 +292,7 @@ class MassReliefGrantTest {
         assertThat(e.getDaysDelinquentAtEnrollment()).isEqualTo(12);
         assertThat(e.getInstallmentsMoved()).isEqualTo(6);
         assertThat(e.getFirstDueBefore()).isEqualTo(FIRST_DUE_DATE);
-        assertThat(e.getFirstDueAfter()).isEqualTo(FIRST_DUE_DATE.plusMonths(3));
+        assertThat(e.getFirstDueAfter()).isEqualTo(businessDay(FIRST_DUE_DATE.plusMonths(3)));
         assertThat(e.isActive()).isTrue();
     }
 

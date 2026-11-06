@@ -54,7 +54,7 @@ class DisbursementSearchIT extends AbstractIntegrationTest {
         listener.onDispositionAuthorized(new DispositionAuthorizedPayload(
                 disposition, creditAccountId, null, "SUC-001", "THIRD_PARTY_CREDIT",
                 new BigDecimal(importe), "MXN", beneficiario, "646180157000000004", "40", null, 646,
-                1L, "DISPOSICION DE CREDITO", Instant.now()));
+                1L, "DISPOSICION DE CREDITO", null, null, Instant.now()));
         UUID id = jdbcTemplate.queryForObject(
                 "SELECT disbursement_id FROM disbursement.disbursement_orders WHERE source_event_id = ?",
                 UUID.class, disposition.toString());

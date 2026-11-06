@@ -88,6 +88,21 @@ class ThreePassMatchingTest {
     }
 
     @Test
+    @DisplayName("importe y fecha cruzan sólo con un movimiento que va en el mismo sentido")
+    void sameAmountOtherWayIsNotACandidate() {
+        // A client's payment of 750 came in and an order of 750 went out on the same day: the incoming line is the
+        // payment, not the order.
+        creditLine("750.00", "MOV-S", null);
+        internos.add(new MovimientoInterno("STP_ORDER", "ORD-S", new BigDecimal("750.00"), DIA, "CLAVE-S", "DEBIT"));
+        internos.add(new MovimientoInterno("CLIENT_PAYMENT", "PAGO-S", new BigDecimal("750.00"), DIA, null, "CREDIT"));
+
+        var r = servicio.conciliar(ACCOUNT, DIA);
+
+        assertThat(r.heuristicos()).isEqualTo(1);
+        assertThat(cruces.get(0).getInternalRef()).isEqualTo("PAGO-S");
+    }
+
+    @Test
     @DisplayName("pasada 1 · la clave de rastreo cruza sin margen de error")
     void byTrackingKey() {
         creditLine("5000.00", "MOV-1", "CR-ABC-123");

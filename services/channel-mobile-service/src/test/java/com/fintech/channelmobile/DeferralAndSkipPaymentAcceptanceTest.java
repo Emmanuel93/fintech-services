@@ -219,6 +219,7 @@ class DeferralAndSkipPaymentAcceptanceTest {
                 id, UUID.randomUUID(), "CT-0001", "CC-IND-STD-V1", "CREDIT_CARD", "REVOLVING",
                 titular, "ACTIVE", null, null, null, null, null, null, null, null, null,
                 null, null, null, 0, null, null,
-                null, null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null,
+                null, null, null);
     }
 }

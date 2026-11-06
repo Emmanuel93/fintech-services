@@ -5,6 +5,8 @@ import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.DispositionRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.application.service.SkipPaymentService;
+import com.fintech.creditportfolio.application.service.BankingCalendar;
+import com.fintech.creditportfolio.application.service.PlanDeferral;
 import com.fintech.creditportfolio.application.service.ProductConfigResolver;
 import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.Installment;
@@ -65,7 +67,8 @@ class SkipPaymentTest {
 
     @BeforeEach
     void preparar() {
-        servicio = new SkipPaymentService(accounts, installments, dispositions, configResolver);
+        servicio = new SkipPaymentService(accounts, installments, dispositions, configResolver,
+                new PlanDeferral(BankingCalendar.weekendsOnly()));
 
         account = CreditAccount.fromSnapshot(
                 UUID.randomUUID(), "CTR-1", UUID.randomUUID(),
@@ -123,6 +126,23 @@ class SkipPaymentTest {
         for (int n = 1; n < 6; n++) {
             assertThat(calendario.get(n).getDueDate()).isEqualTo(before.get(n).plusMonths(1));
         }
+    }
+
+    @Test
+    @DisplayName("Skipping an installment the calendar rolled to Monday moves it from its plan's date, not from the Monday")
+    void skips_from_the_plan_date() {
+        BankingCalendar.weekendsOnly().followBusinessDays(calendario);   // 15 Nov 2026 is a Sunday: due on the 16th
+        Installment segunda = calendario.get(1);
+        assertThat(segunda.getDueDate()).isEqualTo(LocalDate.of(2026, 11, 16));
+
+        servicio.skip(new SaltarPago(account.getCreditAccountId(), segunda.getInstallmentId()));
+
+        // One period after the plan's 15 November is 15 December; counted from the 16th the plan's day drifted.
+        assertThat(calendario).extracting(Installment::getDueDate).containsExactly(
+                LocalDate.of(2026, 10, 15), LocalDate.of(2026, 12, 15), LocalDate.of(2027, 1, 15),
+                LocalDate.of(2027, 2, 15), LocalDate.of(2027, 3, 15), LocalDate.of(2027, 4, 15));
+        // What the client was asked to pay before the skip, to explain the move.
+        assertThat(segunda.getOriginalDueDate()).isEqualTo(LocalDate.of(2026, 11, 16));
     }
 
     // ── El modo lo decide el producto ────────────────────────────────────────

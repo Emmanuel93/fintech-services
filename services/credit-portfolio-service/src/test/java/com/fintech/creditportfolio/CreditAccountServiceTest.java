@@ -4,6 +4,7 @@ import com.fintech.creditportfolio.application.CreateCreditAccountCommand;
 import com.fintech.creditportfolio.application.ProcessAgreementExecutedCommand;
 import com.fintech.creditportfolio.application.ProcessDispositionCommand;
 import com.fintech.creditportfolio.application.port.out.BalanceEventRepository;
+import com.fintech.creditportfolio.domain.BalanceEvent;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
 import com.fintech.creditportfolio.application.port.out.DispositionRepository;
@@ -16,7 +17,15 @@ import com.fintech.creditportfolio.domain.CreditAccountStatus;
 import com.fintech.creditportfolio.domain.Disposition;
 import com.fintech.creditportfolio.domain.DispositionStatus;
 import com.fintech.creditportfolio.domain.DispositionType;
+import com.fintech.creditportfolio.domain.DistributorCommissionSchedule;
+import com.fintech.creditportfolio.domain.Installment;
+import com.fintech.creditportfolio.domain.config.BillingCycle;
 import com.fintech.creditportfolio.domain.config.Capabilities;
+import com.fintech.creditportfolio.domain.config.DistributorCommission;
+import com.fintech.creditportfolio.domain.config.DistributorCommission.Tier;
+import com.fintech.creditportfolio.domain.event.DispositionRejectedEvent;
+import java.math.RoundingMode;
+import java.time.LocalDate;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import com.fintech.creditportfolio.domain.event.CreditAccountActivatedEvent;
 import com.fintech.creditportfolio.domain.event.DispositionAuthorizedEvent;
@@ -30,6 +39,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.util.List;
+
+import static org.mockito.Mockito.times;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,6 +49,12 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.*;
+import com.fintech.creditportfolio.domain.InstallmentStatus;
+import com.fintech.shared.time.BusinessClock;
+import com.fintech.creditportfolio.domain.event.AccountRestructuredEvent;
+import com.fintech.creditportfolio.domain.Installment;
+import java.time.DayOfWeek;
+import java.time.LocalDate;
 
 @ExtendWith(MockitoExtension.class)
 class CreditAccountServiceTest {
@@ -189,6 +206,24 @@ class CreditAccountServiceTest {
     }
 
     @Test
+    void activate_writes_the_ledger_entry_the_debt_is_born_with() {
+        given(accountRepository.findByContractId(any())).willReturn(Optional.empty());
+        given(accountRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+        given(dispositionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+
+        service.activate(personalLoanCmd());
+
+        // Without this entry the sum of balance_events could never equal the balances: the loan's ledger
+        // would start after the money was lent (what happened to 100 loans before 2026-11-02).
+        ArgumentCaptor<BalanceEvent> captor = ArgumentCaptor.forClass(BalanceEvent.class);
+        then(balanceEventRepository).should().save(captor.capture());
+        BalanceEvent entry = captor.getValue();
+        assertThat(entry.getEventType()).isEqualTo("ACTIVATION_DISBURSEMENT");
+        assertThat(entry.getDeltaAmount()).isEqualByComparingTo("50000");
+        assertThat(entry.getSourceEventId()).startsWith("activation:");
+    }
+
+    @Test
     void activate_generates_amortization_schedule() {
         given(accountRepository.findByContractId(any())).willReturn(Optional.empty());
         given(accountRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
@@ -301,6 +336,151 @@ class CreditAccountServiceTest {
                 "FRENCH", "MONTHLY", 1000,
                 new BigDecimal("0.36"), new BigDecimal("0.54"), new BigDecimal("2.0"),
                 "ACTIVE", false);
+    }
+
+    // ── La línea de distribuidora que paga comisión: rangos del producto, bloqueo en atraso, comisión en el plan ──
+
+    /** The distributor line as the catalog publishes it now: 95 %, fortnights, $1,000–$10,000, 12–24 fortnights, 18 % netted. */
+    private static ProductConfigVersion distributorConfigWithCommission() {
+        ProductConfigVersion v = ProductConfigVersion.of(
+                "DL-002", 1, "DISTRIBUTOR_LINE", "REVOLVING", "B2B2C",
+                new Capabilities(false, true, true, "THIRD_PARTY_CREDIT", true, true, false, false, false),
+                "FRENCH", "SEMI_MONTHLY", 500,
+                new BigDecimal("0.95"), new BigDecimal("0.36"), BigDecimal.ZERO,
+                "ACTIVE", false);
+        v.defineBillingCycle(new BillingCycle("SEMI_MONTHLY", null, 0, 2, null, "NEXT",
+                "PER_PERIOD", List.of(6, 21), List.of(18, 3)));
+        v.defineDistributorCommission(new DistributorCommission(
+                DistributorCommission.COLLECTED_TOTAL, new BigDecimal("0.18"),
+                List.of(new Tier(0, new BigDecimal("0.18")),
+                        new Tier(1, new BigDecimal("0.14")),
+                        new Tier(2, new BigDecimal("0.11")),
+                        new Tier(3, new BigDecimal("0.07"))),
+                "NETTED"));
+        v.defineRanges(new BigDecimal("1000"), new BigDecimal("10000"), 12, 24, 2);
+        return v;
+    }
+
+    private CreditAccount commissionedDistributorLine() {
+        CreditAccount account = CreditAccount.fromSnapshot(
+                UUID.randomUUID(), "CTR-DL-2", UUID.randomUUID(),
+                "DL-002", 1, "DISTRIBUTOR_LINE", "REVOLVING",
+                null, new BigDecimal("100000"), null,
+                new BigDecimal("0.95"), new BigDecimal("0.36"),
+                null, BigDecimal.ZERO, "032180000118359719", "MEDIO", null, null);
+        account.activate(BigDecimal.ZERO);
+        lenient().when(configResolver.resolveForAccount(eq("DL-002"), any())).thenReturn(Optional.of(distributorConfigWithCommission()));
+        lenient().when(installmentRepository.findByScheduleIdOrdered(account.getCreditAccountId())).thenReturn(List.of());
+        lenient().when(balanceEventRepository.paymentsOf(account.getCreditAccountId())).thenReturn(List.of());
+        return account;
+    }
+
+    private ProcessDispositionCommand placementOf(CreditAccount account, String amount, int fortnights) {
+        return new ProcessDispositionCommand("evt-" + UUID.randomUUID(), account.getCreditAccountId(), account.getObligorPartyId(),
+                new BigDecimal(amount), UUID.randomUUID(), "646180157000000004", "ROSA ELENA IBARRA SALGADO", "IASR900612B0B", fortnights);
+    }
+
+    /** A placement that will be refused: the account is read and nothing is saved. */
+    private void stubRejectable(CreditAccount account) {
+        given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
+        given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
+    }
+
+    private String rejectionReason() {
+        ArgumentCaptor<DispositionRejectedEvent> captor =
+                ArgumentCaptor.forClass(DispositionRejectedEvent.class);
+        then(eventPublisher).should().publishDispositionRejected(captor.capture());
+        then(eventPublisher).should(never()).publishDispositionAuthorized(any());
+        return captor.getValue().getReason();
+    }
+
+    @Test
+    @DisplayName("una colocación fuera de los rangos del producto se rechaza: 8 quincenas, $12,000, $1,250")
+    void aPlacementOutsideTheProductsRangesIsRejected() {
+        CreditAccount account = commissionedDistributorLine();
+        stubRejectable(account);
+        service.process(placementOf(account, "5000", 8));
+        assertThat(rejectionReason()).startsWith("TERM_BELOW_MINIMUM");
+        assertThat(account.getPrincipalBalance()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("el monto se valida contra los límites del producto, no contra el paso de $500 del selector")
+    void anAmountOutsideTheProductsRangesIsRejected() {
+        CreditAccount account = commissionedDistributorLine();
+        stubRejectable(account);
+        service.process(placementOf(account, "12000", 12));
+        assertThat(rejectionReason()).startsWith("AMOUNT_ABOVE_MAXIMUM");
+        assertThat(distributorConfigWithCommission().placementOutOfRange(new BigDecimal("999.99"), 12)).startsWith("AMOUNT_BELOW_MINIMUM");
+        // The step belongs to the channel's picker: cents within the limits place (the E2E drives SPEI failures with them).
+        assertThat(distributorConfigWithCommission().placementOutOfRange(new BigDecimal("4000.02"), 12)).isNull();
+        assertThat(distributorConfigWithCommission().placementOutOfRange(new BigDecimal("1500"), 13)).startsWith("TERM_NOT_IN_STEP");
+        assertThat(distributorConfigWithCommission().placementOutOfRange(new BigDecimal("1500"), 14)).isNull();
+    }
+
+    @Test
+    @DisplayName("con un estado de cuenta vencido sin pagar la línea no coloca; pagado, coloca el mismo día")
+    void aLineWithAStatementUnpaidPastDueDoesNotPlace() {
+        CreditAccount account = commissionedDistributorLine();
+        stubDisposable(account);
+        LocalDate today = BusinessClock.current().today();
+        Installment statement = Installment.of(
+                account.getCreditAccountId(), 3, today.minusDays(1), new BigDecimal("2500.00"), BigDecimal.ZERO);
+        statement.billAsStatement(3, today.minusDays(13), today.minusDays(1));
+        given(installmentRepository.findByScheduleIdOrdered(account.getCreditAccountId())).willReturn(List.of(statement));
+
+        service.process(placementOf(account, "5000", 12));
+        assertThat(rejectionReason()).startsWith("LINE_BLOCKED_IN_ARREARS").contains("2500.00");
+        assertThat(account.getPrincipalBalance()).isEqualByComparingTo("0");
+
+        // She pays it this morning: the gate opens with the payment's value date, not at the night's close.
+        BalanceEvent paid = BalanceEvent.record(account.getCreditAccountId(), "pay-3", "PAYMENT_APPLIED",
+                new BigDecimal("-2500.00"), account, today);
+        given(balanceEventRepository.paymentsOf(account.getCreditAccountId())).willReturn(List.of(paid));
+        service.process(placementOf(account, "5000", 12));
+        then(eventPublisher).should().publishDispositionAuthorized(any());
+        assertThat(account.getPrincipalBalance()).isEqualByComparingTo("5000");
+    }
+
+    @Test
+    @DisplayName("tras una quita la línea ya no coloca, aunque esté al corriente: la quita es su salida")
+    void aLineWithAQuitaDoesNotPlaceAgain() {
+        CreditAccount account = commissionedDistributorLine();
+        stubRejectable(account);
+        LocalDate today = BusinessClock.current().today();
+        BalanceEvent quita = BalanceEvent.record(account.getCreditAccountId(), "convenio-1", "AGREEMENT_QUITA_PARCIAL",
+                new BigDecimal("-1000.00"), account, today.minusDays(7));
+        given(balanceEventRepository.paymentsOf(account.getCreditAccountId())).willReturn(List.of(quita));
+
+        service.process(placementOf(account, "5000", 12));
+
+        assertThat(rejectionReason()).startsWith("LINE_CLOSED_AFTER_QUITA").contains(today.minusDays(7).toString());
+        assertThat(account.getPrincipalBalance()).isEqualByComparingTo("0");
+    }
+
+    @Test
+    @DisplayName("el plan de la colocación nace con la comisión de la distribuidora en cada cuota: 18 % de lo que paga el cliente")
+    void thePlacementsPlanCarriesTheCommission() {
+        CreditAccount account = commissionedDistributorLine();
+        stubDisposable(account);
+
+        service.process(placementOf(account, "5000", 12));
+
+        ArgumentCaptor<List<Installment>> plan = ArgumentCaptor.forClass(List.class);
+        then(installmentRepository).should().saveAll(plan.capture());
+        List<Installment> cuotas = plan.getValue();
+        assertThat(cuotas).hasSize(12);
+        assertThat(cuotas).allSatisfy(i -> assertThat(i.getScheduledCommission()).isNotNull().isPositive());
+        // Flat from the third installment on (a placement made today may have a short first period: the first two
+        // share what the first one's interest cannot carry); the plan adds up to 18 % of what the client pays.
+        Installment cuarta = cuotas.get(3);
+        assertThat(cuarta.getScheduledCommission()).isEqualByComparingTo(cuarta.getTotalAmount()
+                .multiply(new BigDecimal("0.18")).setScale(2, RoundingMode.HALF_UP));
+        BigDecimal esperado = cuotas.stream().map(i -> i.getTotalAmount().multiply(new BigDecimal("0.18")).setScale(2, RoundingMode.HALF_UP))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal comision = cuotas.stream().map(Installment::getScheduledCommission).reduce(BigDecimal.ZERO, BigDecimal::add);
+        assertThat(comision).isEqualByComparingTo(esperado);
+        assertThat(DistributorCommissionSchedule.interestCoversCommission(cuotas)).isTrue();
     }
 
     private CreditAccount activeRevolvingAccount() {
@@ -428,8 +608,8 @@ class CreditAccountServiceTest {
                 "evt-" + UUID.randomUUID(), account.getCreditAccountId(), account.getObligorPartyId(),
                 new BigDecimal("45000"), UUID.randomUUID(), "646180157000000004", "  ", null, 24));
 
-        ArgumentCaptor<com.fintech.creditportfolio.domain.event.DispositionRejectedEvent> captor =
-                ArgumentCaptor.forClass(com.fintech.creditportfolio.domain.event.DispositionRejectedEvent.class);
+        ArgumentCaptor<DispositionRejectedEvent> captor =
+                ArgumentCaptor.forClass(DispositionRejectedEvent.class);
         then(eventPublisher).should().publishDispositionRejected(captor.capture());
         assertThat(captor.getValue().getReason()).isEqualTo("BENEFICIARY_NAME_REQUIRED");
         then(eventPublisher).should(never()).publishDispositionAuthorized(any());
@@ -564,8 +744,8 @@ class CreditAccountServiceTest {
                 new BigDecimal("3000"), account.getObligorPartyId(),
                 "032180000118399999", "ROSA ELENA IBARRA SALGADO", "IASR900612B0B", 12));
 
-        ArgumentCaptor<com.fintech.creditportfolio.domain.event.DispositionRejectedEvent> captor =
-                ArgumentCaptor.forClass(com.fintech.creditportfolio.domain.event.DispositionRejectedEvent.class);
+        ArgumentCaptor<DispositionRejectedEvent> captor =
+                ArgumentCaptor.forClass(DispositionRejectedEvent.class);
         then(eventPublisher).should().publishDispositionRejected(captor.capture());
         assertThat(captor.getValue().getReason()).isEqualTo("BENEFICIARY_CANNOT_BE_OBLIGOR");
         then(dispositionRepository).should(never()).save(any());
@@ -680,20 +860,55 @@ class CreditAccountServiceTest {
     }
 
     @Test
-    void process_restructure_updatesRateAndTerm_withoutPublishingBalanceUpdated() {
+    void process_restructure_replansTheUnpaidInstallments_atTheNewRate_andTellsCharges() {
+        // 2 Nov, E04: the agreement changed the account's record only; the plan stayed and charges kept the old rate.
         CreditAccount account = activePersonalLoanAccount();
+        UUID id = account.getCreditAccountId();
+        UUID agreement = UUID.randomUUID();
         given(balanceEventRepository.existsBySourceEventId(any())).willReturn(false);
-        given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
+        given(accountRepository.findById(id)).willReturn(Optional.of(account));
         given(accountRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+        LocalDate hoy = BusinessClock.current().today();
+        Installment pagada = Installment.of(id, 1, hoy.minusDays(50), new BigDecimal("4000"), new BigDecimal("1000"));
+        pagada.reconcileTo(InstallmentStatus.PAID);
+        Installment vencida = Installment.of(id, 2, hoy.minusDays(20), new BigDecimal("4100"), new BigDecimal("900"));
+        Installment futura = Installment.of(id, 3, hoy.minusDays(20).plusMonths(1), new BigDecimal("4200"), new BigDecimal("800"));
+        given(installmentRepository.findByScheduleIdOrdered(id)).willReturn(List.of(pagada, vencida, futura));
+        given(installmentRepository.maxInstallmentNumber(id)).willReturn(12);
 
-        var cmd = new ProcessAgreementExecutedCommand("evt-ag-2", account.getCreditAccountId(),
-                "RESTRUCTURE", null, new BigDecimal("18.0"), 24);
-        service.process(cmd);
+        service.process(new ProcessAgreementExecutedCommand(agreement.toString(), id, "RESTRUCTURE", null,
+                new BigDecimal("0.24"), 6));
 
-        assertThat(account.getNominalRate()).isEqualByComparingTo("18.0");
-        assertThat(account.getAssignedTerm()).isEqualTo(24);
-        then(eventPublisher).shouldHaveNoInteractions();
-        then(balanceEventRepository).should(never()).save(any());
+        assertThat(account.getNominalRate()).isEqualByComparingTo("0.24");
+        assertThat(pagada.getStatus()).isEqualTo(InstallmentStatus.PAID);
+        assertThat(vencida.getStatus()).isEqualTo(InstallmentStatus.REPLACED);
+        assertThat(futura.getStatus()).isEqualTo(InstallmentStatus.REPLACED);
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<Installment>> guardadas = ArgumentCaptor.forClass(List.class);
+        then(installmentRepository).should(times(2)).saveAll(guardadas.capture());
+        List<Installment> nuevo = guardadas.getAllValues().get(1);
+        assertThat(nuevo).hasSize(6);
+        assertThat(nuevo).extracting(Installment::getInstallmentNumber).containsExactly(13, 14, 15, 16, 17, 18);
+        // The old plan's day of the month, after today — on a business day: a Saturday or Sunday moves to Monday.
+        LocalDate esperada = futura.getDueDate();
+        while (esperada.getDayOfWeek() == DayOfWeek.SATURDAY || esperada.getDayOfWeek() == DayOfWeek.SUNDAY) {
+            esperada = esperada.plusDays(1);
+        }
+        assertThat(nuevo.get(0).getDueDate()).as("the old plan's day of the month, after today, on a business day")
+                .isEqualTo(esperada);
+        assertThat(nuevo).as("no installment of the new plan falls due on a weekend")
+                .allSatisfy(i -> assertThat(i.getDueDate().getDayOfWeek().getValue()).isLessThan(6));
+        assertThat(nuevo.stream().map(Installment::getPrincipalAmount).reduce(BigDecimal.ZERO, BigDecimal::add))
+                .as("the new plan amortizes the principal still owed").isEqualByComparingTo(account.getPrincipalBalance());
+        ArgumentCaptor<AccountRestructuredEvent> evento =
+                ArgumentCaptor.forClass(AccountRestructuredEvent.class);
+        then(eventPublisher).should().publishAccountRestructured(evento.capture());
+        assertThat(evento.getValue().newNominalRate()).isEqualByComparingTo("0.24");
+        assertThat(evento.getValue().agreementId()).isEqualTo(agreement);
+        assertThat(evento.getValue().replacedInstallments()).isEqualTo(2);
+        // Recorded in the ledger with no money moved: a redelivery of the agreement finds it.
+        then(balanceEventRepository).should().save(any());
+        then(eventPublisher).should(never()).publishBalanceUpdated(any());
     }
 
     @Test
@@ -706,57 +921,5 @@ class CreditAccountServiceTest {
 
         then(accountRepository).shouldHaveNoInteractions();
         then(eventPublisher).shouldHaveNoInteractions();
-    }
-
-    // ── SettleDisbursementUseCase (cierre del ciclo, disbursement.completed/failed) ───
-
-    private Disposition processingDisposition(UUID creditAccountId) {
-        Disposition d = Disposition.create(creditAccountId, DispositionType.THIRD_PARTY_CREDIT,
-                new BigDecimal("50000"), null);
-        d.markProcessing();
-        return d;
-    }
-
-    @Test
-    void onDisbursementCompleted_completesDisposition_andPublishesCompleted() {
-        CreditAccount account = activeRevolvingAccount();
-        Disposition disposition = processingDisposition(account.getCreditAccountId());
-        given(dispositionRepository.findById(disposition.getDispositionId()))
-                .willReturn(Optional.of(disposition));
-        given(dispositionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
-        given(accountRepository.findById(account.getCreditAccountId())).willReturn(Optional.of(account));
-
-        service.onDisbursementCompleted(disposition.getDispositionId(), "STP-REF-REAL-123");
-
-        assertThat(disposition.getStatus()).isEqualTo(DispositionStatus.COMPLETED);
-        then(eventPublisher).should().publishDispositionCompleted(any());
-    }
-
-    @Test
-    void onDisbursementCompleted_isIdempotent_whenDispositionNotProcessing() {
-        CreditAccount account = activeRevolvingAccount();
-        Disposition disposition = processingDisposition(account.getCreditAccountId());
-        disposition.complete("ALREADY");
-        given(dispositionRepository.findById(disposition.getDispositionId()))
-                .willReturn(Optional.of(disposition));
-
-        service.onDisbursementCompleted(disposition.getDispositionId(), "STP-REF-DUP");
-
-        then(dispositionRepository).should(never()).save(any());
-        then(eventPublisher).shouldHaveNoInteractions();
-    }
-
-    @Test
-    void onDisbursementFailed_marksDispositionFailed() {
-        UUID accountId = UUID.randomUUID();
-        Disposition disposition = processingDisposition(accountId);
-        given(dispositionRepository.findById(disposition.getDispositionId()))
-                .willReturn(Optional.of(disposition));
-        given(dispositionRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
-
-        service.onDisbursementFailed(disposition.getDispositionId(), "INVALID_BENEFICIARY_ACCOUNT", "CLABE inválida");
-
-        assertThat(disposition.getStatus()).isEqualTo(DispositionStatus.FAILED);
-        then(eventPublisher).should(never()).publishDispositionCompleted(any());
     }
 }

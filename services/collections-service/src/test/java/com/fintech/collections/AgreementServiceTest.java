@@ -149,6 +149,36 @@ class AgreementServiceTest {
     }
 
     @Test
+    void authorize_bySameStaffWhoProposed_isRejected_andNothingExecutes() {
+        CollectionAgreement agreement = CollectionAgreement.proposeRestructure(UUID.randomUUID(), creditAccountId,
+                obligorPartyId, new BigDecimal("10000"), new RestructureTerms(new BigDecimal("0.2"), 6, "FRENCH"))
+                .proposedBy("gestor-1");
+        agreement.accept();
+        given(agreementRepository.findById(agreement.getAgreementId())).willReturn(Optional.of(agreement));
+
+        assertThatThrownBy(() -> service.authorize(agreement.getAgreementId(), "gestor-1", "AUTH-1"))
+                .isInstanceOf(InvalidAgreementStateException.class)
+                .hasMessageContaining("no puede autorizarlo");
+
+        assertThat(agreement.getStatus()).isEqualTo(AgreementStatus.ACCEPTED);
+        then(eventPublisher).should(never()).publishCollectionAgreementExecuted(any());
+    }
+
+    @Test
+    void propose_recordsTheProposer() {
+        CollectionCase c = managedCase();
+        given(caseRepository.findById(c.getCaseId())).willReturn(Optional.of(c));
+        given(agreementRepository.findActiveByCaseId(c.getCaseId())).willReturn(Optional.empty());
+        given(agreementRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+        var terms = new RestructureTerms(new BigDecimal("0.2"), 6, "FRENCH");
+
+        CollectionAgreement a = service.propose(new ProposeAgreementCommand(c.getCaseId(), AgreementType.RESTRUCTURE,
+                null, terms, "gestor-1"));
+
+        assertThat(a.getProposedBy()).isEqualTo("gestor-1");
+    }
+
+    @Test
     void accept_delegatesToDomain() {
         CollectionAgreement agreement = CollectionAgreement.proposeRestructure(UUID.randomUUID(), creditAccountId,
                 obligorPartyId, new BigDecimal("10000"), new RestructureTerms(new BigDecimal("0.2"), 6, "FRENCH"));

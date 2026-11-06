@@ -1,5 +1,8 @@
 package com.fintech.creditportfolio.relief;
 
+import com.fintech.creditportfolio.application.service.BankingCalendar;
+import com.fintech.creditportfolio.application.service.PlanDeferral;
+import com.fintech.creditportfolio.application.service.ProductConfigResolver;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
@@ -50,6 +53,7 @@ class ReliefProgramsDoNotStackTest {
     @Mock CreditAccountRepository accounts;
     @Mock InstallmentRepository installments;
     @Mock CreditPortfolioEventPublisher eventPublisher;
+    @Mock ProductConfigResolver configResolver;
 
     private ReliefProgramService servicio;
     private ReliefProgram program;
@@ -57,7 +61,8 @@ class ReliefProgramsDoNotStackTest {
 
     @BeforeEach
     void preparar() {
-        servicio = new ReliefProgramService(programs, accounts, installments, eventPublisher);
+        servicio = new ReliefProgramService(programs, accounts, installments, eventPublisher, configResolver,
+                new PlanDeferral(BankingCalendar.weekendsOnly()));
 
         program = ReliefProgram.propose("Apoyo por contingencia", "NATURAL_DISASTER", 3,
                 LocalDate.now(), LocalDate.now().plusMonths(3), null, null, null, null,

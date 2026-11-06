@@ -145,10 +145,18 @@ class CollectionsAcceptanceTest {
         assertThat(accept.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(accept.getBody().get("status")).isEqualTo("ACCEPTED");
 
+        // Maker-checker: the agent who proposed cannot authorize; the body's name is not who authorizes.
+        var mismo = putJson("/api/v1/collections/agreements/" + agreementId + "/authorize",
+                Map.of("authorizedBy", "otra-persona", "authorizationRef", "AUTH-123"), headers);
+        assertThat(mismo.getStatusCode().is4xxClientError()).isTrue();
+
+        var comite = userId("COMMITTEE");
         var authorize = putJson("/api/v1/collections/agreements/" + agreementId + "/authorize",
-                Map.of("authorizedBy", "ops-1", "authorizationRef", "AUTH-123"), headers);
+                Map.of("authorizationRef", "AUTH-123"), comite);
         assertThat(authorize.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(authorize.getBody().get("status")).isEqualTo("EXECUTED");
+        assertThat(authorize.getBody().get("proposedBy")).isEqualTo(headers.getFirst("X-User-Id"));
+        assertThat(authorize.getBody().get("authorizedBy")).isEqualTo(comite.getFirst("X-User-Id"));
     }
 
     @Test
@@ -211,9 +219,13 @@ class CollectionsAcceptanceTest {
     }
 
     private HttpHeaders userId() {
+        return userId("COLLECTIONS_AGENT");
+    }
+
+    private HttpHeaders userId(String role) {
         var h = new HttpHeaders();
         h.set("X-User-Id", UUID.randomUUID().toString());
-        h.set("X-Roles", "COLLECTIONS_AGENT");
+        h.set("X-Roles", role);
         return h;
     }
 }

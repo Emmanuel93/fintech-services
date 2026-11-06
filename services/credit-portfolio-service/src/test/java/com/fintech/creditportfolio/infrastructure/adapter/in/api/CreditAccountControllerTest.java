@@ -1,6 +1,7 @@
 package com.fintech.creditportfolio.infrastructure.adapter.in.api;
 
 import com.fintech.creditportfolio.application.port.in.FindCreditAccountUseCase;
+import com.fintech.creditportfolio.application.port.out.CollectionAccountProjection;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.DispositionRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
@@ -41,6 +42,7 @@ class CreditAccountControllerTest {
     @MockitoBean CreditAccountRepository creditAccountRepository;
     @MockitoBean DispositionRepository dispositionRepository;
     @MockitoBean InstallmentRepository installmentRepository;
+    @MockitoBean CollectionAccountProjection collectionAccounts;
 
     // fromSnapshot generates its own creditAccountId internally; capture it from the built object
     private final CreditAccount account = buildAccount();

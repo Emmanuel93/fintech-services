@@ -50,16 +50,25 @@ class ClosingSchemaIT {
     @Autowired JdbcTemplate jdbc;
 
     @Test
-    @DisplayName("el changelog crea las nueve tablas del motor y NINGUNA de bancos")
+    @DisplayName("el changelog crea las tablas del motor, las del orden del cierre, el candado de crones y NINGUNA de bancos")
     void elEsquemaAplica() {
         List<String> tables = jdbc.queryForList(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'closing' ORDER BY 1",
                 String.class);
 
         assertThat(tables).containsExactly(
-                "account_close_profiles", "business_calendars", "calendar_days",
+                "account_close_profiles",
+                // Movimientos con fecha valor: el corte de D sella el saldo al cierre de D.
+                "balance_movements",
+                "business_calendars", "calendar_days",
                 "close_cycle_policies", "close_runs", "close_seals", "close_units",
-                "cutoff_schedules", "reconciliation_findings");
+                "cutoff_schedules",
+                "held_releases",
+                // Los días que cartera cerró: la compuerta del corte.
+                "portfolio_day_closes",
+                "reconciliation_findings",
+                // El candado del job que planifica el corte y de su monitor (ShedLock).
+                "shedlock");
 
         // BK-04: las cinco `bank_*` se mudaron a `banking`. Afirmarlo por ausencia y no sólo por
         // omisión de la lista: si un merge reviviera el changeset retirado, esta línea lo dice.

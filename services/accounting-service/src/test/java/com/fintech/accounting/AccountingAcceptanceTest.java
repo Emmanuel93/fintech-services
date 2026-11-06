@@ -103,14 +103,57 @@ class AccountingAcceptanceTest {
         assertThat(resp.getBody()).isNotEmpty();
     }
 
+    /**
+     * The trial balance carries each account's opening and closing balance, not only the period's movement: a month
+     * that collected more than it lent showed the loan portfolio "negative", while its balance was the portfolio.
+     */
     @Test
-    void ac5_billingRun_returns200() {
+    void ac4b_trialBalance_carriesOpeningAndClosingBalances() {
+        String unit = "S_TB_" + UUID.randomUUID().toString().substring(0, 8);
+        UUID ca = UUID.randomUUID(), party = UUID.randomUUID();
+        // January: 10,000 lent. February: 2,500 collected, 1,000 lent again.
+        journalRepository.save(JournalEntry.post("tb-1-" + unit, "DISPOSITION_AT_ORIGINATION", ca, party, "1201", "1101",
+                new BigDecimal("10000"), "MXN", "Capital colocado", null, unit, "190001", java.time.Instant.now(), (short) 1));
+        journalRepository.save(JournalEntry.post("tb-2-" + unit, "PAYMENT_APPLIED", ca, party, "1101", "1201",
+                new BigDecimal("2500"), "MXN", "Pago a capital", null, unit, "190002", java.time.Instant.now(), (short) 1));
+        journalRepository.save(JournalEntry.post("tb-3-" + unit, "DISPOSITION_SELF_USE", ca, party, "1201", "1101",
+                new BigDecimal("1000"), "MXN", "Capital colocado", null, unit, "190002", java.time.Instant.now(), (short) 1));
+
+        var resp = getList("/api/v1/accounting/trial-balance?period=190002&unitCodes=" + unit);
+
+        assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
+        Map<String, Object> portfolio = resp.getBody().stream()
+                .filter(r -> "1201".equals(r.get("accountCode"))).findFirst().orElseThrow();
+        assertThat(new BigDecimal(String.valueOf(portfolio.get("openingBalance")))).isEqualByComparingTo("10000");
+        assertThat(new BigDecimal(String.valueOf(portfolio.get("totalDebit")))).isEqualByComparingTo("1000");
+        assertThat(new BigDecimal(String.valueOf(portfolio.get("totalCredit")))).isEqualByComparingTo("2500");
+        assertThat(new BigDecimal(String.valueOf(portfolio.get("balance")))).isEqualByComparingTo("-1500");
+        assertThat(new BigDecimal(String.valueOf(portfolio.get("closingBalance")))).isEqualByComparingTo("8500");
+    }
+
+    @Test
+    void ac5_billingRun_byFinance_returns200() {
         String period = currentPeriod();
+        HttpHeaders finanzas = userHeaders();
+        finanzas.set("X-Roles", "FINANCE");
         var resp = restTemplate.exchange("/api/v1/accounting/billing-runs?period=" + period,
-                HttpMethod.POST, new HttpEntity<>(userHeaders()),
+                HttpMethod.POST, new HttpEntity<>(finanzas),
                 new ParameterizedTypeReference<Map<String, Object>>() {});
         assertThat(resp.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(resp.getBody()).containsKey("invoicesRequested");
+    }
+
+    @Test
+    void ac6_closingOrBillingAPeriod_withoutFinanceRole_isForbidden() {
+        String period = currentPeriod();
+        // An accountant reads the ledger; closing or billing the month publishes the numbers and is finance's call.
+        for (String path : List.of("/api/v1/accounting/billing-runs?period=" + period,
+                                   "/api/v1/accounting/periods/" + period + "/close",
+                                   "/api/v1/accounting/periods/" + period + "/reopen")) {
+            var resp = restTemplate.exchange(path, HttpMethod.POST, new HttpEntity<>(userHeaders()),
+                    new ParameterizedTypeReference<Map<String, Object>>() {});
+            assertThat(resp.getStatusCode()).as(path).isEqualTo(HttpStatus.FORBIDDEN);
+        }
     }
 
     private ResponseEntity<List<Map<String, Object>>> getList(String path) {

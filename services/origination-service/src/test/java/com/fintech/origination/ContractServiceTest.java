@@ -156,6 +156,27 @@ class ContractServiceTest {
         assertThat(app.getStatus()).isEqualTo(ApplicationStatus.DISBURSED);
     }
 
+    @Test
+    void a_cancelled_credit_closes_its_application_as_a_failed_disbursement_once() {
+        // D63: the application was marked DISBURSED at activation, before any money left; the credit never lent.
+        CreditApplication app = appWithAcceptedOffer();
+        app.generateContract(Contract.generate("CTR-202606-ABCD1234", "ELECTRONIC"));
+        app.signContract("032180000118359719", "DOC-REF", null);
+        given(applicationRepository.findById(appId)).willReturn(Optional.of(app));
+        given(applicationRepository.save(any())).willAnswer(inv -> inv.getArgument(0));
+        service.apply(appId);
+
+        service.applyDisbursementFailed(appId);
+        service.applyDisbursementFailed(appId);
+
+        assertThat(app.getStatus()).isEqualTo(ApplicationStatus.DISBURSEMENT_FAILED);
+        assertThat(app.getStatus().isTerminal()).isTrue();
+        then(applicationRepository).should(times(2)).save(app);   // the activation and the failure, not the redelivery
+        // A late activation does not reopen it.
+        service.apply(appId);
+        assertThat(app.getStatus()).isEqualTo(ApplicationStatus.DISBURSEMENT_FAILED);
+    }
+
     @org.junit.jupiter.api.Test
     @org.junit.jupiter.api.DisplayName("Lo que el cliente pide de BNPL al firmar viaja en el hecho, no se queda en la firma")
     void el_bnpl_pedido_al_firmar_viaja_en_el_hecho() {

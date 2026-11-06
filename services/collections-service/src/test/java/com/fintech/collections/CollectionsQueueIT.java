@@ -5,6 +5,7 @@ import com.fintech.collections.application.PromiseQueueRow;
 import com.fintech.collections.application.port.out.CollectionsQueueRepository;
 import com.fintech.collections.domain.*;
 import jakarta.persistence.EntityManager;
+import com.fintech.shared.time.BusinessClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -73,9 +74,9 @@ class CollectionsQueueIT {
         // PP-01: sólo una promesa ACTIVE por caso (índice único parcial). La rota se siembra
         // primero y se cierra antes de abrir la vigente — que es exactamente el orden en que
         // ocurre en la vida real: se rompe una y después se pacta otra.
-        promise(caseA, "900.00",  LocalDate.now().minusDays(3), PromiseStatus.BROKEN);
-        promise(caseA, "1500.00", LocalDate.now(), PromiseStatus.ACTIVE);
-        promise(caseB, "2200.00", LocalDate.now().plusDays(4), PromiseStatus.ACTIVE);
+        promise(caseA, "900.00",  today().minusDays(3), PromiseStatus.BROKEN);
+        promise(caseA, "1500.00", today(), PromiseStatus.ACTIVE);
+        promise(caseB, "2200.00", today().plusDays(4), PromiseStatus.ACTIVE);
 
         // Dos intentos hoy sobre el caso A; uno viejo sobre el B.
         // Anclados al MISMO comienzo de día que usa la consulta, no a `now()` de la máquina.
@@ -142,7 +143,7 @@ class CollectionsQueueIT {
     @Test
     @DisplayName("el rango de fecha prometida acota, y sin rango no filtra")
     void promisedDateRangeNarrows() {
-        LocalDate today = LocalDate.now();
+        LocalDate today = today();
 
         // Con rango: sólo la que vence hoy.
         assertThat(queue.searchPromises(null, null, agents, today, today, PageRequest.of(0, 20))
@@ -232,10 +233,18 @@ class CollectionsQueueIT {
      * después se le mueve la fecha y el estado. Saltarse la fábrica para forzar el dato inicial
      * sería probar contra un estado que el dominio nunca genera.
      */
+    /**
+     * Today as the domain sees it: the business clock's day, in Mexico City. The host's day differs between the two
+     * midnights (the machine runs an hour behind), and a promise seeded with it was "in the past" for the domain.
+     */
+    private static LocalDate today() {
+        return BusinessClock.current().today();
+    }
+
     private UUID promise(UUID caseId, String amount, LocalDate date, PromiseStatus status) {
-        PaymentPromise p = PaymentPromise.create(caseId, new BigDecimal(amount), LocalDate.now(), "agent-seed");
+        PaymentPromise p = PaymentPromise.create(caseId, new BigDecimal(amount), today(), "agent-seed");
         em.persist(p);
-        if (status != PromiseStatus.ACTIVE || !date.equals(LocalDate.now())) {
+        if (status != PromiseStatus.ACTIVE || !date.equals(today())) {
             em.createQuery("UPDATE PaymentPromise p SET p.status = :s, p.promisedDate = :d "
                          + "WHERE p.promiseId = :id")
                     .setParameter("s", status).setParameter("d", date)

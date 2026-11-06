@@ -79,10 +79,8 @@ class AccountingFlowIT {
 
         // La secuencia real de un crédito: primero se dispone el dinero, después devenga.
         //
-        // Mandar el cargo suelto sobre una cuenta que contabilidad nunca vio no prueba el devengo:
-        // prueba la incorporación de un saldo preexistente, que ahora se asienta contra capital
-        // (3901) precisamente para no volver a etiquetar el saldo entero como si fuera el ingreso
-        // de ese hecho — el defecto que producía «comisiones de apertura» del tamaño del préstamo.
+        // A charge on an account whose birth accounting never saw waits for the birth (it is retried and then
+        // dead-lettered), so the disposition goes first, as in a real credit.
         kafkaTemplate.send("credit-portfolio.balance-updated", ca.toString(),
                 balanceEvent(ca, party, 1000, 0, 1000, "DISPOSITION_THIRD_PARTY_CREDIT", 1));
         kafkaTemplate.send("credit-portfolio.balance-updated", ca.toString(),

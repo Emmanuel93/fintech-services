@@ -107,6 +107,16 @@ class BureauMockScenariosTest {
     }
 
     @Test
+    @DisplayName("ZZMR: un perfil en el límite, con FICO de banda media y reporte válido")
+    void el_perfil_en_el_limite_cae_en_banda_media() throws Exception {
+        CirculoReport r = query("ZZMR010101HNEXXXA4");
+
+        assertThat(r.getStatus()).isEqualTo(CirculoReportStatus.SUCCESS);
+        // 650-699: only the smallest FICO step, the MEDIO band that sends the application to the desk.
+        assertThat(r.getFicoScoreValor()).isBetween(650, 699);
+    }
+
+    @Test
     @DisplayName("Determinista: el mismo CURP da el mismo puntaje, hoy y mañana")
     void el_mismo_curp_da_el_mismo_puntaje() throws Exception {
         // Sin esto, una prueba que pasa hoy falla mañana sin que nadie toque nada.

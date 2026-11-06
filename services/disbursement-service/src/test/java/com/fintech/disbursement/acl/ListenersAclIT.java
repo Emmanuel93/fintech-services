@@ -1,8 +1,10 @@
 package com.fintech.disbursement.acl;
 
+import com.fintech.disbursement.application.port.out.DisbursementEventPublisher;
 import com.fintech.disbursement.application.port.out.DisbursementOrderRepository;
 import com.fintech.disbursement.domain.DisbursementSource;
 import com.fintech.disbursement.domain.DisbursementStatus;
+import com.fintech.disbursement.domain.FailureCode;
 import com.fintech.disbursement.infrastructure.adapter.in.messaging.DispositionAuthorizedListener;
 import com.fintech.disbursement.infrastructure.adapter.in.messaging.DispositionAuthorizedPayload;
 import com.fintech.shared.testing.AbstractIntegrationTest;
@@ -11,13 +13,20 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 
 /**
  * Los listeners ACL, con Spring de verdad.
@@ -45,13 +54,23 @@ class ListenersAclIT extends AbstractIntegrationTest {
 
     @Autowired DispositionAuthorizedListener listener;
     @Autowired DisbursementOrderRepository orders;
+    /** Kafka does not take part: a rejection answered is what the publisher is asked to say. */
+    @MockitoBean DisbursementEventPublisher publisher;
+
+    private static DispositionAuthorizedPayload attempt(UUID dispositionId, String amount, int attempt, Instant notBefore) {
+        return new DispositionAuthorizedPayload(
+                dispositionId, UUID.randomUUID(), null, "SUC-001", null,
+                new BigDecimal(amount), "MXN",
+                "JUAN PEREZ", "646180157000000004", "40", "PEPJ800101ABC", 646,
+                1L, "DISPOSICION DE CREDITO", attempt, notBefore, Instant.now());
+    }
 
     private static DispositionAuthorizedPayload authorized(UUID dispositionId, String amount) {
         return new DispositionAuthorizedPayload(
                 dispositionId, UUID.randomUUID(), null, "SUC-001", null,
                 new BigDecimal(amount), "MXN",
                 "JUAN PEREZ", "646180157000000004", "40", "PEPJ800101ABC", 646,
-                1L, "DISPOSICION DE CREDITO", Instant.now());
+                1L, "DISPOSICION DE CREDITO", null, null, Instant.now());
     }
 
     @Test
@@ -90,13 +109,51 @@ class ListenersAclIT extends AbstractIntegrationTest {
     }
 
     @Test
+    @DisplayName("D63 · otro intento de la misma disposición es otra orden, con su número en la llave y la espera que pide cartera")
+    void cadaIntentoEsSuOrden() {
+        UUID disposition = UUID.randomUUID();
+        Instant later = Instant.now().plus(Duration.ofHours(1)).truncatedTo(ChronoUnit.SECONDS);
+
+        listener.onDispositionAuthorized(authorized(disposition, "20000.00"));
+        listener.onDispositionAuthorized(attempt(disposition, "20000.00", 2, later));
+
+        var primera = orders.findBySourceKey("credit-portfolio",
+                DisbursementSource.DISPOSITION.name(), disposition.toString()).orElseThrow();
+        var segunda = orders.findBySourceKey("credit-portfolio",
+                DisbursementSource.DISPOSITION.name(), disposition + ":2").orElseThrow();
+        assertThat(segunda.getDisbursementId()).isNotEqualTo(primera.getDisbursementId());
+        assertThat(segunda.getSourceReference()).isEqualTo(disposition.toString());
+        assertThat(primera.getSourceMetadata()).containsEntry("attempt", "1");
+        assertThat(segunda.getSourceMetadata()).containsEntry("attempt", "2")
+                .containsEntry("dispositionId", disposition.toString());
+        assertThat(segunda.getScheduledFor()).as("sale cuando cartera lo pidió, no antes").isEqualTo(later);
+    }
+
+    @Test
+    @DisplayName("D67 · una CLABE inválida no se queda en la cola de muertos: se responde que falló, sin orden")
+    void claveInvalidaSeResponde() {
+        UUID disposition = UUID.randomUUID();
+
+        listener.onDispositionAuthorized(new DispositionAuthorizedPayload(
+                disposition, UUID.randomUUID(), null, "SUC-001", null, new BigDecimal("5000.00"), "MXN",
+                "JUAN PEREZ", "646180157000000005", "40", null, 646, 1L, "X", null, null, Instant.now()));
+
+        assertThat(orders.findBySourceKey("credit-portfolio",
+                DisbursementSource.DISPOSITION.name(), disposition.toString())).isEmpty();
+        verify(publisher).publishRequestRejected(
+                argThat(c -> c.sourceEventId().equals(disposition.toString())
+                        && "1".equals(c.metadataOrEmpty().get("attempt"))),
+                eq(FailureCode.INVALID_BENEFICIARY_ACCOUNT), anyString());
+    }
+
+    @Test
     @DisplayName("una disposición sin monto no crea orden — y no revienta")
     void sinMontoNoHaceNada() {
         UUID disposition = UUID.randomUUID();
 
         listener.onDispositionAuthorized(new DispositionAuthorizedPayload(
                 disposition, UUID.randomUUID(), null, "SUC-001", null, null, "MXN",
-                "JUAN PEREZ", "646180157000000004", "40", null, 646, 1L, "X", Instant.now()));
+                "JUAN PEREZ", "646180157000000004", "40", null, 646, 1L, "X", null, null, Instant.now()));
 
         assertThat(orders.findBySourceKey("credit-portfolio",
                 DisbursementSource.DISPOSITION.name(), disposition.toString())).isEmpty();

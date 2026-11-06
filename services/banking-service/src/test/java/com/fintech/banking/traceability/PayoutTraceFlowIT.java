@@ -1,5 +1,8 @@
 package com.fintech.banking.traceability;
 
+import com.fintech.banking.application.port.out.CashMovementPublisher;
+import org.springframework.boot.test.mock.mockito.MockBean;
+
 import com.fintech.banking.infrastructure.adapter.in.messaging.PayoutTraceListener;
 import com.fintech.banking.infrastructure.adapter.in.messaging.StpOrderSettledListener;
 import com.fintech.shared.testing.AbstractIntegrationTest;
@@ -52,6 +55,8 @@ class PayoutTraceFlowIT extends AbstractIntegrationTest {
     @Autowired PayoutTraceListener payouts;
     @Autowired StpOrderSettledListener settlements;
     @Autowired TestRestTemplate rest;
+    /** Kafka does not take part: the cash book's announcement is not what is tested here. */
+    @MockBean CashMovementPublisher cashMovements;
 
     private static final UUID CUENTA = UUID.fromString("9b1d0000-0000-4000-8000-000000000001");
     private static final LocalDate DIA = LocalDate.of(2026, 10, 30);
@@ -71,7 +76,7 @@ class PayoutTraceFlowIT extends AbstractIntegrationTest {
     private static StpOrderSettledListener.StpOrderSettledPayload liquidado(UUID pago, String clave,
                                                                             BigDecimal importe, LocalDate dia) {
         return new StpOrderSettledListener.StpOrderSettledPayload(
-                importe == null ? null : "settled-" + pago, pago, UUID.randomUUID(), clave, importe, dia,
+                importe == null ? null : "settled-" + pago, pago, UUID.randomUUID(), clave, importe, dia, dia,
                 Instant.parse("2026-10-30T07:23:08Z"), Instant.parse("2026-10-30T07:24:15Z"));
     }
 
@@ -145,6 +150,43 @@ class PayoutTraceFlowIT extends AbstractIntegrationTest {
         assertThat(t.get("postedAt")).isNull();
 
         assertThat(porPago(pago).getStatusCode()).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    @DisplayName("un pago rechazado termina FALLIDO con su motivo y deja de contar como traza a medias (D61)")
+    void unPagoRechazadoTerminaFallido() {
+        UUID pago = UUID.randomUUID(), credito = UUID.randomUUID();
+        payouts.onPaymentRequested(despacho(pago));
+        payouts.onDisbursementAccepted(aceptado(pago, credito, clave()));
+
+        payouts.onDisbursementFailed(new PayoutTraceListener.DisbursementFailedPayload(pago, IMPORTE,
+                "REJECTED_BY_PROVIDER", "-200 RECHAZO_POR_PLD — Se rechaza por PLD", Instant.parse("2026-10-30T07:23:00Z")));
+
+        Map<?, ?> t = porPago(pago).getBody();
+        assertThat(t.get("status")).isEqualTo("FAILED");
+        assertThat((String) t.get("failureReason")).contains("REJECTED_BY_PROVIDER").contains("PLD");
+        assertThat(movimientosDe(pago)).as("el dinero no salió: nada en el libro de caja").isZero();
+        Integer incompletas = jdbcTemplate.queryForObject(
+                "SELECT count(*) FROM banking.movement_trace WHERE payout_id = ? AND status <> 'FAILED'", Integer.class, pago);
+        assertThat(incompletas).isZero();
+    }
+
+    @Test
+    @DisplayName("un fallo tardío no deshace una liquidación, y una devolución la cierra como DEVUELTA")
+    void falloTardioYDevolucion() {
+        UUID pago = UUID.randomUUID(), credito = UUID.randomUUID();
+        String clave = clave();
+        payouts.onPaymentRequested(despacho(pago));
+        payouts.onDisbursementAccepted(aceptado(pago, credito, clave));
+        settlements.onOrderSettled(liquidado(pago, clave, IMPORTE, DIA));
+
+        payouts.onDisbursementFailed(new PayoutTraceListener.DisbursementFailedPayload(pago, IMPORTE,
+                "REJECTED_BY_PROVIDER", "tarde", Instant.parse("2026-10-30T08:00:00Z")));
+        assertThat(porPago(pago).getBody().get("status")).as("el dinero ya salió").isEqualTo("SETTLED");
+
+        payouts.onDisbursementReturned(new PayoutTraceListener.DisbursementReturnedPayload(pago, IMPORTE, "R01",
+                Instant.parse("2026-10-31T10:00:00Z")));
+        assertThat(porPago(pago).getBody().get("status")).isEqualTo("RETURNED");
     }
 
     @Test

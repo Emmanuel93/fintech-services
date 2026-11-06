@@ -188,8 +188,8 @@ class DeferPurchaseTest {
     }
 
     @Test
-    @DisplayName("se publica la VENTANA en que fue revolvente — es lo que charges reversa")
-    void publicaLaVentana() {
+    @DisplayName("se difiere el mismo día de la compra: la ventana revolvente es de cero días, sin interés que reversar")
+    void publishesASameDayWindow() {
         defer(6);
 
         ArgumentCaptor<DispositionDeferredEvent> captor =
@@ -199,9 +199,20 @@ class DeferPurchaseTest {
         DispositionDeferredEvent e = captor.getValue();
         assertThat(e.amount()).isEqualByComparingTo("6000.00");
         assertThat(e.nominalRate()).isEqualByComparingTo("0");
-        assertThat(e.revolvingDesde()).isNotNull();
-        assertThat(e.revolvingHasta()).isNotNull();
-        assertThat(e.revolvingHasta()).isAfterOrEqualTo(e.revolvingDesde());
+        assertThat(e.revolvingHasta()).isEqualTo(e.revolvingDesde());
+    }
+
+    @Test
+    @DisplayName("una compra de ayer ya devengó: no se parcializa")
+    void purchaseThatAlreadyAccruedIsNotDeferred() {
+        org.springframework.test.util.ReflectionTestUtils.setField(compra, "createdAt",
+                java.time.Instant.now().minus(java.time.Duration.ofDays(1)));
+
+        assertThatThrownBy(() -> defer(6))
+                .isInstanceOf(NoSePuedeDiferirException.class)
+                .hasMessageContaining("ya devengó interés");
+        verify(installments, never()).saveAll(any());
+        verify(eventPublisher, never()).publishDispositionDeferred(any());
     }
 
     @Test

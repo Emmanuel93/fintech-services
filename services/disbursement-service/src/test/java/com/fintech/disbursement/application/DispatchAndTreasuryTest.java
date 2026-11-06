@@ -16,6 +16,7 @@ import com.fintech.disbursement.domain.Rail;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -27,10 +28,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -91,6 +97,11 @@ class DispatchAndTreasuryTest {
         TransactionTemplate tx = mock(TransactionTemplate.class);
         when(tx.execute(any())).thenAnswer(inv ->
                 ((TransactionCallback<?>) inv.getArgument(0)).doInTransaction(null));
+        // The failure of a hand-off is recorded in a transaction of its own: the mock runs it too.
+        doAnswer(inv -> {
+            inv.<Consumer<TransactionStatus>>getArgument(0).accept(null);
+            return null;
+        }).when(tx).executeWithoutResult(any());
 
         servicio = new DisbursementDispatchService(orders,
                 mock(DisbursementEventRepository.class), conector,
@@ -106,7 +117,7 @@ class DispatchAndTreasuryTest {
     @DisplayName("con ruta, la orden se despacha CON la cuenta que tesorería eligió")
     void conRuta() {
         DisbursementOrder o = order();
-        when(orders.lockDueForDispatch(org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(o));
+        when(orders.lockDueForDispatch(anyInt())).thenReturn(List.of(o));
 
         servicio.dispatchDue();
 
@@ -118,11 +129,40 @@ class DispatchAndTreasuryTest {
     }
 
     @Test
+    @DisplayName("mientras entrega lo reclamado el despachador dice que trabaja; al terminar, aunque la entrega falle, ya no")
+    void dispatchingWhileHandingOff() {
+        DisbursementOrder o = order();
+        when(orders.lockDueForDispatch(anyInt())).thenReturn(List.of(o));
+        AtomicBoolean seen = new AtomicBoolean();
+        doAnswer(i -> {
+            seen.set(servicio.dispatching());
+            return null;
+        }).when(conector).dispatch(any(), any());
+
+        assertThat(servicio.dispatching()).isFalse();
+        servicio.dispatchDue();
+
+        // Claimed (DISPATCHED in the table) and not yet in the provider's topic: only the running cycle holds it.
+        assertThat(seen).isTrue();
+        assertThat(servicio.dispatching()).isFalse();
+
+        DisbursementOrder other = order();
+        when(orders.lockDueForDispatch(anyInt())).thenReturn(List.of(other));
+        when(orders.findById(other.getDisbursementId())).thenReturn(Optional.of(other));
+        doThrow(new IllegalStateException("broker caído")).when(conector).dispatch(any(), any());
+
+        servicio.dispatchDue();
+
+        assertThat(other.status()).isEqualTo(DisbursementStatus.REQUESTED);
+        assertThat(servicio.dispatching()).isFalse();
+    }
+
+    @Test
     @DisplayName("SIN ruta la orden gasta intento — una configuración incompleta tiene que doler")
     void sinRuta() {
         response.set(Optional.empty());
         DisbursementOrder o = order();
-        when(orders.lockDueForDispatch(org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(o));
+        when(orders.lockDueForDispatch(anyInt())).thenReturn(List.of(o));
 
         servicio.dispatchDue();
 
@@ -137,7 +177,7 @@ class DispatchAndTreasuryTest {
         falla.set(new PayoutRouteResolverPort.PayoutRoutingUnavailableException(
                 "connection refused", new RuntimeException()));
         DisbursementOrder o = order();
-        when(orders.lockDueForDispatch(org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(o));
+        when(orders.lockDueForDispatch(anyInt())).thenReturn(List.of(o));
 
         servicio.dispatchDue();
 
@@ -154,7 +194,7 @@ class DispatchAndTreasuryTest {
         falla.set(new PayoutRouteResolverPort.PayoutRoutingUnavailableException(
                 "timeout", new RuntimeException()));
         DisbursementOrder o = order();
-        when(orders.lockDueForDispatch(org.mockito.ArgumentMatchers.anyInt())).thenReturn(List.of(o));
+        when(orders.lockDueForDispatch(anyInt())).thenReturn(List.of(o));
 
         // Diez pasadas del job con tesorería caída: más que los seis intentos que matan una orden.
         for (int i = 0; i < 10; i++) {

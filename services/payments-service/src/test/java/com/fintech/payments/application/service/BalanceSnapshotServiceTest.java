@@ -1,6 +1,7 @@
 package com.fintech.payments.application.service;
 
 import com.fintech.payments.application.port.out.AccountBalanceSnapshotRepository;
+import com.fintech.payments.application.port.out.CollectionAccountDirectory;
 import com.fintech.payments.domain.AccountBalanceSnapshot;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -21,12 +22,13 @@ import static org.mockito.Mockito.*;
 class BalanceSnapshotServiceTest {
 
     @Mock AccountBalanceSnapshotRepository snapshotRepo;
+    @Mock CollectionAccountDirectory collectionAccounts;
 
     BalanceSnapshotService service;
 
     @BeforeEach
     void setUp() {
-        service = new BalanceSnapshotService(snapshotRepo);
+        service = new BalanceSnapshotService(snapshotRepo, collectionAccounts);
     }
 
     @Test

@@ -6,6 +6,7 @@ import com.fintech.risk.domain.Ifrs9Stage;
 import com.fintech.risk.domain.RiskProfile;
 import com.fintech.risk.domain.RiskProfileNotFoundException;
 import com.fintech.risk.domain.RiskProfileStatus;
+import com.fintech.risk.application.port.out.RiskEventPublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -30,6 +31,7 @@ import static org.mockito.BDDMockito.*;
 class RiskProfileServiceTest {
 
     @Mock RiskProfileRepository repository;
+    @Mock RiskEventPublisher eventPublisher;
 
     RiskProfileService service;
 
@@ -38,7 +40,7 @@ class RiskProfileServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new RiskProfileService(repository);
+        service = new RiskProfileService(repository, eventPublisher);
     }
 
     @Test
@@ -84,6 +86,19 @@ class RiskProfileServiceTest {
         service.onBalanceUpdated(creditAccountId, new BigDecimal("0"), "SETTLED");
 
         assertThat(p.getStatus()).isEqualTo(RiskProfileStatus.CLOSED);
+    }
+
+    @Test
+    void onBalanceUpdated_closesProfile_whenCancelled_becauseItNeverLentAnything() {
+        // D63: a credit whose only disbursement never happened closes with no reserve, like a settled one.
+        RiskProfile p = RiskProfile.create(creditAccountId, obligorPartyId, "PERSONAL_LOAN");
+        given(repository.findByCreditAccountId(creditAccountId)).willReturn(Optional.of(p));
+        given(repository.save(any())).willAnswer(inv -> inv.getArgument(0));
+
+        service.onBalanceUpdated(creditAccountId, new BigDecimal("0"), "CANCELLED");
+
+        assertThat(p.getStatus()).isEqualTo(RiskProfileStatus.CLOSED);
+        assertThat(p.getProvisionAmount()).isEqualByComparingTo("0");
     }
 
     @Test

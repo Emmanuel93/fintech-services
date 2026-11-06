@@ -114,6 +114,26 @@ class AccrualScheduleServiceTest {
     }
 
     @Test
+    void createFromActivation_skipsOpeningFee_whenItRoundsToZero() {
+        // A revolving line is approved with a limit, not a disbursed amount: the fee basis is zero. No record is
+        // written (the amount check would reject it at commit) and no event leaves (the portfolio would apply a
+        // charge that does not exist here).
+        UUID accountId = UUID.randomUUID();
+
+        when(scheduleRepo.existsByCreditAccountId(accountId)).thenReturn(false);
+        when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(chargeRecordRepo.existsByChargeTypeAndCreditAccountId(anyString(), eq(accountId))).thenReturn(false);
+
+        service.createFromActivation(accountId, UUID.randomUUID(), "REVOLVING_LINE", "REVOLVING",
+                new BigDecimal("0.38"), new BigDecimal("0.76"),
+                BigDecimal.ZERO, new BigDecimal("0.02"));
+
+        verify(scheduleRepo).save(any());
+        verify(chargeRecordRepo, never()).save(any());
+        verify(eventPublisher, never()).publishChargeApplied(any(), any(), any(), any());
+    }
+
+    @Test
     void updateBalanceFromEvent_updatesBalance() {
         UUID accountId = UUID.randomUUID();
         AccrualSchedule existing = AccrualSchedule.create(accountId, UUID.randomUUID(),
@@ -144,5 +164,22 @@ class AccrualScheduleServiceTest {
         service.updateBalanceFromEvent(accountId, BigDecimal.ZERO, "SETTLED");
 
         assertThat(existing.getStatus()).isEqualTo(AccrualScheduleStatus.CLOSED.name());
+    }
+
+    @Test
+    void applyRestructure_accruesTheAgreedRate_fromNowOn() {
+        // 2 Nov, E04: 24 % agreed, 32 % still charged, because nothing told charges.
+        UUID accountId = UUID.randomUUID();
+        when(scheduleRepo.existsByCreditAccountId(accountId)).thenReturn(false);
+        when(scheduleRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        service.createFromActivation(accountId, UUID.randomUUID(), "PERSONAL_LOAN", "AMORTIZING",
+                new BigDecimal("0.32"), new BigDecimal("0.48"), new BigDecimal("25000.00"), BigDecimal.ZERO);
+        ArgumentCaptor<AccrualSchedule> creado = ArgumentCaptor.forClass(AccrualSchedule.class);
+        verify(scheduleRepo).save(creado.capture());
+        when(scheduleRepo.findByCreditAccountId(accountId)).thenReturn(Optional.of(creado.getValue()));
+
+        service.applyRestructure(accountId, new BigDecimal("0.24"));
+
+        assertThat(creado.getValue().getNominalRate()).isEqualByComparingTo("0.24");
     }
 }

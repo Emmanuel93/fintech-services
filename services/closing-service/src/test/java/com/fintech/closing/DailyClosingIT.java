@@ -9,6 +9,7 @@ import com.fintech.closing.application.service.BusinessDayRunner;
 import com.fintech.closing.domain.ClosePhase;
 import com.fintech.closing.domain.CloseSeal;
 import com.fintech.closing.domain.CutoffSchedule;
+import com.fintech.closing.support.PortfolioSnapshotTestConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -41,7 +42,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest
 @Testcontainers
-@Import({InMemoryLockConfig.class, DailyClosingIT.CapturedEventsConfig.class})
+@Import({InMemoryLockConfig.class, DailyClosingIT.CapturedEventsConfig.class, PortfolioSnapshotTestConfig.class})
 class DailyClosingIT {
 
     @Container
@@ -74,10 +75,19 @@ class DailyClosingIT {
                                                                LocalDate date, String productType) {
                     WINDOWS.add(phase + "|" + account + "|" + date);
                 }
-                @Override public void publishCutoffClosed(CutoffSchedule c, UUID party, String productType) {
+                @Override public void publishCutoffClosed(CutoffSchedule c, com.fintech.closing.domain.AccountCloseProfile p,
+                                                          UUID runId, LocalDate periodStart, String holderKind, int daysDelinquent) {
                     CUTOFFS.add(c);
                 }
                 @Override public void publishDaySealed(CloseSeal s) { SEALS.add(s); }
+                @Override public java.util.concurrent.CompletableFuture<Void> publishCutoffDue(
+                        com.fintech.closing.application.port.out.CutoffUnitStore.Dispatchable u, LocalDate date) {
+                    return java.util.concurrent.CompletableFuture.completedFuture(null);
+                }
+                @Override public void publishCutoffRunPlanned(com.fintech.closing.domain.CloseRun run,
+                        List<com.fintech.closing.application.port.out.CutoffUnitStore.Breakdown> b) {}
+                @Override public void publishCutoffRunCompleted(com.fintech.closing.domain.CloseRun run,
+                        com.fintech.closing.application.port.out.CutoffUnitStore.StatusCounts c) {}
             };
         }
     }

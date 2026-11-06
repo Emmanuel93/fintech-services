@@ -30,6 +30,8 @@ import org.junit.jupiter.api.Test;
  *   <li>todo {@code @Scheduled(cron = ...)} lleva {@code @SchedulerLock};</li>
  *   <li>nadie calcula la fecha con el reloj del contenedor ({@code LocalDate.now()} sin argumento,
  *       {@code ZoneId.systemDefault()}): se usa {@code BusinessClock}.</li>
+ *   <li>ningún cron diario dispara entre las 23:00 y las 00:04: el día se procesa cuando terminó. El
+ *       cierre del 10 de noviembre corre el 11 a partir de las 00:05.</li>
  * </ol>
  *
  * <p>Los jobs de intervalo ({@code fixedDelay}) quedan fuera a propósito: o limpian estado en memoria
@@ -84,6 +86,30 @@ class ScheduledJobsRunInBusinessTimeTest {
     }
 
     @Test
+    void ningun_cron_diario_corre_antes_de_que_termine_el_dia() throws IOException {
+        List<String> hallazgos = new ArrayList<>();
+        for (Path java : mainSources()) {
+            List<String> lines = Files.readAllLines(java);
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i);
+                if (comment(line) || !CRON.matcher(line).find()) continue;
+                revisarHora(cronOf(line), relative(java) + ":" + (i + 1), hallazgos);
+            }
+        }
+        for (Path yml : configFiles()) {
+            List<String> lines = Files.readAllLines(yml);
+            for (int i = 0; i < lines.size(); i++) {
+                String line = lines.get(i).trim();
+                if (line.startsWith("#") || !YML_CRON.matcher(line).find()) continue;
+                revisarHora(line.substring(line.indexOf(':') + 1), relative(yml) + ":" + (i + 1), hallazgos);
+            }
+        }
+        assertThat(hallazgos)
+                .as("El día se procesa cuando terminó: los crones diarios van de las 00:05 en adelante, nunca a las 23:xx")
+                .isEmpty();
+    }
+
+    @Test
     void revisar_todo_el_codigo_es_rapido() throws IOException {
         long inicio = System.nanoTime();
         int archivos = 0;
@@ -94,6 +120,45 @@ class ScheduledJobsRunInBusinessTimeTest {
         // Rendimiento: el guardián recorre todos los servicios en cada build.
         assertThat(archivos).isGreaterThan(100);
         assertThat((System.nanoTime() - inicio) / 1_000_000).isLessThan(10_000L);
+    }
+
+    private static final Pattern YML_CRON = Pattern.compile("^[a-z-]*cron:");
+
+    /** La expresión de un {@code @Scheduled(cron = "...")}; de un {@code ${prop:default}}, el default. */
+    private static String cronOf(String line) {
+        int a = line.indexOf('"', line.indexOf("cron"));
+        int b = line.indexOf('"', a + 1);
+        return a < 0 || b < 0 ? "" : line.substring(a + 1, b);
+    }
+
+    /**
+     * Segundos, minutos, hora, ...: si la hora es fija (un cron diario, semanal o mensual) no puede caer
+     * entre las 23:00 y las 00:04. Los que corren cada hora ({@code *}) quedan fuera.
+     */
+    private static void revisarHora(String expr, String where, List<String> hallazgos) {
+        String e = expr.replace("\"", "").trim();
+        if (e.startsWith("${")) {
+            int colon = e.indexOf(':');
+            if (colon < 0) return;
+            e = e.substring(colon + 1, e.lastIndexOf('}') > colon ? e.lastIndexOf('}') : e.length()).trim();
+        }
+        String[] f = e.split("\\s+");
+        if (f.length < 3 || !f[1].matches("\\d+") || !f[2].matches("\\d+")) return;
+        int minuto = Integer.parseInt(f[1]), hora = Integer.parseInt(f[2]);
+        if (hora == 23 || (hora == 0 && minuto < 5)) {
+            hallazgos.add(where + " cron «" + e + "» corre a las " + String.format("%02d:%02d", hora, minuto)
+                          + " — el día todavía no termina o apenas terminó");
+        }
+    }
+
+    private static List<Path> configFiles() throws IOException {
+        Path services = repoRoot().resolve("services");
+        try (Stream<Path> files = Files.walk(services)) {
+            return files.filter(p -> p.toString().endsWith(".yml") || p.toString().endsWith(".yaml"))
+                    .filter(p -> p.toString().contains("/src/main/resources/"))
+                    .sorted()
+                    .toList();
+        }
     }
 
     private static boolean comment(String line) {

@@ -32,7 +32,7 @@ class BankingSchemaIT extends AbstractIntegrationTest {
     @Override protected List<String> preserve() { return List.of("bank_accounts", "payout_routes"); }
 
     @Test
-    @DisplayName("el changelog crea las ocho tablas del dominio")
+    @DisplayName("el changelog crea las diez tablas del dominio")
     void elEsquemaAplica() {
         List<String> tables = jdbcTemplate.queryForList("""
                 SELECT table_name FROM information_schema.tables
@@ -41,6 +41,8 @@ class BankingSchemaIT extends AbstractIntegrationTest {
 
         assertThat(tables).containsExactly(
                 "bank_accounts", "bank_close_seals", "bank_matches", "bank_statement_lines",
+                // Funding: the capital paid in and the lines drawn, with every movement (009).
+                "funding_movements", "funding_sources",
                 // La proyección de hechos internos que la conciliación cruza (BK-38): conciliar es
                 // barrer un día entero, y una consulta por línea al vecino ataría un proceso por
                 // lotes a la disponibilidad de otro servicio.

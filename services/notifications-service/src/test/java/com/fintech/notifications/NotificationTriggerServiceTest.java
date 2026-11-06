@@ -63,6 +63,22 @@ class NotificationTriggerServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void onDispositionFailed_tellsTheBorrowerNothingIsOwed_D63() {
+        given(contactResolutionService.resolvePartyContact(obligorPartyId))
+                .willReturn(new ContactInfo("Ana", "5511112222", "ana@example.com"));
+        ArgumentCaptor<Map<String, String>> vars = ArgumentCaptor.forClass(Map.class);
+
+        triggerService.onDispositionFailed("DISPOSITION_FAILED:d-1", obligorPartyId, new BigDecimal("50000"), true);
+
+        then(dispatchService).should().dispatch(eq("DISPOSITION_FAILED:d-1"), eq(EventType.DISBURSEMENT_FAILED),
+                eq(obligorPartyId), any(), any(), vars.capture());
+        assertThat(vars.getValue()).containsEntry("firstName", "Ana")
+                .containsEntry("outcome", "Cancelamos tu crédito sin costo.");
+        assertThat(vars.getValue().get("amount")).as("el formato sigue al locale de la JVM").matches("\\$50[,.]000[.,]00");
+    }
+
+    @Test
     void onPaymentApplied_noProgress_skipsSilently_NT11() {
         given(progressRepository.findById(creditAccountId)).willReturn(Optional.empty());
 

@@ -19,6 +19,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.*;
+import static org.mockito.Mockito.never;
 
 @ExtendWith(MockitoExtension.class)
 class NotificationDispatchServiceTest {
@@ -93,6 +94,22 @@ class NotificationDispatchServiceTest {
         then(pushAdapter).shouldHaveNoInteractions();
         then(whatsAppAdapter).should().send(eq("5511112222"), any());
         then(recordRepository).should(times(1)).save(any());
+    }
+
+    @Test
+    void noContactInfo_theSameFactAgain_isAlreadyRecorded_andNotSavedTwice() {
+        // The same installment due notified twice to a client without contact data: the second finds the first's
+        // record. It used to collide with the unique (source, channel) on every retry and go to the DLT.
+        NotificationPolicy policy = NotificationPolicy.create(EventType.WELCOME_ACTIVATED, ValueTier.ALTO,
+                ChannelStrategy.SIMULTANEOUS, NotificationChannel.PUSH_NOTIFICATION, List.of(), 1);
+        given(policyRepository.findActiveByEventType(EventType.WELCOME_ACTIVATED)).willReturn(Optional.of(policy));
+        given(recordRepository.existsBySourceEventIdAndChannel("evt-dup", NotificationChannel.PUSH_NOTIFICATION))
+                .willReturn(true);
+
+        service.dispatch("evt-dup", EventType.WELCOME_ACTIVATED, recipientId, ContactInfo.empty(), null, Map.of());
+
+        then(recordRepository).should(never()).save(any());
+        then(eventPublisher).shouldHaveNoInteractions();
     }
 
     @Test

@@ -72,14 +72,17 @@ class CalendarAndPolicyIT {
     }
 
     @Test
-    @DisplayName("un festivo cargado gana sobre la regla general")
+    @DisplayName("un festivo cargado gana sobre la regla general; el calendario trae los inhábiles bancarios")
     void elFestivoGana() {
-        LocalDate independencia = LocalDate.of(2026, 9, 16);   // miércoles
-        assertThat(calendar.isBusinessDay("MX", independencia)).isTrue();
+        // The seed (019) brings the bank holidays: 16 September is a Wednesday and banks do not operate.
+        assertThat(calendar.isBusinessDay("MX", LocalDate.of(2026, 9, 16))).isFalse();
+        assertThat(calendar.isBusinessDay("MX", LocalDate.of(2026, 4, 2))).as("Jueves Santo").isFalse();
+        assertThat(calendar.nextBusinessDay("MX", LocalDate.of(2026, 4, 1))).isEqualTo(LocalDate.of(2026, 4, 6));
 
-        calendarDays.save(CalendarDay.of("MX", independencia, false, "Independencia"));
-
-        assertThat(calendar.isBusinessDay("MX", independencia)).isFalse();
+        LocalDate decretado = LocalDate.of(2026, 9, 15);   // martes
+        assertThat(calendar.isBusinessDay("MX", decretado)).isTrue();
+        calendarDays.save(CalendarDay.of("MX", decretado, false, "Decretado"));
+        assertThat(calendar.isBusinessDay("MX", decretado)).isFalse();
     }
 
     @Test

@@ -208,6 +208,34 @@ class CreditProductCatalogIT {
     }
 
     @Test
+    void distributorLine_livesByTheCalendarFortnight_microLoansAt95() {
+        // The product as the business defines it (migration 023): placements of $1,000 to $10,000 in steps of $500,
+        // 6 to 24 fortnights, 95 % a year charged per period, a cutoff on the 15th and on the last day of the month,
+        // payment five days later and no minimum.
+        CreditProductDefinitionResponse p = rest.getForEntity(
+                url("/api/v1/credit-products/code/DL-DIST-STD-V1"), CreditProductDefinitionResponse.class).getBody();
+        assertThat(p.defaultPaymentFrequency()).isEqualTo("SEMI_MONTHLY");
+        assertThat(p.allowedPaymentFrequencies()).containsExactly("SEMI_MONTHLY");
+        assertThat(p.nominalRateAnnual()).isEqualByComparingTo("0.95");
+        assertThat(p.minAmount()).isEqualByComparingTo("1000");
+        assertThat(p.maxAmount()).isEqualByComparingTo("10000");
+        assertThat(p.amountStep()).isEqualTo(500);
+        // From 12 to 24 fortnights: below 12 the distributor's 18 % of what is collected exceeds the plan's interest.
+        assertThat(p.minTerm()).isEqualTo(12);
+        assertThat(p.maxTerm()).isEqualTo(24);
+        assertThat(p.termStep()).isEqualTo(2);
+        // Her commission the market's way: 18 % of what her clients pay on time, 14 / 11 / 7 % late, netted.
+        assertThat(p.distributorCommission()).isNotNull();
+        assertThat(p.distributorCommission().rate()).isEqualByComparingTo("0.18");
+        assertThat(p.distributorCommission().basis()).isEqualTo("COLLECTED_TOTAL");
+        assertThat(p.distributorCommission().settlement()).isEqualTo("NETTED");
+        assertThat(p.distributorCommission().tiers()).extracting(t -> t.daysLate()).containsExactly(0, 1, 2, 3);
+        assertThat(p.billingCycle())
+                .isEqualTo(new BillingCycle("SEMI_MONTHLY", null, 0, 2, null, "NEXT", BillingCycle.PER_PERIOD,
+                        List.of(6, 21), List.of(18, 3)));
+    }
+
+    @Test
     void capabilities_payrollLoan_payrollDisposition() {
         ResponseEntity<CreditProductDefinitionResponse> resp = rest.getForEntity(
                 url("/api/v1/credit-products/code/PY-IND-STD-V1"), CreditProductDefinitionResponse.class);

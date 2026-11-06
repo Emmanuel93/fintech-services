@@ -51,6 +51,7 @@ class PaymentServiceTest {
     @Mock PaymentOrderRepository orderRepo;
     @Mock AccountBalanceSnapshotRepository snapshotRepo;
     @Mock PaymentEventPublisher eventPublisher;
+    @Mock CustomerBalanceService customerBalances;
 
     PaymentsProperties properties;
     PaymentService service;
@@ -58,7 +59,7 @@ class PaymentServiceTest {
     @BeforeEach
     void setUp() {
         properties = new PaymentsProperties();
-        service = new PaymentService(orderRepo, snapshotRepo, eventPublisher, properties);
+        service = new PaymentService(orderRepo, snapshotRepo, eventPublisher, properties, customerBalances);
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -116,9 +117,8 @@ class PaymentServiceTest {
 
         // payment-applied published for totalDebt
         verify(eventPublisher).publishPaymentApplied(any(), eq(accountId), eq(totalDebt), eq(3L));
-        // payment-returned published for excess (500)
-        verify(eventPublisher).publishPaymentReversed(contains("-excess"), eq(accountId),
-                eq(new BigDecimal("500.00")), eq("OVERPAYMENT_RETURN_TO_PAYER"));
+        // the excess is refunded to the payer, never published as a returned payment: it is not debt
+        verify(eventPublisher, never()).publishPaymentReversed(any(), any(), any(), any());
     }
 
     // ── PY-T03 ──────────────────────────────────────────────────────────────────
@@ -192,19 +192,18 @@ class PaymentServiceTest {
     // ── PY-T07: WRITTEN_OFF guard ─────────────────────────────────────────────
 
     @Test
-    void pyT07_submit_writtenOffAccount_throws() {
+    void pyT07_submit_writtenOffAccount_isAcceptedAsARecovery() {
+        // A written-off loan's owner may still pay: that money is a recovery, booked downstream. Rejecting it
+        // meant recoveries could never happen.
         UUID accountId = UUID.randomUUID();
         AccountBalanceSnapshot snapshot = buildSnapshot(accountId, BigDecimal.ZERO, 1L, "WRITTEN_OFF");
 
         when(orderRepo.existsByExternalRef(any())).thenReturn(false);
         when(snapshotRepo.findByCreditAccountId(accountId)).thenReturn(Optional.of(snapshot));
 
-        assertThatThrownBy(() -> service.submit(accountId, UUID.randomUUID(),
-                new BigDecimal("100"), PaymentMethod.SPEI, "REF-WO"))
-                .isInstanceOf(InvalidPaymentStateException.class)
-                .hasMessageContaining("WRITTEN_OFF");
+        service.submit(accountId, UUID.randomUUID(), new BigDecimal("100"), PaymentMethod.SPEI, "REF-WO");
 
-        verifyNoInteractions(eventPublisher);
+        verify(eventPublisher).publishPaymentApplied(any(), eq(accountId), eq(new BigDecimal("100")), eq(1L));
     }
 
     // ── PY-T08: CLOSED guard ──────────────────────────────────────────────────
@@ -252,11 +251,8 @@ class PaymentServiceTest {
         // payment-applied for 800 (applied)
         verify(eventPublisher).publishPaymentApplied(any(), eq(accountId),
                 eq(new BigDecimal("800.00")), eq(3L));
-        // payment-returned for 200 (excess)
-        ArgumentCaptor<BigDecimal> excessCaptor = ArgumentCaptor.forClass(BigDecimal.class);
-        verify(eventPublisher).publishPaymentReversed(any(), eq(accountId),
-                excessCaptor.capture(), eq("OVERPAYMENT_RETURN_TO_PAYER"));
-        assertThat(excessCaptor.getValue()).isEqualByComparingTo("200.00");
+        // the excess (200) stays on the order for treasury; no returned-payment event leaves
+        verify(eventPublisher, never()).publishPaymentReversed(any(), any(), any(), any());
     }
 
     // ── PY-T10: overpayment APPLY_NEXT_INSTALLMENT ───────────────────────────

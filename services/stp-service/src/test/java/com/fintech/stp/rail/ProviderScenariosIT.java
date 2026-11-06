@@ -37,6 +37,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ProviderScenariosIT extends AbstractIntegrationTest {
 
     @Override protected List<String> schemas() { return List.of("stp"); }
+    /** The bank calendar is a catalog seeded by Liquibase (015); truncating it would date orders on holidays. */
+    @Override protected List<String> preserve() { return List.of("business_calendar_days"); }
 
     @Autowired RegisterPaymentOrderUseCase registrar;
     @Autowired StpPaymentOrderRepository ordenes;
