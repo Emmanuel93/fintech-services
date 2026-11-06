@@ -73,6 +73,9 @@ management:
       show-details: when-authorized
 
 fintech:
+  # Test support (shiftable business clock, among others). Off unless TEST_SUPPORT_ENABLED=true; never in production.
+  test-support:
+    enabled: ${TEST_SUPPORT_ENABLED:false}
   lock:
     enabled: true
     provider: redisson
@@ -83,8 +86,38 @@ fintech:
     wait-time: 0s
   closing:
     calendar-code: MX
+    # Where the portfolio lives: the cutoff copies its per-account day snapshot from here.
+    portfolio-url: ${CREDIT_PORTFOLIO_SERVICE_URL:http://localhost:8087}
+    portfolio-timeout: PT30S
     # Identidad del pod en el arrendamiento. En Kubernetes lo inyecta la downward API.
     node-id: ${HOSTNAME:local}
     batch-size: 500
     lease: 5m
     workers: 4
+    # El corte repartido por cuenta. Ver ClosingProperties.Cutoff.
+    cutoff:
+      job-enabled: ${CLOSING_CUTOFF_JOB_ENABLED:true}
+      # El disparo normal es credit-portfolio.day-closed. Este cron es la reanudación: corta, por las
+      # mismas compuertas, lo que haya quedado esperando, y nunca un día que cartera no cerró.
+      trigger-on-day-closed: true
+      cron: ${CLOSING_CUTOFF_CRON:0 15/15 * * * *}
+      # Cuánto espera en línea a que closing consuma los saldos de cartera antes de dejar el día en espera.
+      gate-wait: PT10M
+      gate-poll: PT2S
+      movement-retention-days: 62
+      # Techo de paralelismo entre todos los pods: Kafka da cada partición a un solo consumidor.
+      partitions: ${CLOSING_CUTOFF_PARTITIONS:12}
+      # Hilos consumidores por pod.
+      concurrency: ${CLOSING_CUTOFF_CONCURRENCY:4}
+      consumer-group: closing-cutoff-workers
+      dispatch-page: 1000
+      redispatch-after: 2m
+      max-attempts: 3
+      monitor-interval: ${CLOSING_CUTOFF_MONITOR_INTERVAL:PT15S}
+      lookback-days: 31
+      distributor-product-types: DISTRIBUTOR_LINE
+      # Sólo las pruebas que corren el reloj cortan días que todavía no llegan.
+      allow-future-dates: ${TEST_SUPPORT_ENABLED:false}
+  scheduling:
+    lock:
+      table: closing.shedlock

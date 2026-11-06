@@ -7,6 +7,7 @@ import org.hibernate.type.SqlTypes;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Entity
 @Table(name = "score_evaluations", schema = "scoring")
@@ -63,7 +64,7 @@ public class ScoreEvaluation {
         e.totalScore   = totalScore;
         e.riskLevel    = riskLevel;
         e.decision     = decision;
-        e.evaluatedAt  = Instant.now();
+        e.evaluatedAt  = BusinessClock.current().now();
         e.ruleDetails  = List.copyOf(ruleDetails);
         return e;
     }

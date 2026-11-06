@@ -61,6 +61,9 @@ fintech:
     lock:
       table: charges.shedlock
   charges:
+    # Where the portfolio lives: the day close pulls its per-account snapshot from here before accruing.
+    portfolio-url: ${CREDIT_PORTFOLIO_SERVICE_URL:http://localhost:8087}
+    portfolio-timeout: PT30S
     vat-rate: 0.16
     grace-period-days: 3
     moratorium-rate-multiplier: 1.5
@@ -68,6 +71,41 @@ fintech:
     prepayment-fee-rate: 0
     prepayment-free-months: 0
     admin-fee-enabled: false
+  # El cierre del día D empieza a las 00:05 de D+1: ordinario y moratorio de D, y el aviso
+  # charges.day-accrued (con las cifras de control) con el que cartera calcula la mora y closing corta.
+  # La hora sólo despierta al job; lo que decide son las compuertas (ver DayCloseAccrualJob).
+  day-close:
+    # 00:05 y cada 15 minutos mientras quede un día pendiente o sin confirmar.
+    cron: ${CHARGES_DAY_CLOSE_CRON:0 5/15 * * * *}
+    # Nunca antes de las 00:05 de D+1, aunque lo dispare una reanudación.
+    not-before: PT5M
+    # Cuánto espera en línea a que abra una compuerta antes de dejar el día para la siguiente vuelta.
+    gate-wait: PT10M
+    gate-poll: PT2S
+    stale-after: PT3H
+    # Si cartera no confirma un día en este tiempo, se vuelve a avisar (y a la segunda, se reenvían los cargos).
+    reannounce-after: PT30M
+    # Sólo con el soporte de pruebas: deja cerrar días que no han llegado para correr el reloj.
+    allow-future-dates: ${TEST_SUPPORT_ENABLED:false}
+    # El día se reparte por cuenta: una unidad por cuenta al tópico charges.accrual-due.
+    units:
+      # Techo de paralelismo entre todos los pods: Kafka da cada partición a un solo consumidor.
+      partitions: ${CHARGES_ACCRUAL_PARTITIONS:12}
+      # Hilos consumidores por pod.
+      concurrency: ${CHARGES_ACCRUAL_CONCURRENCY:4}
+      consumer-group: charges-accrual-workers
+      # Cuánto espera el job en línea a que el día cierre; lo que quede lo termina el monitor.
+      unit-wait: PT10M
+      monitor-interval: ${CHARGES_ACCRUAL_MONITOR_INTERVAL:PT15S}
+      lease: PT2M
+      # Intentos antes de la cuarentena, y la pausa entre uno y otro.
+      max-attempts: 3
+      retry-backoff: PT1M
+      redispatch-after: PT2M
+      dispatch-page: 1000
+      # Más cuentas en cuarentena que esto (el mayor de los dos) es una falla general y el día no cierra.
+      max-quarantined-ratio: 0.01
+      min-quarantined-allowed: 10
   test-support:
     # Endpoints /internal/test-support/* — solo para pruebas E2E, deshabilitados por default.
     enabled: ${TEST_SUPPORT_ENABLED:false}

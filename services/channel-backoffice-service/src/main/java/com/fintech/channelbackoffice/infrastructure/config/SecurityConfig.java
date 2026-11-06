@@ -175,7 +175,16 @@ public class SecurityConfig {
                         .requestMatchers("/compliance/**").denyAll()
 
                         // ── Módulos de fases 3/4 — declarados antes de existir ────────────
-                        .requestMatchers("/collections/**").access(requires("portfolio.view"))
+                        // Cobranza: ver es de quien ve cartera; gestionar (contacto, promesa, proponer
+                        // convenio, pedir quebranto) es del gestor; autorizar un convenio o un quebranto
+                        // es del comité. Antes todo colgaba de portfolio.view: un ejecutivo podía
+                        // autorizar un quebranto, y escribir en el cuerpo el nombre de quien quisiera.
+                        .requestMatchers(HttpMethod.GET, "/collections/**").access(requires("portfolio.view"))
+                        .requestMatchers(HttpMethod.PUT, "/collections/agreements/*/authorize")
+                                .access(requires("collections.authorize"))
+                        .requestMatchers(HttpMethod.POST, "/collections/cases/*/write-offs")
+                                .access(requires("collections.authorize"))
+                        .requestMatchers("/collections/**").access(requires("collections.manage"))
                         .requestMatchers("/commissions/**").access(requires("dashboard.commercial"))
                         // Parámetros y políticas mueven dinero y decisiones de crédito: se aprueban
                         // a cuatro ojos (fase 4). Hasta entonces, solo ADMIN escribe.
@@ -207,6 +216,7 @@ public class SecurityConfig {
                         // Sólo lectura: cuentas propias, rutas y cada pago con su orden y su traza.
                         // Lo que no sea GET se niega aquí mismo — dar de alta una CLABE ordenante o
                         // apuntarle una ruta es ADMIN en banking y no tiene puerta en la consola.
+                        .requestMatchers(HttpMethod.POST, "/treasury/funding/**").access(requires("treasury.funding"))
                         .requestMatchers(HttpMethod.GET, "/treasury/**").access(requires("treasury.view"))
                         .requestMatchers("/treasury/**").denyAll()
 

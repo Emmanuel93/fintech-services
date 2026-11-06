@@ -12,19 +12,28 @@ import java.util.List;
 import java.util.UUID;
 
 interface SpringDataInstallmentRepository extends JpaRepository<Installment, UUID> {
-    List<Installment> findByScheduleIdOrderByInstallmentNumber(UUID scheduleId);
+    /** The live schedule: a restructure's REPLACED installments owe nothing and nobody reads them as plan. */
+    @Query("SELECT i FROM Installment i WHERE i.scheduleId = :scheduleId "
+         + "AND i.status NOT IN (com.fintech.creditportfolio.domain.InstallmentStatus.REPLACED, com.fintech.creditportfolio.domain.InstallmentStatus.CANCELLED) ORDER BY i.installmentNumber")
+    List<Installment> findByScheduleIdOrderByInstallmentNumber(@Param("scheduleId") UUID scheduleId);
 
-    List<Installment> findByScheduleIdIn(java.util.Collection<UUID> scheduleIds);
+    @Query("SELECT i FROM Installment i WHERE i.scheduleId IN :scheduleIds "
+         + "AND i.status NOT IN (com.fintech.creditportfolio.domain.InstallmentStatus.REPLACED, com.fintech.creditportfolio.domain.InstallmentStatus.CANCELLED)")
+    List<Installment> findByScheduleIdIn(@Param("scheduleIds") java.util.Collection<UUID> scheduleIds);
 
-    @Query("SELECT i FROM Installment i WHERE i.scheduleId = :scheduleId AND i.status = :status AND i.dueDate < :cutoff")
+    /** The highest number ever used on a schedule, replaced installments included: a new plan continues after it. */
+    @Query("SELECT coalesce(max(i.installmentNumber), 0) FROM Installment i WHERE i.scheduleId = :scheduleId")
+    int maxInstallmentNumber(@Param("scheduleId") UUID scheduleId);
+
+    @Query("SELECT i FROM Installment i WHERE i.scheduleId = :scheduleId AND i.status IN :statuses AND i.dueDate < :cutoff")
     List<Installment> findOverdueByScheduleId(@Param("scheduleId") UUID scheduleId,
-                                               @Param("status") InstallmentStatus status,
+                                               @Param("statuses") java.util.Collection<InstallmentStatus> statuses,
                                                @Param("cutoff") LocalDate cutoff);
 
     @Query("SELECT i FROM Installment i WHERE i.scheduleId IN :scheduleIds "
-         + "AND i.status = :status AND i.dueDate < :cutoff")
+         + "AND i.status IN :statuses AND i.dueDate < :cutoff")
     List<Installment> findOverdueByScheduleIds(@Param("scheduleIds") java.util.Collection<UUID> scheduleIds,
-                                                @Param("status") InstallmentStatus status,
+                                                @Param("statuses") java.util.Collection<InstallmentStatus> statuses,
                                                 @Param("cutoff") LocalDate cutoff);
 
     @Query("SELECT i FROM Installment i WHERE i.dueDate = :today AND i.status = :status")
@@ -49,20 +58,21 @@ interface SpringDataInstallmentRepository extends JpaRepository<Installment, UUI
                  + "       MIN(installment_number) FILTER (WHERE status <> 'PAID') AS next_number, "
                  + "       MIN(due_date) FILTER (WHERE status <> 'PAID') AS next_due, "
                  + "       COALESCE(SUM(principal_amount) FILTER (WHERE status = 'PAID'), 0) AS principal_paid, "
-                 + "       COALESCE(SUM(total_amount) FILTER (WHERE status <> 'PAID' AND due_date < CURRENT_DATE), 0) AS overdue_amount, "
-                 + "       COUNT(*) FILTER (WHERE status <> 'PAID' AND due_date < CURRENT_DATE) AS overdue_count, "
+                 + "       COALESCE(SUM(total_amount) FILTER (WHERE status <> 'PAID' AND due_date < :today), 0) AS overdue_amount, "
+                 + "       COUNT(*) FILTER (WHERE status <> 'PAID' AND due_date < :today) AS overdue_count, "
                  // El importe de la mensualidad que toca. Faltaba —el lote lo devolvía nulo
                  // mientras la ruta de una sola cuenta sí lo calculaba—, y por eso "a cobrar"
                  // salía en cero en cualquier pantalla que listara cuentas: la cifra existía en
                  // la ficha y desaparecía en el listado. Se toma de la primera no pagada por
                  // número, la misma regla que aplica `PaymentPlanSummary`: se cobra lo más viejo.
                  + "       (SELECT x.total_amount FROM credit_portfolio.installments x "
-                 + "         WHERE x.schedule_id = i.schedule_id AND x.status <> 'PAID' "
+                 + "         WHERE x.schedule_id = i.schedule_id AND x.status NOT IN ('PAID', 'REPLACED', 'CANCELLED') "
                  + "         ORDER BY x.installment_number LIMIT 1) AS next_amount "
                  + "  FROM credit_portfolio.installments i "
-                 + " WHERE schedule_id IN (:scheduleIds) "
+                 + " WHERE schedule_id IN (:scheduleIds) AND status NOT IN ('REPLACED', 'CANCELLED') "
                  + " GROUP BY schedule_id", nativeQuery = true)
-    List<Object[]> planSummariesByScheduleIds(@Param("scheduleIds") java.util.Collection<UUID> scheduleIds);
+    List<Object[]> planSummariesByScheduleIds(@Param("scheduleIds") java.util.Collection<UUID> scheduleIds,
+                                              @Param("today") LocalDate today);
 
     /**
      * Cobro por periodo, agregado en la base (una fila para todo el tablero):
@@ -75,7 +85,7 @@ interface SpringDataInstallmentRepository extends JpaRepository<Installment, UUI
                  + "  COALESCE(SUM(total_amount) FILTER (WHERE status <> 'PAID' AND due_date BETWEEN :nextStart AND :nextEnd), 0) AS a_cobrar_proximo, "
                  + "  COALESCE(SUM(total_amount) FILTER (WHERE due_date BETWEEN :curStart AND :curEnd), 0) AS esperado_actual, "
                  + "  COALESCE(SUM(total_amount) FILTER (WHERE status = 'PAID' AND due_date BETWEEN :curStart AND :curEnd), 0) AS cobrado_actual "
-                 + "  FROM credit_portfolio.installments", nativeQuery = true)
+                 + "  FROM credit_portfolio.installments WHERE status NOT IN ('REPLACED', 'CANCELLED')", nativeQuery = true)
     Object[] periodCollectionRow(@Param("curStart") LocalDate curStart, @Param("curEnd") LocalDate curEnd,
                                  @Param("nextStart") LocalDate nextStart, @Param("nextEnd") LocalDate nextEnd);
 

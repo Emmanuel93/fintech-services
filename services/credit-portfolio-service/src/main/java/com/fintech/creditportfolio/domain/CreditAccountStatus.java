@@ -9,10 +9,12 @@ public enum CreditAccountStatus {
     RESTRUCTURED,
     SETTLED,
     WRITTEN_OFF,
-    CLOSED;
+    CLOSED,
+    /** Its only disbursement could not happen: it never lent anything, and every movement was compensated (D63). */
+    CANCELLED;
 
     private static final Set<CreditAccountStatus> TERMINAL =
-            Set.of(SETTLED, WRITTEN_OFF, CLOSED);
+            Set.of(SETTLED, WRITTEN_OFF, CLOSED, CANCELLED);
 
     public boolean isTerminal() { return TERMINAL.contains(this); }
 }

@@ -81,7 +81,7 @@ public class DunningService {
         List<CollectionCase> candidatos =
                 caseRepository.findByStatusInAndDaysDelinquentGreaterThanEqual(ACTIVOS, 1);
 
-        Set<UUID> silenciados = new HashSet<>(holdRepository.findCaseIdsWithActiveHold(Instant.now()));
+        Set<UUID> silenciados = new HashSet<>(holdRepository.findCaseIdsWithActiveHold(BusinessClock.current().now()));
 
         int enviados = 0;
         for (CollectionCase c : candidatos) {

@@ -43,7 +43,7 @@ class JpaCloseSealAdapter implements CloseSealRepository {
                        0::numeric,
                        COALESCE(SUM(total_debt), 0)
                   FROM closing.account_close_profiles
-                 WHERE status NOT IN ('SETTLED','WRITTEN_OFF','CLOSED')
+                 WHERE status NOT IN ('SETTLED','WRITTEN_OFF','CLOSED','CANCELLED')
                 """).getSingleResult();
 
         return new Totales(((Number) row[0]).intValue(),

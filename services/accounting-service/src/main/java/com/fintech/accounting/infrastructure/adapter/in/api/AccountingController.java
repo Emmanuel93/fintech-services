@@ -1,17 +1,23 @@
 package com.fintech.accounting.infrastructure.adapter.in.api;
 
+import com.fintech.accounting.application.CloseReport;
 import com.fintech.accounting.application.LedgerViews.*;
 import com.fintech.accounting.application.TrialBalanceRow;
 import com.fintech.accounting.application.port.in.GetLedgerUseCase;
 import com.fintech.accounting.application.service.BillingService;
 import com.fintech.accounting.application.service.LedgerQueryService;
+import com.fintech.accounting.application.service.PeriodCloseService;
+import com.fintech.accounting.application.service.PeriodNotReconciledException;
+import com.fintech.accounting.application.service.ProductAttributionService;
 import com.fintech.accounting.infrastructure.adapter.in.api.dto.JournalEntryResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,9 +31,14 @@ class AccountingController {
     private final GetLedgerUseCase getLedgerUseCase;
     private final LedgerQueryService queryService;
     private final BillingService billingService;
+    private final PeriodCloseService closeService;
+    private final ProductAttributionService productAttribution;
 
     AccountingController(GetLedgerUseCase getLedgerUseCase, LedgerQueryService queryService,
-                         BillingService billingService) {
+                         BillingService billingService, PeriodCloseService closeService,
+                         ProductAttributionService productAttribution) {
+        this.closeService = closeService;
+        this.productAttribution = productAttribution;
         this.getLedgerUseCase = getLedgerUseCase;
         this.queryService     = queryService;
         this.billingService   = billingService;
@@ -100,12 +111,38 @@ class AccountingController {
 
     // ── Balanza y auxiliares ─────────────────────────────────────────────────
 
-    @Operation(summary = "Balanza de comprobación del período, acotable por sucursal")
+    @Operation(summary = "Balanza de comprobación del período, acotable por sucursal y por producto "
+            + "(INSTITUCION: lo que no es de ningún producto)")
     @GetMapping("/trial-balance")
     ResponseEntity<List<TrialBalanceRowView>> trialBalanceScoped(
             @RequestParam String period,
+            @RequestParam(required = false) List<String> unitCodes,
+            @RequestParam(required = false) List<String> productTypes) {
+        return ResponseEntity.ok(queryService.trialBalance(period, unitCodes, productTypes));
+    }
+
+    @Operation(summary = "Movimiento por producto del período: los productos de la balanza, con lo que movió cada uno")
+    @GetMapping("/products")
+    ResponseEntity<List<ProductMovementView>> products(
+            @RequestParam String period,
             @RequestParam(required = false) List<String> unitCodes) {
-        return ResponseEntity.ok(queryService.trialBalance(period, unitCodes));
+        return ResponseEntity.ok(queryService.productMovements(period, unitCodes));
+    }
+
+    @Operation(summary = "Esquema contable de un producto: sus conceptos y las cuentas que mueve cada uno, como los "
+            + "asentó el mayor (INSTITUCION: lo que no es de ningún producto)")
+    @GetMapping("/products/{productType}/scheme")
+    ResponseEntity<ProductSchemeView> productScheme(
+            @PathVariable String productType,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to) {
+        return ResponseEntity.ok(queryService.productScheme(productType, from, to));
+    }
+
+    @Operation(summary = "Atribuye a su producto lo asentado antes de conocerlo, en meses abiertos (barrido)")
+    @PostMapping("/products/sweep")
+    ResponseEntity<Map<String, Object>> sweepProducts() {
+        return ResponseEntity.ok(Map.of("vouchersUpdated", productAttribution.sweep()));
     }
 
     @Operation(summary = "Ficha contable de un préstamo: saldos acumulados y sus pólizas")
@@ -144,17 +181,44 @@ class AccountingController {
     }
 
     /**
-     * Cierra el período.
+     * Cierra el período si concilia: cartera completa al último día, reserva medida a esa fecha y el mayor igual a
+     * cartera, reservas y calendarios de comisiones, crédito por crédito. Si algo no concilia responde 409 con el
+     * reporte y el mes sigue abierto.
      *
      * <p>No rechaza lo que llegue después: un hecho de un mes cerrado se asienta en el primero
      * abierto marcado como extemporáneo. Cerrar es decir «estos números ya se publicaron», no
      * levantar un muro que haga desaparecer hechos.
      */
-    @Operation(summary = "Cierra un período contable")
+    @Operation(summary = "Cierra un período contable si concilia")
     @PostMapping("/periods/{period}/close")
     ResponseEntity<Map<String, Object>> close(@PathVariable String period) {
-        var p = queryService.closePeriod(period);
-        return ResponseEntity.ok(Map.of("period", p.getPeriod(), "status", p.getStatus().name()));
+        CloseReport report = closeService.close(period);
+        return ResponseEntity.ok(body(report, "CLOSED"));
+    }
+
+    @Operation(summary = "Conciliación del cierre: la que corrió el cierre o, con el mes abierto, una corrida en seco")
+    @GetMapping("/periods/{period}/reconciliation")
+    ResponseEntity<Map<String, Object>> reconciliation(@PathVariable String period) {
+        CloseReport report = closeService.reconciliation(period);
+        return ResponseEntity.ok(body(report, report.closedAt() != null ? "CLOSED" : "OPEN"));
+    }
+
+    @ExceptionHandler(PeriodNotReconciledException.class)
+    ResponseEntity<Map<String, Object>> notReconciled(PeriodNotReconciledException e) {
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body(e.report(), "OPEN"));
+    }
+
+    private static Map<String, Object> body(CloseReport r, String status) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("period", r.period());
+        m.put("status", status);
+        m.put("outcome", r.outcome());
+        m.put("message", r.summary());
+        m.put("runAt", r.runAt());
+        m.put("closedAt", r.closedAt());
+        m.put("preview", r.preview());
+        m.put("checks", r.checks());
+        return m;
     }
 
     @Operation(summary = "Reabre un período contable")

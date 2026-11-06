@@ -48,6 +48,11 @@ public class JpaDisbursementOrderAdapter implements DisbursementOrderRepository 
     }
 
     @Override
+    public long countDueForDispatch() {
+        return repository.countDueForDispatch(clock.instant());
+    }
+
+    @Override
     public List<DisbursementOrder> findByCompany(UUID companyId, int page, int size) {
         return repository.findByCompanyIdOrderByCreatedAtDesc(companyId, PageRequest.of(page, size));
     }

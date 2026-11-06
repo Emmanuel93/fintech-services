@@ -1,5 +1,6 @@
 package com.fintech.collections.infrastructure.adapter.out.messaging;
 
+import com.fintech.collections.application.PaymentOrigin;
 import com.fintech.collections.application.port.out.CollectionsEventPublisher;
 import com.fintech.collections.domain.*;
 import org.slf4j.Logger;
@@ -11,6 +12,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Component
 public class KafkaCollectionsEventPublisher implements CollectionsEventPublisher {
@@ -41,21 +43,21 @@ public class KafkaCollectionsEventPublisher implements CollectionsEventPublisher
     @Override
     public void publishPreDueReminderTriggered(UUID creditAccountId, UUID obligorPartyId,
                                                 LocalDate dueDate, BigDecimal installmentAmount) {
-        var payload = new PreDueReminderTriggeredPayload(creditAccountId, obligorPartyId, dueDate, installmentAmount, Instant.now());
+        var payload = new PreDueReminderTriggeredPayload(creditAccountId, obligorPartyId, dueDate, installmentAmount, BusinessClock.current().now());
         send(TOPIC_PRE_DUE_REMINDER, creditAccountId.toString(), payload, "pre-due-reminder-triggered");
     }
 
     @Override
     public void publishCollectionCaseCreated(CollectionCase c) {
         var payload = new CollectionCaseEventPayload(c.getCaseId(), c.getCreditAccountId(), c.getObligorPartyId(),
-                c.getCurrentBucket().name(), null, c.getDaysDelinquent(), c.getTotalDebt(), c.getStrategy(), Instant.now());
+                c.getCurrentBucket().name(), null, c.getDaysDelinquent(), c.getTotalDebt(), c.getStrategy(), BusinessClock.current().now());
         send(TOPIC_CASE_CREATED, c.getCreditAccountId().toString(), payload, "case-created");
     }
 
     @Override
     public void publishCollectionCaseEscalated(CollectionCase c, String previousBucket) {
         var payload = new CollectionCaseEventPayload(c.getCaseId(), c.getCreditAccountId(), c.getObligorPartyId(),
-                c.getCurrentBucket().name(), previousBucket, c.getDaysDelinquent(), c.getTotalDebt(), c.getStrategy(), Instant.now());
+                c.getCurrentBucket().name(), previousBucket, c.getDaysDelinquent(), c.getTotalDebt(), c.getStrategy(), BusinessClock.current().now());
         send(TOPIC_CASE_ESCALATED, c.getCreditAccountId().toString(), payload, "case-escalated");
     }
 
@@ -70,28 +72,28 @@ public class KafkaCollectionsEventPublisher implements CollectionsEventPublisher
     public void publishDunningRequested(CollectionCase c, DunningStep step) {
         var payload = new DunningRequestedPayload(c.getCaseId(), c.getCreditAccountId(), c.getObligorPartyId(),
                 step.name(), step.day(), c.getDaysDelinquent(), c.getCurrentBucket().name(),
-                c.getTotalDebt(), Instant.now());
+                c.getTotalDebt(), BusinessClock.current().now());
         send(TOPIC_DUNNING_REQUESTED, c.getCaseId().toString(), payload, "dunning-requested");
     }
 
     @Override
     public void publishPaymentThanks(CollectionCase c, BigDecimal amount) {
         var payload = new PaymentThanksPayload(c.getCaseId(), c.getCreditAccountId(), c.getObligorPartyId(),
-                amount, c.getDaysDelinquent(), Instant.now());
+                amount, c.getDaysDelinquent(), BusinessClock.current().now());
         send(TOPIC_PAYMENT_THANKS, c.getCaseId().toString(), payload, "payment-thanks");
     }
 
     @Override
     public void publishPaymentPromiseMade(PaymentPromise promise) {
         var payload = new PaymentPromiseEventPayload(promise.getPromiseId(), promise.getCaseId(),
-                promise.getAmount(), promise.getPromisedDate(), promise.getRecordedBy(), Instant.now());
+                promise.getAmount(), promise.getPromisedDate(), promise.getRecordedBy(), BusinessClock.current().now());
         send(TOPIC_PROMISE_MADE, promise.getCaseId().toString(), payload, "payment-promise-made");
     }
 
     @Override
     public void publishPaymentPromiseBroken(PaymentPromise promise) {
         var payload = new PaymentPromiseEventPayload(promise.getPromiseId(), promise.getCaseId(),
-                promise.getAmount(), promise.getPromisedDate(), promise.getRecordedBy(), Instant.now());
+                promise.getAmount(), promise.getPromisedDate(), promise.getRecordedBy(), BusinessClock.current().now());
         send(TOPIC_PROMISE_BROKEN, promise.getCaseId().toString(), payload, "payment-promise-broken");
     }
 
@@ -111,14 +113,14 @@ public class KafkaCollectionsEventPublisher implements CollectionsEventPublisher
         return new CollectionAgreementEventPayload(agreement.getAgreementId(), agreement.getCaseId(),
                 agreement.getCreditAccountId(), agreement.getObligorPartyId(), agreement.getType().name(),
                 agreement.getForgivenAmount(), agreement.getNewTerms(),
-                agreement.getAuthorizedBy(), agreement.getAuthorizationRef(), Instant.now());
+                agreement.getAuthorizedBy(), agreement.getAuthorizationRef(), BusinessClock.current().now());
     }
 
     @Override
     public void publishWriteOffRequested(UUID caseId, UUID creditAccountId, BigDecimal totalDebt,
                                           int daysDelinquent, String reason, String requestedBy) {
         var payload = new WriteOffRequestedPayload(caseId, creditAccountId, totalDebt, daysDelinquent,
-                reason, requestedBy, Instant.now());
+                reason, requestedBy, BusinessClock.current().now());
         send(TOPIC_WRITE_OFF_REQUESTED, creditAccountId.toString(), payload, "write-off-requested");
     }
 
@@ -128,7 +130,7 @@ public class KafkaCollectionsEventPublisher implements CollectionsEventPublisher
                 record.getWriteOffId(), record.getCaseId(), record.getObligorPartyId(),
                 record.getPrincipalWrittenOff(), record.getInterestWrittenOff(), record.getPenaltyWrittenOff(),
                 record.getTotalWrittenOff(), record.getAuthorizedBy(), record.getAuthorizationRef(),
-                record.getReason().name(), Instant.now());
+                record.getReason().name(), BusinessClock.current().now());
         send(TOPIC_WRITE_OFF_EXECUTED, record.getCreditAccountId().toString(), payload, "write-off-executed");
     }
 
@@ -136,14 +138,15 @@ public class KafkaCollectionsEventPublisher implements CollectionsEventPublisher
     public void publishBureauReportSubmitted(BureauReport report) {
         var payload = new BureauReportSubmittedPayload(report.getReportId(), report.getCreditAccountId(),
                 report.getObligorPartyId(), report.getEventType().name(), report.getAmountReported(),
-                report.getBureauReference(), Instant.now());
+                report.getBureauReference(), BusinessClock.current().now());
         send(TOPIC_BUREAU_REPORT_SUBMITTED, report.getCreditAccountId().toString(), payload, "bureau-report-submitted");
     }
 
     @Override
     public void publishRecoveryPaymentApplied(UUID writeOffId, UUID creditAccountId,
-                                               BigDecimal recoveredAmount, String paymentMethod) {
-        var payload = new RecoveryPaymentAppliedPayload(writeOffId, creditAccountId, recoveredAmount, paymentMethod, Instant.now());
+                                               BigDecimal recoveredAmount, PaymentOrigin origin, UUID paymentId) {
+        var payload = new RecoveryPaymentAppliedPayload(writeOffId, creditAccountId, recoveredAmount,
+                origin.fundingSource(), BusinessClock.current().now(), paymentId, origin.inboundCreditId());
         send(TOPIC_RECOVERY_PAYMENT, creditAccountId.toString(), payload, "recovery-payment-applied");
     }
 

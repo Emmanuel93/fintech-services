@@ -3,6 +3,7 @@ package com.fintech.creditportfolio.infrastructure.adapter.out.persistence;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.domain.Installment;
 import com.fintech.creditportfolio.domain.InstallmentStatus;
+import com.fintech.shared.time.BusinessClock;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
@@ -30,14 +31,17 @@ class JpaInstallmentAdapter implements InstallmentRepository {
     @Override public List<Installment> findByScheduleId(UUID scheduleId) {
         return jpa.findByScheduleIdOrderByInstallmentNumber(scheduleId);
     }
+    /** Still owed: a partially paid installment is as overdue as an unpaid one (same rule as the day snapshot). */
+    private static final List<InstallmentStatus> OWED = List.of(InstallmentStatus.PENDING, InstallmentStatus.PARTIAL);
+
     @Override public List<Installment> findPendingOverdueByScheduleId(UUID scheduleId, LocalDate cutoff) {
-        return jpa.findOverdueByScheduleId(scheduleId, InstallmentStatus.PENDING, cutoff);
+        return jpa.findOverdueByScheduleId(scheduleId, OWED, cutoff);
     }
 
     @Override public List<Installment> findPendingOverdueByScheduleIds(
             java.util.Collection<UUID> scheduleIds, LocalDate cutoff) {
         if (scheduleIds == null || scheduleIds.isEmpty()) return List.of();
-        return jpa.findOverdueByScheduleIds(scheduleIds, InstallmentStatus.PENDING, cutoff);
+        return jpa.findOverdueByScheduleIds(scheduleIds, OWED, cutoff);
     }
     @Override public List<Installment> findDueToday(LocalDate today) {
         return jpa.findByDueDateAndStatus(today, InstallmentStatus.PENDING);
@@ -53,7 +57,8 @@ class JpaInstallmentAdapter implements InstallmentRepository {
             planSummaries(java.util.Collection<UUID> scheduleIds) {
         if (scheduleIds == null || scheduleIds.isEmpty()) return java.util.Map.of();
         var out = new java.util.HashMap<UUID, com.fintech.creditportfolio.domain.PaymentPlanSummary>();
-        for (Object[] r : jpa.planSummariesByScheduleIds(scheduleIds)) {
+        // Overdue as of the business day, not the database's: with the clock shifted the two differ.
+        for (Object[] r : jpa.planSummariesByScheduleIds(scheduleIds, BusinessClock.current().today())) {
             out.put((UUID) r[0], new com.fintech.creditportfolio.domain.PaymentPlanSummary(
                     ((Number) r[1]).intValue(),
                     ((Number) r[2]).intValue(),
@@ -65,6 +70,10 @@ class JpaInstallmentAdapter implements InstallmentRepository {
                     ((Number) r[7]).intValue()));
         }
         return out;
+    }
+
+    @Override public int maxInstallmentNumber(UUID scheduleId) {
+        return jpa.maxInstallmentNumber(scheduleId);
     }
 
     @Override public void shiftDueDate(UUID scheduleId, int installmentNumber, LocalDate newDueDate) {

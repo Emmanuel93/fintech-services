@@ -13,9 +13,8 @@ import java.time.LocalDate;
 /**
  * Abre la ventana del cálculo de mora.
  *
- * <p>Sólo corre con el devengo del día ya sellado; la barrera la impone el planificador. Hoy esa
- * garantía es que la mora arranca 59 minutos después del devengo y se espera que alcance — si no
- * alcanza, se calcula sobre datos viejos y nada lo detecta.
+ * <p>Sólo corre con el devengo del día ya sellado; la barrera la impone el planificador. Hoy el
+ * devengo y la mora corren en cargos y cartera, en cadena desde las 00:05, y no pasan por aquí.
  */
 @Component
 public class DelinquencyPhaseProcessor implements CloseUnitProcessor {

@@ -27,7 +27,7 @@ public class BalanceEventListener {
     public void onChargeApplied(ChargeAppliedPayload p) {
         log.info("charge-applied accountId={} type={} amount={}", p.creditAccountId(), p.chargeType(), p.totalAmount());
         reconciliation.onChargeApplied(p.eventId(), p.creditAccountId(), p.chargeType(), p.totalAmount(),
-                p.effectiveDate());
+                p.effectiveDate(), p.dayCloseDate());
     }
 
     @KafkaListener(topics = "charges.charge-reversed",
@@ -44,7 +44,7 @@ public class BalanceEventListener {
             containerFactory = "paymentAppliedListenerContainerFactory")
     public void onPaymentApplied(PaymentAppliedPayload p) {
         log.info("payment-applied accountId={} amount={}", p.creditAccountId(), p.amount());
-        reconciliation.onPaymentApplied(p.eventId(), p.creditAccountId(), p.amount());
+        reconciliation.onPaymentApplied(p.eventId(), p.creditAccountId(), p.amount(), p.facts());
     }
 
     @KafkaListener(topics = "payments.payment-returned",

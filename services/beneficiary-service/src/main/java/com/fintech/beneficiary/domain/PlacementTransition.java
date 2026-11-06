@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Bitácora append-only de cada cambio de estado de una colocación.
@@ -64,7 +65,7 @@ public class PlacementTransition {
         t.actor        = actor;
         t.actorPartyId = actorPartyId;
         t.reason       = reason;
-        t.occurredAt   = Instant.now();
+        t.occurredAt   = BusinessClock.current().now();
         return t;
     }
 

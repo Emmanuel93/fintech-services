@@ -3,6 +3,7 @@ package com.fintech.stp.application.port.out;
 import com.fintech.stp.domain.OutboxMessage;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 public interface OutboxMessageRepository {
@@ -15,10 +16,13 @@ public interface OutboxMessageRepository {
      */
     List<OutboxMessage> lockNextBatch(int batchSize);
 
+    /** How many messages {@link #lockNextBatch} would take now, counted without locking: the relay's due work. */
+    long countDue();
+
     OutboxMessage save(OutboxMessage message);
 
     /** Necesario para registrar el fallo en una transacción nueva, tras el rollback de la anterior. */
-    java.util.Optional<OutboxMessage> findById(UUID outboxId);
+    Optional<OutboxMessage> findById(UUID outboxId);
 
     List<OutboxMessage> findByAggregateId(UUID aggregateId);
 }

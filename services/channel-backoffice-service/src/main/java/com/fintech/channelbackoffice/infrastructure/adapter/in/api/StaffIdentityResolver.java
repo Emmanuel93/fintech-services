@@ -45,8 +45,21 @@ public class StaffIdentityResolver {
         this.serviceTokens = serviceTokens;
     }
 
-    /** El "quién" completo de un colaborador, congelado al momento del acceso. */
-    public record StaffIdentity(String email, String fullName, String curp) {}
+    /**
+     * The full "who" of a staff member, frozen at the moment of access, and whose employee they are: a
+     * distributor's employee ({@code COLABORADOR_EMPRESARIAL}) does not see the borrower's full personal data.
+     */
+    public record StaffIdentity(String email, String fullName, String curp, String employeeType) {
+
+        public StaffIdentity(String email, String fullName, String curp) {
+            this(email, fullName, curp, null);
+        }
+
+        /** A distributor's employee, not the lender's. */
+        public boolean externalCollaborator() {
+            return "COLABORADOR_EMPRESARIAL".equals(employeeType);
+        }
+    }
 
     /** Resuelve nombre+CURP+correo; vacío si no es un UUID de staff resoluble. Nunca lanza. */
     public Optional<StaffIdentity> resolve(String actor) {
@@ -79,7 +92,7 @@ public class StaffIdentityResolver {
         try {
             var staff = identityClient.getStaff(token, id);
             StaffIdentity identity = staff == null ? null
-                    : new StaffIdentity(staff.email(), staff.fullName(), staff.curp());
+                    : new StaffIdentity(staff.email(), staff.fullName(), staff.curp(), staff.employeeType());
             cache.put(id, new Cached(identity, Instant.now().plus(TTL)));
             return identity;
         } catch (ResponseStatusException e) {

@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Factura (CFDI 4.0). Generada al consumir {@code accounting.invoice-requested}. El receptor es un
@@ -98,7 +99,7 @@ public class Invoice {
         i.total            = total;
         i.currency         = currency;
         i.status           = InvoiceStatus.DRAFT;
-        i.createdAt        = Instant.now();
+        i.createdAt        = BusinessClock.current().now();
         return i;
     }
 
@@ -114,7 +115,7 @@ public class Invoice {
         this.folioFiscal = folioFiscal;
         this.serie       = serie;
         this.folio       = folio;
-        this.stampedAt   = Instant.now();
+        this.stampedAt   = BusinessClock.current().now();
     }
 
     public UUID getInvoiceId()        { return invoiceId; }

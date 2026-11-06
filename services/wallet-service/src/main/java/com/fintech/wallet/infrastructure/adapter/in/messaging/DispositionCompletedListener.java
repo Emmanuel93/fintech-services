@@ -26,6 +26,6 @@ public class DispositionCompletedListener {
                 event.creditAccountId(), event.dispositionType(), event.amount());
 
         projectionService.onDispositionCompleted(
-                event.creditAccountId(), event.amount(), event.dispositionType());
+                event.creditAccountId(), event.dispositionId(), event.amount(), event.dispositionType());
     }
 }

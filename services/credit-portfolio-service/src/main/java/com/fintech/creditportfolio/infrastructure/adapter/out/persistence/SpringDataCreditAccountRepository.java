@@ -14,7 +14,13 @@ import java.util.Optional;
 import java.util.UUID;
 
 interface SpringDataCreditAccountRepository extends JpaRepository<CreditAccount, UUID> {
+
+    List<CreditAccount> findByPaymentReferenceIsNullOrderByCreatedAtAsc();
     Optional<CreditAccount> findByContractId(UUID contractId);
+
+    /** SELECT … FOR UPDATE on the account row; the entity is then loaded by the regular findById in the same transaction. */
+    @Query(value = "SELECT credit_account_id FROM credit_portfolio.credit_accounts WHERE credit_account_id = :id FOR UPDATE", nativeQuery = true)
+    Optional<UUID> lockForUpdate(@Param("id") UUID id);
     List<CreditAccount> findByObligorPartyId(UUID obligorPartyId);
     List<CreditAccount> findByStatus(CreditAccountStatus status);
     List<CreditAccount> findByCreditAccountIdIn(Collection<UUID> ids);

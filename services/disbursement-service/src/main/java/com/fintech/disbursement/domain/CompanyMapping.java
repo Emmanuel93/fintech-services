@@ -1,5 +1,6 @@
 package com.fintech.disbursement.domain;
 
+import com.fintech.shared.time.BusinessClock;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -51,7 +52,7 @@ public class CompanyMapping {
         mapping.sourceKey = sourceKey;
         mapping.companyId = companyId;
         mapping.enabled = true;
-        mapping.createdAt = Instant.now();
+        mapping.createdAt = BusinessClock.current().now();
         return mapping;
     }
 

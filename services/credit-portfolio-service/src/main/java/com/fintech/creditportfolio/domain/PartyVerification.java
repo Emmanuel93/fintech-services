@@ -7,6 +7,7 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * El veredicto de KYC y listas de una persona, proyectado desde compliance (D16).
@@ -106,7 +107,7 @@ public class PartyVerification {
         this.allowsToProceed = allowsToProceed;
         this.blockReason     = blockReason == null ? null
                 : blockReason.substring(0, Math.min(200, blockReason.length()));
-        this.updatedAt       = Instant.now();
+        this.updatedAt       = BusinessClock.current().now();
     }
 
     /**

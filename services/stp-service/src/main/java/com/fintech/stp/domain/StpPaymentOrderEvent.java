@@ -1,5 +1,6 @@
 package com.fintech.stp.domain;
 
+import com.fintech.shared.time.BusinessClock;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -56,7 +57,7 @@ public class StpPaymentOrderEvent {
         event.reasonCode = reasonCode;
         event.detail = detail;
         event.actor = actor;
-        event.occurredAt = Instant.now();
+        event.occurredAt = BusinessClock.current().now();
         return event;
     }
 

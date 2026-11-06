@@ -19,8 +19,10 @@ public record CutoffClosedPayload(String eventId,
                                   UUID obligorPartyId,
                                   String productType,
                                   int cycleNumber,
+                                  LocalDate periodStart,
                                   LocalDate cutoffDate,
                                   LocalDate paymentDueDate,
                                   BigDecimal balanceAtCutoff,
                                   BigDecimal amountDue,
-                                  BigDecimal minimumPayment) {}
+                                  BigDecimal minimumPayment,
+                                  BigDecimal principalAtCutoff) {}

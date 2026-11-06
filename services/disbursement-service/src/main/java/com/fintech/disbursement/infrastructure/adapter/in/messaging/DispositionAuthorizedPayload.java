@@ -32,5 +32,9 @@ public record DispositionAuthorizedPayload(
         Integer beneficiaryInstitution,
         Long numericReference,
         String concept,
+        /* Which attempt of this disposition's payment (1 when absent): a failed one is asked again as a new order. */
+        Integer attempt,
+        /* The earliest moment this attempt may leave: the portfolio's wait between attempts. */
+        Instant notBefore,
         Instant occurredOn
 ) {}

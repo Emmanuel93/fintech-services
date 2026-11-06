@@ -1,5 +1,6 @@
 package com.fintech.collections.infrastructure.adapter.in.messaging;
 
+import com.fintech.collections.application.PaymentOrigin;
 import com.fintech.collections.application.service.PromiseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,7 +26,9 @@ public class PaymentAppliedListener {
     public void onMessage(PaymentAppliedPayload payload) {
         log.debug("payment-applied received creditAccountId={} amount={}", payload.creditAccountId(), payload.amount());
         UUID paymentId = safeUuid(payload.eventId());
-        promiseService.onPaymentApplied(payload.creditAccountId(), paymentId, payload.amount(), "UNKNOWN");
+        // Where the money came from travels on with a recovery: accounting books it against that account.
+        promiseService.onPaymentApplied(payload.creditAccountId(), paymentId, payload.amount(),
+                new PaymentOrigin(payload.fundingSource(), payload.inboundCreditId()));
     }
 
     private static UUID safeUuid(String value) {

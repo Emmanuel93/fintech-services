@@ -38,6 +38,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * La bandeja transversal de colocaciones: la consulta de la mesa de KYC.
@@ -106,7 +107,7 @@ class BackofficePlacementController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
 
-        Instant now = Instant.now();
+        Instant now = BusinessClock.current().now();
 
         // El veredicto de identidad ya es columna propia, así que se filtra directo. Antes había
         // que traducirlo a los estados que lo producían —porque se derivaba— y esa traducción
@@ -135,7 +136,7 @@ class BackofficePlacementController {
     @GetMapping("/{placementId}")
     ResponseEntity<Map<String, Object>> detail(@PathVariable UUID placementId) {
         Placement placement = placementLifecycle.findById(placementId);
-        Instant now = Instant.now();
+        Instant now = BusinessClock.current().now();
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("placement", BackofficePlacementResponse.from(placement, now));
@@ -261,7 +262,7 @@ class BackofficePlacementController {
                 placementId, req.decision(), source, req.decidedBy(), req.rejectionReason());
 
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("placement", BackofficePlacementResponse.from(placement, Instant.now()));
+        body.put("placement", BackofficePlacementResponse.from(placement, BusinessClock.current().now()));
         // La estrategia es la del producto de ESTA colocación (F3b): ya no hay una global.
         body.put("verificationStrategy",
                 verificationGateway.describeStrategy(kycPolicyResolver.resolve(placement)));

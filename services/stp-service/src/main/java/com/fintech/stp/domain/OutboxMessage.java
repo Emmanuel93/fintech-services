@@ -1,5 +1,6 @@
 package com.fintech.stp.domain;
 
+import com.fintech.shared.time.BusinessClock;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -21,9 +22,10 @@ import java.util.UUID;
 public class OutboxMessage {
 
     public static final String TYPE_REGISTER_ORDER = "REGISTER_ORDER";
+    /** An integration event to publish once the transaction that wrote it commits. */
+    public static final String TYPE_PUBLISH_EVENT = "PUBLISH_EVENT";
 
-    private static final Duration BASE_BACKOFF = Duration.ofSeconds(5);
-    private static final int MAX_BACKOFF_EXPONENT = 8;   // ~21 min
+    private static final int MAX_BACKOFF_EXPONENT = 8;   // 128 times the base: under 11 min with the default 5 s
 
     @Id
     @Column(name = "outbox_id", nullable = false, updatable = false)
@@ -60,6 +62,15 @@ public class OutboxMessage {
     }
 
     public static OutboxMessage registerOrder(UUID stpPaymentOrderId, String payload) {
+        return registerOrder(stpPaymentOrderId, payload, BusinessClock.current().now());
+    }
+
+    /**
+     * An order that may not be sent before {@code notBefore}: the end of the hold around the SPEI cutoff, while STP
+     * changes the operation date. Sent then, it takes the next business day, which is the date it was given.
+     */
+    public static OutboxMessage registerOrder(UUID stpPaymentOrderId, String payload, Instant notBefore) {
+        Instant now = BusinessClock.current().now();
         OutboxMessage message = new OutboxMessage();
         message.outboxId = UUID.randomUUID();
         message.messageType = TYPE_REGISTER_ORDER;
@@ -67,8 +78,23 @@ public class OutboxMessage {
         message.payload = payload;
         message.status = OutboxStatus.PENDING.name();
         message.attemptCount = 0;
-        message.nextAttemptAt = Instant.now();
-        message.createdAt = Instant.now();
+        message.nextAttemptAt = notBefore != null && notBefore.isAfter(now) ? notBefore : now;
+        message.createdAt = now;
+        return message;
+    }
+
+    /** An event about {@code aggregateId}; {@code envelope} carries its topic, key and body. */
+    public static OutboxMessage publishEvent(UUID aggregateId, String envelope) {
+        Instant now = BusinessClock.current().now();
+        OutboxMessage message = new OutboxMessage();
+        message.outboxId = UUID.randomUUID();
+        message.messageType = TYPE_PUBLISH_EVENT;
+        message.aggregateId = aggregateId;
+        message.payload = envelope;
+        message.status = OutboxStatus.PENDING.name();
+        message.attemptCount = 0;
+        message.nextAttemptAt = now;
+        message.createdAt = now;
         return message;
     }
 
@@ -76,16 +102,21 @@ public class OutboxMessage {
 
     public void markSent() {
         this.status = OutboxStatus.SENT.name();
-        this.sentAt = Instant.now();
+        this.sentAt = BusinessClock.current().now();
     }
 
-    /** Backoff exponencial acotado. No bloquea ningún hilo — el legado hacía Thread.sleep(5 min). */
-    public void scheduleRetry(String error) {
+    /**
+     * Backoff exponencial acotado. No bloquea ningún hilo — el legado hacía Thread.sleep(5 min).
+     *
+     * @param baseBackoff the wait before the first retry; each later one doubles it. Zero retries at once: the
+     *                    attempts then all happen at the moment the order was registered (the local stack's stub)
+     */
+    public void scheduleRetry(String error, Duration baseBackoff) {
         this.attemptCount++;
         this.lastError = error;
         this.status = OutboxStatus.PENDING.name();
         int exponent = Math.min(attemptCount, MAX_BACKOFF_EXPONENT);
-        this.nextAttemptAt = Instant.now().plus(BASE_BACKOFF.multipliedBy(1L << (exponent - 1)));
+        this.nextAttemptAt = BusinessClock.current().now().plus(baseBackoff.multipliedBy(1L << (exponent - 1)));
     }
 
     public void markFailed(String error) {

@@ -1,6 +1,7 @@
 package com.fintech.banking.infrastructure.config;
 
-import com.fintech.banking.infrastructure.adapter.in.messaging.CreditReceivedListener;
+import com.fintech.banking.infrastructure.adapter.in.messaging.TreasuryCashListener;
+
 import com.fintech.banking.infrastructure.adapter.in.messaging.PayoutTraceListener;
 import com.fintech.banking.infrastructure.adapter.in.messaging.StpOrderSettledListener;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
@@ -60,12 +61,50 @@ public class KafkaConfig {
     }
 
     @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, CreditReceivedListener.CreditReceivedPayload>
+    public ConcurrentKafkaListenerContainerFactory<String, TreasuryCashListener.CreditReceivedPayload>
     creditReceivedListenerContainerFactory(KafkaProperties properties) {
-        var factory = new ConcurrentKafkaListenerContainerFactory<String,
-                CreditReceivedListener.CreditReceivedPayload>();
-        factory.setConsumerFactory(jsonConsumerFactory(properties,
-                CreditReceivedListener.CreditReceivedPayload.class));
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, TreasuryCashListener.CreditReceivedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, TreasuryCashListener.CreditReceivedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TreasuryCashListener.PaymentAppliedPayload>
+    paymentAppliedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, TreasuryCashListener.PaymentAppliedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, TreasuryCashListener.PaymentAppliedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TreasuryCashListener.PaymentReturnedPayload>
+    paymentReturnedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, TreasuryCashListener.PaymentReturnedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, TreasuryCashListener.PaymentReturnedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, TreasuryCashListener.PaymentRejectedPayload>
+    paymentRejectedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, TreasuryCashListener.PaymentRejectedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, TreasuryCashListener.PaymentRejectedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, PayoutTraceListener.DisbursementFailedPayload>
+    disbursementFailedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, PayoutTraceListener.DisbursementFailedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, PayoutTraceListener.DisbursementFailedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, PayoutTraceListener.DisbursementReturnedPayload>
+    disbursementReturnedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, PayoutTraceListener.DisbursementReturnedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, PayoutTraceListener.DisbursementReturnedPayload.class));
         return factory;
     }
 }

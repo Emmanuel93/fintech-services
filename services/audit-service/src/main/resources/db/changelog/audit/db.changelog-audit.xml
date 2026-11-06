@@ -14,5 +14,6 @@
     <include file="db/changelog/audit/007-add-access-context.sql"        relativeToChangelogFile="false"/>
     <include file="db/changelog/audit/008-add-actor-identity.sql"        relativeToChangelogFile="false"/>
     <include file="db/changelog/audit/009-add-full-identity.sql"         relativeToChangelogFile="false"/>
+    <include file="db/changelog/audit/010-mensajes-fallidos.sql"         relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

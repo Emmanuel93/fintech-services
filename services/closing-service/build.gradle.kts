@@ -23,6 +23,8 @@ dependencyManagement {
 dependencies {
     implementation(project(":shared"))
 
+    implementation("net.logstash.logback:logstash-logback-encoder:8.0")
+
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
@@ -32,6 +34,10 @@ dependencies {
 
     // El candado del reparto (TK-01). Redisson es el proveedor predeterminado.
     implementation("org.redisson:redisson-spring-boot-starter:3.40.2")
+
+    // Candado de crones: el job que planifica el corte y su monitor corren en una sola réplica.
+    implementation("net.javacrumbs.shedlock:shedlock-spring:5.16.0")
+    implementation("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:5.16.0")
 
     implementation("org.springframework.modulith:spring-modulith-starter-core")
 
@@ -50,10 +56,13 @@ dependencies {
     testImplementation("org.springframework.security:spring-security-test")
     testImplementation("org.testcontainers:postgresql")
     testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.springframework.kafka:spring-kafka-test")
 }
 
 tasks.withType<Test> {
     useJUnitPlatform()
     systemProperty("api.version", "1.44")
     environment("TESTCONTAINERS_RYUK_DISABLED", "true")
+    environment("DOCKER_HOST", "unix:///var/run/docker.sock")
+    environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
 }

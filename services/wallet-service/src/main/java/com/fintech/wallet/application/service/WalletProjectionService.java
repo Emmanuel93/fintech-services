@@ -108,12 +108,27 @@ public class WalletProjectionService implements GetWalletViewUseCase, GetWalletM
      * their debt did, already synced via onBalanceUpdated).
      */
     public void onDispositionCompleted(UUID creditAccountId, BigDecimal amount, String dispositionType) {
+        onDispositionCompleted(creditAccountId, null, amount, dispositionType);
+    }
+
+    /**
+     * Credits a SELF_USE disposition once. The movement (unique per disposition) goes in before the balance moves:
+     * a redelivered message finds it and does nothing; two consumers at once collide on the unique index and the
+     * loser rolls back. Before, a redelivery added the money again and the inflated balance could be withdrawn.
+     */
+    public void onDispositionCompleted(UUID creditAccountId, UUID dispositionId, BigDecimal amount, String dispositionType) {
+        String referencia = dispositionId != null ? dispositionId.toString() : null;
+        if (referencia != null && movementRepository.existsByTypeAndReference("DISPOSITION", referencia)) {
+            log.info("DispositionCompleted ya acreditada dispositionId={} creditAccountId={} — se ignora", dispositionId, creditAccountId);
+            return;
+        }
         if (!"SELF_USE".equals(dispositionType)) {
             log.debug("DispositionCompleted type={} — not credited to walletBalance creditAccountId={}",
                     dispositionType, creditAccountId);
             return;
         }
-        // Incremento atómico de walletBalance — no puede perderse ante un BalanceUpdated concurrente.
+        // Incremento atómico de walletBalance — no puede perderse ante un BalanceUpdated concurrente. The movement
+        // below is unique per disposition and shares this transaction: a duplicate rolls the increment back too.
         int rows = walletViewRepository.creditWalletBalance(creditAccountId, amount);
         if (rows == 0) {
             log.warn("DispositionCompleted for unknown creditAccountId={} — ignored", creditAccountId);
@@ -121,7 +136,7 @@ public class WalletProjectionService implements GetWalletViewUseCase, GetWalletM
         }
         walletViewRepository.findByCreditAccountId(creditAccountId).ifPresent(view -> {
             movementRepository.save(WalletMovement.disposition(
-                    creditAccountId, view.getObligorPartyId(), amount, null));
+                    creditAccountId, view.getObligorPartyId(), amount, referencia));
             log.info("WalletView credited creditAccountId={} amount={} walletBalance={}",
                     creditAccountId, amount, view.getWalletBalance());
             eventPublisher.publishWalletSnapshotUpdated(view);

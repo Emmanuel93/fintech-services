@@ -65,6 +65,12 @@ public class NotificationDispatchService {
         }
 
         if (candidates.isEmpty()) {
+            // Idempotent too: the same fact again (the same installment due, notified twice) finds its record. Without
+            // this check the second one collided with the unique (source, channel) on every retry and went to the DLT
+            // (demo 3 Nov: 23 installment-due messages of clients without contact data).
+            if (recordRepository.existsBySourceEventIdAndChannel(sourceEventId, policy.getPrimaryChannel())) {
+                return;
+            }
             NotificationRecord failed = NotificationRecord.failed(
                     sourceEventId, recipientId, eventType, policy.getPrimaryChannel(), "NO_CONTACT_INFO");
             recordRepository.save(failed);

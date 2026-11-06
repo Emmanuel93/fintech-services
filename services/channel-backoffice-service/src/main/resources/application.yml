@@ -80,6 +80,7 @@ fintech:
     sales-org-service-url:        ${SALES_ORG_SERVICE_URL:http://localhost:8100}
     beneficiary-service-url:      ${BENEFICIARY_SERVICE_URL:http://localhost:8102}
     compliance-service-url:       ${COMPLIANCE_SERVICE_URL:http://localhost:8105}
+    statement-service-url:        ${STATEMENT_SERVICE_URL:http://localhost:8106}
     # Tesorería. banking publica 8104 en docker-compose; disbursement y stp no publican puerto y aquí
     # van los de su propio `server.port` de bootRun (disbursement 8100 choca con sales-org: levantar
     # uno de los dos con SERVER_PORT distinto).

@@ -64,8 +64,10 @@ public class StpOrderSettledListener {
             log.warn("stp.order-settled sin importe orden={} clave={} — no se proyecta para conciliar",
                     event.paymentRequestId(), event.trackingKey());
         } else {
+            // Both dates of the money: the bank's (operation date) and the portfolio's (the day it was ordered).
             proyector.project(InternalMovement.from("STP_ORDER", event.paymentRequestId().toString(),
-                    event.amount(), businessDate, event.trackingKey(), "DEBIT", eventId));
+                    event.amount(), businessDate, event.trackingKey(), "DEBIT", eventId)
+                    .withPortfolioDate(event.registeredOn() != null ? event.registeredOn() : businessDate));
         }
 
         traces.settled(event.paymentRequestId(), event.amount(), event.trackingKey(), businessDate,
@@ -99,6 +101,7 @@ public class StpOrderSettledListener {
                                          String trackingKey,
                                          BigDecimal amount,
                                          LocalDate businessDate,
+                                         LocalDate registeredOn,
                                          Instant settledAt,
                                          Instant occurredOn) {}
 }

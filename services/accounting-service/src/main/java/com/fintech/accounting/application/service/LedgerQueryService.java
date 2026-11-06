@@ -94,8 +94,23 @@ public class LedgerQueryService implements GetLedgerUseCase {
         return dao.trialBalance(period, unitCodes);
     }
 
+    /** The trial balance of the branches and products asked for ({@code INSTITUCION}: what belongs to no product). */
+    public List<TrialBalanceRowView> trialBalance(String period, List<String> unitCodes, List<String> productTypes) {
+        return dao.trialBalance(period, unitCodes, productTypes);
+    }
+
     public List<UnitMovementView> unitMovements(String period, List<String> unitCodes) {
         return dao.unitMovements(period, unitCodes);
+    }
+
+    /** The movement of each product in the period: the products the selector offers, with what each moved. */
+    public List<ProductMovementView> productMovements(String period, List<String> unitCodes) {
+        return dao.productMovements(period, unitCodes);
+    }
+
+    /** A product's accounting scheme between two periods (either may be open-ended), as the ledger booked it. */
+    public ProductSchemeView productScheme(String productType, String from, String to) {
+        return dao.productScheme(productType, from, to);
     }
 
     /**
@@ -132,7 +147,8 @@ public class LedgerQueryService implements GetLedgerUseCase {
                 // porque la pantalla las contrasta, y un cuadre que nadie enseña no tranquiliza a nadie.
                 balance, balance, true, order,
                 accrued, moratory, fees, iva, provision, writeOff, recovery, activations,
-                includeUnits ? dao.unitMovements(period, unitCodes) : List.of());
+                includeUnits ? dao.unitMovements(period, unitCodes) : List.of(),
+                dao.billingBridge(period, unitCodes));
     }
 
     // ── Auxiliar de un préstamo ──────────────────────────────────────────────
@@ -146,7 +162,7 @@ public class LedgerQueryService implements GetLedgerUseCase {
                         v.getTriggerEvent(), v.getSourceEventId(), v.getCreditAccountId(),
                         v.getObligorPartyId(), v.getTotalDebit(), v.getTotalCredit(),
                         v.getStatus().name(), v.isLatePosting(), v.getOriginalPeriod(),
-                        v.getReversalRef(), List.of()))
+                        v.getReversalRef(), v.getProductType(), List.of()))
                 .toList();
 
         UUID partyId = vouchers.stream().map(Voucher::getObligorPartyId)
@@ -162,14 +178,6 @@ public class LedgerQueryService implements GetLedgerUseCase {
 
     public List<PeriodView> periods() {
         return dao.periods();
-    }
-
-    @Transactional
-    public AccountingPeriod closePeriod(String period) {
-        AccountingPeriod p = periodRepository.findById(period)
-                .orElseGet(() -> AccountingPeriod.open(period));
-        p.close();
-        return periodRepository.save(p);
     }
 
     /**

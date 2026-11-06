@@ -7,6 +7,7 @@ import com.fintech.scoring.domain.ScoringPolicy;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Emitido por scoring-service al completar la evaluación crediticia.
@@ -47,7 +48,7 @@ public record ScoringCompletedEvent(
                                              List<NoHistoryRequirement> requirements) {
         return new ScoringCompletedEvent(
                 UUID.randomUUID().toString(),
-                Instant.now(),
+                BusinessClock.current().now(),
                 applicationId,
                 evaluation.getEvaluationId(),
                 evaluation.getProspectId(),

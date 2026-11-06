@@ -3,6 +3,7 @@ package com.fintech.creditportfolio.domain.event;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Published when payments.payment-applied is rejected (e.g., overpayment).
@@ -20,7 +21,7 @@ public class PaymentRejectedEvent {
     public PaymentRejectedEvent(String sourceEventId, UUID creditAccountId,
                                  BigDecimal rejectedAmount, String reason) {
         this.eventId        = UUID.randomUUID().toString();
-        this.occurredOn     = Instant.now();
+        this.occurredOn     = BusinessClock.current().now();
         this.sourceEventId  = sourceEventId;
         this.creditAccountId = creditAccountId;
         this.rejectedAmount = rejectedAmount;

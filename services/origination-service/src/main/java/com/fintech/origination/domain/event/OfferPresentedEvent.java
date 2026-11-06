@@ -3,6 +3,7 @@ package com.fintech.origination.domain.event;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /** Published when origination presents a priced offer to a prospect. */
 public class OfferPresentedEvent {
@@ -30,7 +31,7 @@ public class OfferPresentedEvent {
             BigDecimal cat,
             Instant validUntil) {
         this.eventId       = UUID.randomUUID().toString();
-        this.occurredOn    = Instant.now();
+        this.occurredOn    = BusinessClock.current().now();
         this.applicationId = applicationId;
         this.prospectId    = prospectId;
         this.productCode   = productCode;

@@ -19,5 +19,12 @@
 
     <include file="db/changelog/closing/012-gracia-unificada.sql"            relativeToChangelogFile="false"/>
     <include file="db/changelog/closing/013-pago-minimo-por-producto.sql"    relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/014-corte-distribuido.sql"           relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/015-compuertas-del-corte.sql"        relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/016-corte-retenido.sql"        relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/017-foto-de-cartera.sql"        relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/018-ciclo-de-facturacion.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/019-dias-inhabiles-banxico.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/closing/020-corte-quincenal-y-dias-2025.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Append-only. "Quita total" — unilateral, no debtor agreement required (unlike CollectionAgreement).
@@ -70,7 +71,7 @@ public class WriteOffRecord {
         w.totalWrittenOff       = principal.add(interest).add(penalty);
         w.authorizedBy          = authorizedBy;
         w.authorizationRef      = authorizationRef;
-        w.writeOffDate           = Instant.now();
+        w.writeOffDate           = BusinessClock.current().now();
         w.reason                = reason;
         w.bureauReported        = false;
         return w;

@@ -2,6 +2,8 @@ package com.fintech.creditportfolio.infrastructure.adapter.in.api.dto;
 
 import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.PaymentPlanSummary;
+import com.fintech.creditportfolio.domain.PlacementGate;
+import com.fintech.creditportfolio.domain.config.DistributorCommission;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -51,8 +53,50 @@ public record CreditAccountResponse(
         BigDecimal minimumPayment,
         BigDecimal principalPaid,
         BigDecimal overdueAmount,
-        Integer overdueInstallments
+        Integer overdueInstallments,
+
+        // ── Cómo pagar ─────────────────────────────────────────────────────
+        //
+        // La CLABE de cobro de la persona (una para todos sus créditos) y la referencia numérica que dice cuál
+        // crédito se paga. Las imprime el estado de cuenta; sin ellas el pago llega «por regla».
+        Long paymentReference,
+        String collectionClabe,
+
+        // ── Línea de distribuidora ─────────────────────────────────────────
+        //
+        // Si hoy puede colocar y, si no, por qué y cuánto debe pagar para volver a hacerlo; y su parte de lo que
+        // cobran sus clientes. Nulos en los productos que no pagan a una distribuidora.
+        Boolean placementBlocked,
+        String placementBlockReason,
+        Integer overdueStatements,
+        BigDecimal overdueStatementsAmount,
+        LocalDate oldestOverdueStatementDue,
+        BigDecimal distributorCommissionRate,
+        String distributorCommissionSettlement
 ) {
+
+    /** The account with its plan, its collection CLABE and, on a distributor line, its placement gate and commission. */
+    public static CreditAccountResponse from(CreditAccount a, PaymentPlanSummary plan, String collectionClabe,
+                                             PlacementGate gate, DistributorCommission commission) {
+        CreditAccountResponse base = from(a, plan, collectionClabe);
+        if (gate == null && commission == null) return base;
+        return new CreditAccountResponse(base.creditAccountId(), base.contractId(), base.contractNumber(), base.productCode(),
+                base.productType(), base.productBehavior(), base.obligorPartyId(), base.status(), base.nominalRate(),
+                base.moratoriumRate(), base.assignedTerm(), base.creditLimit(), base.principalBalance(),
+                base.accruedInterestBalance(), base.penaltyBalance(), base.ivaBalance(), base.availableCredit(),
+                base.totalDebt(), base.amortizationType(), base.riskTier(), base.clabeAccount(), base.daysDelinquent(),
+                base.originUnitCode(), base.createdAt(), base.activatedAt(), base.paidInstallments(),
+                base.totalInstallments(), base.nextInstallmentNumber(), base.paymentDueDate(), base.minimumPayment(),
+                base.principalPaid(), base.overdueAmount(), base.overdueInstallments(), base.paymentReference(),
+                base.collectionClabe(),
+                gate == null ? null : gate.blocked(),
+                gate == null ? null : gate.reason(),
+                gate == null ? null : gate.overdueStatements(),
+                gate == null ? null : gate.overdueAmount(),
+                gate == null ? null : gate.oldestDueDate(),
+                commission == null ? null : commission.rate(),
+                commission == null ? null : commission.settlement());
+    }
 
     /** Sin calendario: los campos del plan van nulos, no en cero. */
     public static CreditAccountResponse from(CreditAccount a) {
@@ -60,6 +104,10 @@ public record CreditAccountResponse(
     }
 
     public static CreditAccountResponse from(CreditAccount a, PaymentPlanSummary plan) {
+        return from(a, plan, null);
+    }
+
+    public static CreditAccountResponse from(CreditAccount a, PaymentPlanSummary plan, String collectionClabe) {
         return new CreditAccountResponse(
                 a.getCreditAccountId(),
                 a.getContractId(),
@@ -93,6 +141,9 @@ public record CreditAccountResponse(
                 plan.nextInstallmentAmount(),
                 plan.principalPaid(),
                 plan.overdueAmount(),
-                plan.overdueInstallments());
+                plan.overdueInstallments(),
+                a.getPaymentReference(),
+                collectionClabe,
+                null, null, null, null, null, null, null);
     }
 }

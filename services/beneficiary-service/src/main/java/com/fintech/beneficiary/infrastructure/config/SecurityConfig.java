@@ -43,6 +43,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/actuator/info",
                                          "/actuator/metrics", "/actuator/prometheus").permitAll()
+                        // Test support (clock shift, job triggers): only exists with fintech.test-support.enabled=true; the gateway never routes /internal/*.
+                        .requestMatchers("/internal/test-support/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/v3/api-docs", "/v3/api-docs.yaml", "/v3/api-docs/**",
                                          "/swagger-ui.html", "/swagger-ui/**").permitAll()

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Inter, the design system's typeface, embedded in every PDF (Identity-H): the document looks the same on
+     any device and needs no font installed in the image. Regular/Bold are the body; "Inter Black" (ExtraBold,
+     the weight of the wordmark) is for the big amounts only. -->
+<fontFamilies>
+  <fontFamily name="Inter">
+    <normal>fonts/inter/Inter-Regular.ttf</normal>
+    <bold>fonts/inter/Inter-Bold.ttf</bold>
+    <pdfEncoding>Identity-H</pdfEncoding>
+    <pdfEmbedded>true</pdfEmbedded>
+  </fontFamily>
+  <fontFamily name="Inter Black">
+    <normal>fonts/inter/Inter-ExtraBold.ttf</normal>
+    <bold>fonts/inter/Inter-ExtraBold.ttf</bold>
+    <pdfEncoding>Identity-H</pdfEncoding>
+    <pdfEmbedded>true</pdfEmbedded>
+  </fontFamily>
+</fontFamilies>

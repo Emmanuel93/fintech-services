@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Entity
 @Table(name = "installments", schema = "credit_portfolio")
@@ -64,7 +65,37 @@ public class Installment {
     @Column(name = "original_due_date")
     private LocalDate originalDueDate;
 
+    /** A cycle installment's statement cutoff: payments made up to it were already in that statement's balance. */
+    @Column(name = "cutoff_date")
+    private LocalDate cutoffDate;
+
+    /** The statement cycle that billed it (statement-billed products only); null while unbilled. */
+    @Column(name = "billed_cycle")
+    private Integer billedCycle;
+
+    /**
+     * The business day it became fully paid; null while it is not (and for installments paid before it was kept).
+     * A statement reads the plan as it stood at its cutoff: paid by then, or paid later.
+     */
+    @Column(name = "paid_on")
+    private LocalDate paidOn;
+
+    /**
+     * The distributor's commission on this installment when she delivers its statement on time: her flat share of what
+     * the client pays, capped by the plan's interest ({@code DistributorCommissionSchedule}). Null on every plan that
+     * is not a distributor's placement.
+     */
+    @Column(name = "scheduled_commission")
+    private BigDecimal scheduledCommission;
+
     protected Installment() {}
+
+    public BigDecimal getScheduledCommission() { return scheduledCommission; }
+
+    /** The commission the plan sets on this installment, written when the placement is made. */
+    public void scheduleCommission(BigDecimal commission) {
+        this.scheduledCommission = commission;
+    }
 
     public static Installment of(UUID scheduleId, int number, LocalDate dueDate,
                                   BigDecimal principal, BigDecimal interest) {
@@ -87,6 +118,7 @@ public class Installment {
     }
 
     public UUID getInstallmentId()        { return installmentId; }
+    public LocalDate getCutoffDate()      { return cutoffDate; }
     public UUID getScheduleId()           { return scheduleId; }
     public int getInstallmentNumber()     { return installmentNumber; }
     public LocalDate getDueDate()         { return dueDate; }
@@ -98,6 +130,15 @@ public class Installment {
     public java.time.Instant getSkippedAt() { return skippedAt; }
     public String getSkippedMode()        { return skippedMode; }
     public LocalDate getOriginalDueDate() { return originalDueDate; }
+    public LocalDate getPaidOn()          { return paidOn; }
+
+    /**
+     * Whether it was paid as of a day: paid, and on or before that day. One paid before the payment day was kept
+     * counts as paid on any day.
+     */
+    public boolean paidBy(LocalDate day) {
+        return status == InstallmentStatus.PAID && (paidOn == null || !paidOn.isAfter(day));
+    }
 
     /**
      * Saltar este pago: el vencimiento se corre y deja de ser exigible en su fecha original.
@@ -120,7 +161,7 @@ public class Installment {
         }
         this.originalDueDate = dueDate;
         this.dueDate         = newDueDate;
-        this.skippedAt       = java.time.Instant.now();
+        this.skippedAt       = BusinessClock.current().now();
         this.skippedMode     = modo;
         // Vuelve a PENDING: una cuota que ya se había vencido y se salta deja de estar vencida.
         this.status          = InstallmentStatus.PENDING;
@@ -139,6 +180,86 @@ public class Installment {
             this.originalDueDate = dueDate;
         }
         this.dueDate = newDueDate;
+    }
+
+    /**
+     * Billed by a statement of a statement-billed product: from now on it is due on that statement's
+     * payment due date, never earlier, and the next statement does not bill it again. Billing twice
+     * changes nothing.
+     */
+    /** A statement's own cycle installment: billed by it, and issued on its cutoff. */
+    public void billAsStatement(int cycleNumber, LocalDate cutoff, LocalDate paymentDueDate) {
+        this.cutoffDate = cutoff;
+        billIn(cycleNumber, paymentDueDate);
+    }
+
+    public void billIn(int cycleNumber, LocalDate paymentDueDate) {
+        if (billedCycle != null) {
+            return;
+        }
+        this.billedCycle = cycleNumber;
+        if (paymentDueDate != null && paymentDueDate.isAfter(dueDate)) {
+            if (originalDueDate == null) {
+                this.originalDueDate = dueDate;
+            }
+            this.dueDate = paymentDueDate;
+        }
+    }
+
+    public Integer getBilledCycle() { return billedCycle; }
+
+    /**
+     * Sets the status a statement-billed product derives from its payments (covered statements). Returns whether it
+     * changed. A skipped installment keeps its own state.
+     */
+    public boolean settleAs(InstallmentStatus covered) {
+        if (skippedAt != null || status == covered) {
+            return false;
+        }
+        moveTo(covered);
+        return true;
+    }
+
+    /** Changes the status and keeps the day it became paid: today when it becomes PAID, none when it stops being. */
+    private void moveTo(InstallmentStatus next) {
+        if (next == InstallmentStatus.PAID && status != InstallmentStatus.PAID) {
+            this.paidOn = BusinessClock.current().today();
+        } else if (next != InstallmentStatus.PAID) {
+            this.paidOn = null;
+        }
+        this.status = next;
+    }
+
+    /**
+     * The status an installment loan derives from the payments received (net of returns), covering the oldest
+     * first. Unlike {@link #settleAs}, a skipped installment is settled too: skipping moved its date, it did not
+     * pay it. Returns whether it changed. A replaced installment is never touched.
+     */
+    public boolean reconcileTo(InstallmentStatus covered) {
+        if (status.isVoid() || status == covered) {
+            return false;
+        }
+        moveTo(covered);
+        return true;
+    }
+
+    /** A restructure superseded it: it stays for the record and owes nothing. */
+    public void replace() {
+        this.status = InstallmentStatus.REPLACED;
+    }
+
+    /**
+     * Its credit was cancelled (the money never reached the borrower): it stays for the record and owes nothing. A paid
+     * one keeps its status: what was paid is the borrower's, and goes back as a balance in favor.
+     *
+     * @return whether it changed
+     */
+    public boolean cancel() {
+        if (status == InstallmentStatus.PAID || status.isVoid()) {
+            return false;
+        }
+        this.status = InstallmentStatus.CANCELLED;
+        return true;
     }
 
     /** El período saltado como regalo no devenga: es una recompensa, no un aplazamiento. */
@@ -162,10 +283,10 @@ public class Installment {
             return amount == null ? BigDecimal.ZERO : amount;
         }
         if (amount.compareTo(totalAmount) >= 0) {
-            status = InstallmentStatus.PAID;
+            moveTo(InstallmentStatus.PAID);
             return amount.subtract(totalAmount);
         }
-        status = InstallmentStatus.PARTIAL;
+        moveTo(InstallmentStatus.PARTIAL);
         return BigDecimal.ZERO;
     }
 }

@@ -13,5 +13,9 @@
     <include file="db/changelog/banking/006-internal-movements.sql"     relativeToChangelogFile="false"/>
     <include file="db/changelog/banking/007-movement-trace.sql"         relativeToChangelogFile="false"/>
     <include file="db/changelog/banking/008-movement-trace-steps.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/009-fondeo.sql"                 relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/010-libro-de-caja.sql"          relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/011-dos-fechas-del-dinero.sql"  relativeToChangelogFile="false"/>
+    <include file="db/changelog/banking/012-traza-fallida.sql"          relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

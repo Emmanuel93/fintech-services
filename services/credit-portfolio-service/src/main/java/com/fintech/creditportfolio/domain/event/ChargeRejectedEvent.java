@@ -3,6 +3,7 @@ package com.fintech.creditportfolio.domain.event;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Published when a charge-applied event is rejected because the account is in a terminal state.
@@ -21,7 +22,7 @@ public class ChargeRejectedEvent {
     public ChargeRejectedEvent(String sourceEventId, UUID creditAccountId,
                                 String chargeType, BigDecimal rejectedAmount, String reason) {
         this.eventId         = UUID.randomUUID().toString();
-        this.occurredOn      = Instant.now();
+        this.occurredOn      = BusinessClock.current().now();
         this.sourceEventId   = sourceEventId;
         this.creditAccountId = creditAccountId;
         this.chargeType      = chargeType;

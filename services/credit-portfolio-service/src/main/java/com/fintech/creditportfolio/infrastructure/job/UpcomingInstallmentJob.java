@@ -7,19 +7,18 @@ import com.fintech.creditportfolio.domain.event.InstallmentUpcomingEvent;
 import com.fintech.creditportfolio.infrastructure.config.CreditPortfolioProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.fintech.shared.time.BusinessClock;
 
 /**
- * Nightly at 00:00 (just before InstallmentDueJob at 00:01) — finds PENDING installments due
- * reminderLeadDays (T5) from now and publishes InstallmentUpcoming, prerequisite for
- * Collections' early collections (EC-01).
+ * Busca las cuotas PENDING que vencen dentro de reminderLeadDays (T5) y publica InstallmentUpcoming,
+ * requisito de la cobranza temprana (EC-01).
+ *
+ * <p>Sin cron propio: lo corre {@link DayCloseRunner} en el cierre del día, después de la mora.
  */
 @Component
 public class UpcomingInstallmentJob {
@@ -42,8 +41,6 @@ public class UpcomingInstallmentJob {
         this.properties            = properties;
     }
 
-    @SchedulerLock(name = "credit-portfolio.upcoming-installment", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
-    @Scheduled(cron = "0 0 0 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     @Transactional(readOnly = true)
     public void run() {
         runFor(businessClock.today());

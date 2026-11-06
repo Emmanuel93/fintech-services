@@ -1,5 +1,6 @@
 package com.fintech.stp.application.service;
 
+import com.fintech.shared.banking.SpeiOperatingDay;
 import com.fintech.stp.application.StpProperties;
 import com.fintech.stp.application.port.in.PollSettlementsUseCase;
 import com.fintech.stp.application.port.out.SettlementObservationRepository;
@@ -37,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import com.fintech.shared.time.BusinessClock;
@@ -74,6 +76,7 @@ public class SettlementPollingService implements PollSettlementsUseCase {
     private final StpProperties properties;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
+    private final SpeiOperatingDay operatingDay;
 
     public SettlementPollingService(StpPaymentOrderRepository orderRepository,
                                      StpPaymentOrderEventRepository eventRepository,
@@ -84,7 +87,8 @@ public class SettlementPollingService implements PollSettlementsUseCase {
                                      StpEventPublisher eventPublisher,
                                      StpProperties properties,
                                      TransactionTemplate transactionTemplate,
-                                     Clock clock) {
+                                     Clock clock,
+                                     SpeiOperatingDay operatingDay) {
         this.orderRepository = orderRepository;
         this.eventRepository = eventRepository;
         this.observationRepository = observationRepository;
@@ -95,6 +99,7 @@ public class SettlementPollingService implements PollSettlementsUseCase {
         this.properties = properties;
         this.transactionTemplate = transactionTemplate;
         this.clock = clock;
+        this.operatingDay = operatingDay;
     }
 
     @Override
@@ -134,6 +139,7 @@ public class SettlementPollingService implements PollSettlementsUseCase {
     }
 
     private int pollGroup(PollGroup group) {
+        boolean dayClosed = isClosed(group.businessDate(), clock.instant());
         GroupContext context = transactionTemplate.execute(status -> {
             StpCompany company = companyRepository.findById(group.companyId()).orElseThrow();
             ConciliacionFirma firma = new ConciliacionFirma(
@@ -184,6 +190,17 @@ public class SettlementPollingService implements PollSettlementsUseCase {
             }
         }
 
+        if (dayClosed && seen >= total) {
+            Set<String> listed = entries.stream()
+                    .map(StpGatewayPort.ReconciliationEntry::claveRastreo)
+                    .collect(Collectors.toSet());
+            int failed = failNeverRegistered(group, listed);
+            if (failed > 0) {
+                log.warn("{} órdenes sin respuesta de STP no aparecen en la conciliación cerrada del {}: no se registraron",
+                        failed, group.businessDate());
+            }
+        }
+
         transactionTemplate.executeWithoutResult(status ->
                 orderRepository.findByCompanyIdAndBusinessDate(group.companyId(), group.businessDate())
                         .forEach(order -> {
@@ -191,6 +208,48 @@ public class SettlementPollingService implements PollSettlementsUseCase {
                             orderRepository.save(order);
                         }));
         return applied;
+    }
+
+    /**
+     * Whether STP's day for an operation date is over at {@code now}: its cutoff passed, and the hold after it, during
+     * which no order is sent. From then on the reconciliation of that date lists every order STP holds for it.
+     */
+    private boolean isClosed(LocalDate operationDate, Instant now) {
+        return operatingDay.operationDate(now.minus(operatingDay.hold())).isAfter(operationDate);
+    }
+
+    /**
+     * The orders STP never answered for, once the complete reconciliation of their closed operation date does not
+     * list them: STP never registered them. They fail, and the caller hears it can pay again without paying twice. An
+     * accepted order missing from the same listing is not touched: STP said it took it (SO-06).
+     */
+    private int failNeverRegistered(PollGroup group, Set<String> listed) {
+        List<UUID> unanswered = transactionTemplate.execute(status ->
+                orderRepository.findByCompanyIdAndBusinessDate(group.companyId(), group.businessDate()).stream()
+                        .filter(StpPaymentOrder::isUnanswered)
+                        .filter(order -> !listed.contains(order.getTrackingKey()))
+                        .map(StpPaymentOrder::getStpPaymentOrderId)
+                        .toList());
+        int failed = 0;
+        for (UUID id : unanswered == null ? List.<UUID>of() : unanswered) {
+            Boolean done = transactionTemplate.execute(status -> orderRepository.findById(id)
+                    .filter(StpPaymentOrder::isUnanswered)
+                    .map(order -> {
+                        String detail = "STP no la registró: la conciliación del " + group.businessDate()
+                                + ", ya cerrada, no la trae";
+                        order.fail(detail);
+                        orderRepository.save(order);
+                        eventRepository.save(StpPaymentOrderEvent.of(order.getStpPaymentOrderId(),
+                                StpPaymentOrderStatus.SENT, StpPaymentOrderStatus.FAILED, null, detail, "SYSTEM"));
+                        eventPublisher.publishOrderNotRegistered(order, detail);
+                        return Boolean.TRUE;
+                    })
+                    .orElse(Boolean.FALSE));
+            if (Boolean.TRUE.equals(done)) {
+                failed++;
+            }
+        }
+        return failed;
     }
 
     private record GroupContext(StpCompany company, String sello, Optional<PublicKey> verificationKey) {}
@@ -331,7 +390,7 @@ public class SettlementPollingService implements PollSettlementsUseCase {
     }
 
     private static Instant toInstant(Long epochMillis) {
-        return epochMillis != null ? Instant.ofEpochMilli(epochMillis) : Instant.now();
+        return epochMillis != null ? Instant.ofEpochMilli(epochMillis) : BusinessClock.current().now();
     }
 
     private record PollGroup(UUID companyId, LocalDate businessDate) {}

@@ -34,8 +34,9 @@ public class BalanceUpdatedListener {
                 payload.totalDebt()              != null ? payload.totalDebt()              : payload.principalBalance(),
                 payload.balanceVersion());
 
-        // CM-05: credit-portfolio has no dedicated ProductSettled event — derived here
-        if ("SETTLED".equals(payload.accountStatus())) {
+        // CM-05: credit-portfolio has no dedicated ProductSettled event — derived here. A line closed after a quita
+        // (the holder settled what was left) ends the case the same way.
+        if ("SETTLED".equals(payload.accountStatus()) || "CLOSED".equals(payload.accountStatus())) {
             caseManagementService.onProductSettled(payload.creditAccountId());
         }
     }

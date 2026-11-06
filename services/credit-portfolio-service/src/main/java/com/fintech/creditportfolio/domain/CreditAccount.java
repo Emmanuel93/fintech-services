@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Aggregate root — the live credit account.
@@ -111,6 +112,10 @@ public class CreditAccount {
     @Column(name = "vat_rate", precision = 6, scale = 4)
     private BigDecimal vatRate;
 
+    /** The CAT of the offer the client signed (annual, %, without IVA): the statement prints it. */
+    @Column(name = "cat", precision = 8, scale = 2)
+    private BigDecimal cat;
+
     /** availableCredit = creditLimit − principalBalance − pendingDispositions (revolving only). */
     @Column(name = "available_credit")
     private BigDecimal availableCredit;
@@ -123,6 +128,10 @@ public class CreditAccount {
 
     @Column(name = "clabe_account")
     private String clabeAccount;
+
+    /** The SPEI numeric reference that names this loan when its owner pays to their collection CLABE. */
+    @Column(name = "payment_reference")
+    private Long paymentReference;
 
     // Identidad del beneficiario, congelada al originar (snapshot inmutable). STP la exige para
     // firmar la orden de pago; viaja en credit-account-activated hacia disbursement.
@@ -149,6 +158,20 @@ public class CreditAccount {
     @Column(name = "activated_at")
     private Instant activatedAt;
 
+    /** Why it was cancelled (D63): its disbursement failed for good, or the money came back. */
+    @Column(name = "cancellation_reason", length = 60)
+    private String cancellationReason;
+
+    @Column(name = "cancelled_at")
+    private Instant cancelledAt;
+
+    /** Why a line was closed: {@code QUITA} when collections forgave part of its debt and the holder settled the rest. */
+    @Column(name = "closure_reason", length = 60)
+    private String closureReason;
+
+    @Column(name = "closed_at")
+    private Instant closedAt;
+
     protected CreditAccount() {}
 
     /** Factory — creates the account in PENDING_ACTIVATION from the origination snapshot. */
@@ -172,7 +195,7 @@ public class CreditAccount {
             String beneficiaryName,
             String beneficiaryTaxId) {
 
-        Instant now = Instant.now();
+        Instant now = BusinessClock.current().now();
         CreditAccount a = new CreditAccount();
         a.creditAccountId        = UUID.randomUUID();
         a.contractId             = contractId;
@@ -222,16 +245,35 @@ public class CreditAccount {
             this.availableCredit = creditLimit.subtract(disbursedAmount);
         }
         this.status      = CreditAccountStatus.ACTIVE;
-        this.activatedAt = Instant.now();
+        this.activatedAt = BusinessClock.current().now();
         touch();
     }
 
     // ── Balance engine (the others calculate, portfolio applies) ─────────────
 
     private void guardActive() {
-        if (status == CreditAccountStatus.WRITTEN_OFF || status == CreditAccountStatus.CLOSED) {
+        if (status == CreditAccountStatus.WRITTEN_OFF || status == CreditAccountStatus.CLOSED
+                || status == CreditAccountStatus.CANCELLED) {
             throw new IllegalStateException("Cannot mutate balance of terminal account: " + status);
         }
+    }
+
+    /**
+     * Its only disbursement could not happen: the credit never lent anything, so it is cancelled (D63). The principal
+     * was given back already; what it was charged for (the opening fee, its IVA) is reversed by charges as part of the
+     * same compensation, and is the one change a cancelled account still takes.
+     */
+    public void cancel(String reason) {
+        if (status.isTerminal()) {
+            throw new IllegalStateException("A terminal account is not cancelled: " + status);
+        }
+        if (isRevolving()) {
+            throw new IllegalStateException("A line is not cancelled by a failed disposition: only that one is undone");
+        }
+        this.status = CreditAccountStatus.CANCELLED;
+        this.cancellationReason = reason;
+        this.cancelledAt = BusinessClock.current().now();
+        touch();
     }
 
     /** OrdinaryInterestAccrued (Charges) → accruedInterestBalance += amount. */
@@ -261,12 +303,71 @@ public class CreditAccount {
      * Balances never go below zero (CP-02).
      */
     public void reverseCharge(String originalChargeType, BigDecimal amount) {
-        guardActive();
+        // A cancelled credit's charges are reversed as part of its compensation: the one change it still takes.
+        if (status != CreditAccountStatus.CANCELLED) {
+            guardActive();
+        }
         if ("ORDINARY_INTEREST".equalsIgnoreCase(originalChargeType)
                 || "INTEREST".equalsIgnoreCase(originalChargeType)) {
             this.accruedInterestBalance = nonNegative(accruedInterestBalance.subtract(amount));
+        } else if ("IVA".equalsIgnoreCase(originalChargeType)) {
+            // The IVA of a reversed or waived charge comes back from the IVA it was charged to; reversing it
+            // from the penalty left the tax owed and took a moratorium that was never charged.
+            this.ivaBalance = nonNegative(ivaBalance.subtract(amount));
         } else {
             this.penaltyBalance = nonNegative(penaltyBalance.subtract(amount));
+        }
+        touch();
+    }
+
+    /**
+     * The distributor's commission on a statement she delivered on time (or within the ladder), settled against what
+     * she owes: it comes out of the interest first and, when a late fortnight's interest is less than the flat
+     * commission, out of the principal that the interest she paid earlier already covered. Never the IVA nor the
+     * moratorium: those are not hers to share. Principal it settles frees available credit as a payment does.
+     *
+     * @return what reached principal, interest and penalty, in that order of interest
+     */
+    public BigDecimal[] applyCommissionCompensation(BigDecimal amount) {
+        guardActive();
+        BigDecimal remaining = amount;
+        BigDecimal toInterest = remaining.min(accruedInterestBalance);
+        accruedInterestBalance = accruedInterestBalance.subtract(toInterest);
+        remaining = remaining.subtract(toInterest);
+        BigDecimal toPrincipal = remaining.min(principalBalance);
+        principalBalance = principalBalance.subtract(toPrincipal);
+        if (isRevolving() && creditLimit != null && toPrincipal.signum() > 0) {
+            this.availableCredit = nonNegative(
+                    (availableCredit != null ? availableCredit : BigDecimal.ZERO).add(toPrincipal))
+                    .min(creditLimit);
+        }
+        touch();
+        return new BigDecimal[]{toPrincipal, toInterest};
+    }
+
+    /** The payment a compensation went with came back: what the commission had settled is owed again. */
+    public void restoreCommissionCompensation(BigDecimal principal, BigDecimal interest) {
+        restorePayment(nz(principal), nz(interest), BigDecimal.ZERO, BigDecimal.ZERO);
+    }
+
+    private static BigDecimal nz(BigDecimal v) { return v == null ? BigDecimal.ZERO : v; }
+
+    /**
+     * A payment came back (SPEI returned by the payer's bank): what it had covered is owed again, in the same
+     * buckets. A settled loan reopens; a revolving line loses the available credit the payment had freed.
+     */
+    public void restorePayment(BigDecimal principal, BigDecimal interest, BigDecimal iva, BigDecimal penalty) {
+        guardActive();
+        this.principalBalance       = principalBalance.add(principal);
+        this.accruedInterestBalance = accruedInterestBalance.add(interest);
+        this.ivaBalance             = ivaBalance.add(iva);
+        this.penaltyBalance         = penaltyBalance.add(penalty);
+        if (isRevolving() && creditLimit != null && principal.signum() > 0) {
+            this.availableCredit = nonNegative(
+                    (availableCredit != null ? availableCredit : BigDecimal.ZERO).subtract(principal));
+        }
+        if (status == CreditAccountStatus.SETTLED) {
+            this.status = CreditAccountStatus.ACTIVE;
         }
         touch();
     }
@@ -434,6 +535,26 @@ public class CreditAccount {
         }
     }
 
+    /** The reason a line closes when collections forgave part of its debt and the holder settled the rest. */
+    public static final String CLOSED_AFTER_QUITA = "QUITA";
+
+    /**
+     * A quita is the holder's exit: her line places no more from that day (the gate) and, once she settles what is
+     * left, it closes. Nothing happens while she still owes something, and a line already closed stays as it is.
+     */
+    public void closeAfterQuita() {
+        if (!isRevolving() || status != CreditAccountStatus.ACTIVE || getTotalDebt().signum() != 0) {
+            return;
+        }
+        this.status = CreditAccountStatus.CLOSED;
+        this.closureReason = CLOSED_AFTER_QUITA;
+        this.closedAt = BusinessClock.current().now();
+        this.availableCredit = BigDecimal.ZERO;
+        // Closed with nothing owed, nothing is late: the nightly job no longer visits it, so the days would stay.
+        this.daysDelinquent = 0;
+        touch();
+    }
+
     public boolean isRevolving() {
         return "REVOLVING".equalsIgnoreCase(productBehavior);
     }
@@ -442,7 +563,7 @@ public class CreditAccount {
         return v.signum() < 0 ? BigDecimal.ZERO : v;
     }
 
-    private void touch() { this.updatedAt = Instant.now(); this.balanceVersion++; }
+    private void touch() { this.updatedAt = BusinessClock.current().now(); this.balanceVersion++; }
 
     public UUID getCreditAccountId()          { return creditAccountId; }
     public UUID getContractId()               { return contractId; }
@@ -471,16 +592,31 @@ public class CreditAccount {
     public BigDecimal getIvaBalance()         { return ivaBalance; }
     public BigDecimal getVatRate()            { return vatRate; }
     public void sealVatRate(BigDecimal r)     { if (this.vatRate == null) this.vatRate = r; }
+    /** The contracted CAT is fixed at signature: sealed once, never recomputed. */
+    public void sealCat(BigDecimal c)         { if (this.cat == null) this.cat = c; }
+    public BigDecimal getCat()                { return cat; }
     public BigDecimal getAvailableCredit()    { return availableCredit; }
     public String getAmortizationType()       { return amortizationType; }
     public String getRiskTier()               { return riskTier; }
     public String getClabeAccount()           { return clabeAccount; }
+    public Long getPaymentReference()         { return paymentReference; }
+
+    /** Gives the loan its payment reference once; a loan that has one keeps it. */
+    public void assignPaymentReference(long reference) {
+        if (this.paymentReference == null) {
+            this.paymentReference = reference;
+        }
+    }
     public String getBeneficiaryName()        { return beneficiaryName; }
     public String getBeneficiaryTaxId()       { return beneficiaryTaxId; }
     public int getDaysDelinquent()            { return daysDelinquent; }
     public Instant getCreatedAt()             { return createdAt; }
     public Instant getUpdatedAt()             { return updatedAt; }
     public Instant getActivatedAt()           { return activatedAt; }
+    public String getCancellationReason()     { return cancellationReason; }
+    public Instant getCancelledAt()           { return cancelledAt; }
+    public String getClosureReason()          { return closureReason; }
+    public Instant getClosedAt()              { return closedAt; }
 
     /** El adeudo íntegro: capital, interés devengado, mora y el IVA que se le trasladó. */
     public BigDecimal getTotalDebt() {

@@ -18,4 +18,14 @@
 
     <include file="db/changelog/charges/009-candado-de-crones.sql" relativeToChangelogFile="false"/>
 
+    <include file="db/changelog/charges/010-cierre-con-compuertas.sql" relativeToChangelogFile="false"/>
+
+    <include file="db/changelog/charges/011-lote-del-cierre.sql" relativeToChangelogFile="false"/>
+
+    <include file="db/changelog/charges/012-cierre-por-cuenta.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/charges/013-foto-de-cartera.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/charges/014-capital-que-causa-interes.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/charges/015-interes-por-periodo.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/charges/016-iva-del-periodo.sql" relativeToChangelogFile="false"/>
+
 </databaseChangeLog>

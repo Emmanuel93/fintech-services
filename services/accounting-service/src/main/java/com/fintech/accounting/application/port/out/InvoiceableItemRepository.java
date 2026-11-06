@@ -11,4 +11,6 @@ public interface InvoiceableItemRepository {
     List<InvoiceableItem> findByStatusAndPeriod(InvoiceableItemStatus status, String period);
     List<InvoiceableItem> findByObligorPartyIdAndPeriodAndStatus(UUID obligorPartyId, String period, InvoiceableItemStatus status);
     InvoiceableItem save(InvoiceableItem item);
+    /** A credit's items in a status: what a cancellation keeps out of the invoices (D63). */
+    List<InvoiceableItem> findByCreditAccountIdAndStatus(UUID creditAccountId, InvoiceableItemStatus status);
 }

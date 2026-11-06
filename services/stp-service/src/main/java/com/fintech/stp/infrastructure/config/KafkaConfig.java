@@ -1,5 +1,7 @@
 package com.fintech.stp.infrastructure.config;
 
+import com.fintech.stp.infrastructure.adapter.in.messaging.BusinessCalendarDayListener;
+import com.fintech.stp.infrastructure.adapter.in.messaging.CollectionAccountRequestedListener;
 import com.fintech.stp.infrastructure.adapter.in.messaging.StpPaymentRequestedPayload;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
@@ -38,6 +40,24 @@ public class KafkaConfig {
                                                  DefaultErrorHandler stpErrorHandler) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, StpPaymentRequestedPayload>();
         factory.setConsumerFactory(jsonConsumerFactory(properties, StpPaymentRequestedPayload.class));
+        factory.setCommonErrorHandler(stpErrorHandler);
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, CollectionAccountRequestedListener.CollectionAccountRequested>
+    collectionAccountRequestedListenerContainerFactory(KafkaProperties properties, DefaultErrorHandler stpErrorHandler) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, CollectionAccountRequestedListener.CollectionAccountRequested>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, CollectionAccountRequestedListener.CollectionAccountRequested.class));
+        factory.setCommonErrorHandler(stpErrorHandler);
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, BusinessCalendarDayListener.CalendarDayPayload>
+    businessCalendarDayListenerContainerFactory(KafkaProperties properties, DefaultErrorHandler stpErrorHandler) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, BusinessCalendarDayListener.CalendarDayPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, BusinessCalendarDayListener.CalendarDayPayload.class));
         factory.setCommonErrorHandler(stpErrorHandler);
         return factory;
     }

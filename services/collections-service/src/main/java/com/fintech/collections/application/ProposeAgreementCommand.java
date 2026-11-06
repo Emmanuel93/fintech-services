@@ -9,5 +9,10 @@ public record ProposeAgreementCommand(
         UUID caseId,
         AgreementType type,
         BigDecimal forgivenAmount,     // QUITA_PARCIAL only
-        RestructureTerms newTerms      // RESTRUCTURE only
-) {}
+        RestructureTerms newTerms,     // RESTRUCTURE only
+        String proposedBy              // the staff session that proposes it
+) {
+    public ProposeAgreementCommand(UUID caseId, AgreementType type, BigDecimal forgivenAmount, RestructureTerms newTerms) {
+        this(caseId, type, forgivenAmount, newTerms, null);
+    }
+}

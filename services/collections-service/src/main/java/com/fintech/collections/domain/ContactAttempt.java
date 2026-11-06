@@ -3,6 +3,7 @@ package com.fintech.collections.domain;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Un contacto con el deudor, lo haya hecho una persona o el sistema.
@@ -85,7 +86,7 @@ public class ContactAttempt {
         a.caseId      = caseId;
         a.channel     = channel;
         a.result      = result;
-        a.attemptedAt = Instant.now();
+        a.attemptedAt = BusinessClock.current().now();
         return a;
     }
 

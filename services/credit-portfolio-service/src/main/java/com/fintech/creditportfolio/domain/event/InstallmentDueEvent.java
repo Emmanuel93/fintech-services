@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 public class InstallmentDueEvent {
 
@@ -22,7 +23,7 @@ public class InstallmentDueEvent {
         this.installmentNumber = installmentNumber;
         this.dueDate           = dueDate;
         this.totalAmount       = totalAmount;
-        this.occurredAt        = Instant.now();
+        this.occurredAt        = BusinessClock.current().now();
     }
 
     public UUID getInstallmentId()     { return installmentId; }

@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Normaliza los filtros antes de que lleguen a la consulta.
@@ -47,8 +48,8 @@ class JpaPlacementQueryAdapter implements PlacementQueryRepository {
                 emptyToNull(statuses),
                 emptyToNull(identityDecisions),
                 from  != null ? from  : Instant.EPOCH,
-                to    != null ? to    : Instant.now(),
-                stalledBefore != null ? stalledBefore : Instant.now(),
+                to    != null ? to    : BusinessClock.current().now(),
+                stalledBefore != null ? stalledBefore : BusinessClock.current().now(),
                 pageable);
     }
 

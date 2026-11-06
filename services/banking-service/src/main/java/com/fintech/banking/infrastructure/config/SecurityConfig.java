@@ -38,6 +38,9 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/info", "/actuator/metrics",
                                 "/actuator/prometheus").permitAll()
                         .requestMatchers("/error").permitAll()
+                        // Test support (clock, scheduling state, rest): only exists with fintech.test-support.enabled=true;
+                        // the gateway never routes /internal/*.
+                        .requestMatchers("/internal/test-support/**").permitAll()
                         .requestMatchers("/v3/api-docs", "/v3/api-docs.yaml", "/v3/api-docs/**",
                                 "/swagger-ui.html", "/swagger-ui/**").permitAll()
                         // La resolución de ruta devuelve la CLABE ordenante COMPLETA — el conector
@@ -58,6 +61,13 @@ public class SecurityConfig {
                         // abre también a soporte, que es quien recibe la pregunta «¿dónde está mi
                         // dinero?» y hoy la contesta preguntando por chat; y a tesorería, que la
                         // pinta en la ficha de cada pago.
+                        // Funding: recording where the money comes from is treasury's (FINANCE) and the
+                        // administrator's; the batch accrual is also called by the month-end chain (SERVICE).
+                        .requestMatchers(HttpMethod.POST, "/api/v1/funding/accruals")
+                                .hasAnyRole("ADMIN", "FINANCE", "SERVICE")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/funding/**").hasAnyRole("ADMIN", "FINANCE")
+                        .requestMatchers(HttpMethod.GET, "/api/v1/funding/**")
+                                .hasAnyRole("ADMIN", "FINANCE", "OPS_SUPERVISOR", "AUDITOR")
                         .requestMatchers(HttpMethod.GET, "/api/v1/traces/**")
                                 .hasAnyRole("ADMIN", "OPS_SUPERVISOR", "AUDITOR", "SUPPORT", "FINANCE")
                         .anyRequest().authenticated())

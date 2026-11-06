@@ -1,5 +1,6 @@
 package com.fintech.collections.application.service;
 
+import com.fintech.collections.application.PaymentOrigin;
 import com.fintech.collections.application.CreatePaymentPromiseCommand;
 import com.fintech.collections.application.port.in.CreatePaymentPromiseUseCase;
 import com.fintech.collections.application.port.out.CollectionCaseRepository;
@@ -76,7 +77,7 @@ public class PromiseService implements CreatePaymentPromiseUseCase {
      * partial payments that don't). RR-01: a payment with no active case, against an already
      * written-off account, is a post-write-off recovery — tracked here, never reopens the case.
      */
-    public void onPaymentApplied(UUID creditAccountId, UUID paymentId, BigDecimal amount, String paymentMethod) {
+    public void onPaymentApplied(UUID creditAccountId, UUID paymentId, BigDecimal amount, PaymentOrigin origin) {
         var activeCase = caseRepository.findActiveByCreditAccountId(creditAccountId);
         if (activeCase.isPresent()) {
             UUID caseId = activeCase.get().getCaseId();
@@ -105,7 +106,8 @@ public class PromiseService implements CreatePaymentPromiseUseCase {
         writeOffRepository.findByCreditAccountId(creditAccountId).ifPresent(writeOff -> {
             log.info("Recovery payment detected post write-off writeOffId={} creditAccountId={} amount={}",
                     writeOff.getWriteOffId(), creditAccountId, amount);
-            eventPublisher.publishRecoveryPaymentApplied(writeOff.getWriteOffId(), creditAccountId, amount, paymentMethod);
+            eventPublisher.publishRecoveryPaymentApplied(writeOff.getWriteOffId(), creditAccountId, amount, origin,
+                    paymentId);
         });
     }
 

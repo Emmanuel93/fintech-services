@@ -69,6 +69,36 @@ public class CreditProductCatalogService {
             List<RateCard> rateCards,
             List<EligibilityRule> eligibilityRules
     ) {
+        return create(productCode, productType, name, description, targetAudience, currency,
+                nominalRateAnnual, moratoriumRateAnnual, minTerm, maxTerm, defaultTerm, minAmount, maxAmount,
+                defaultCreditLine, minCreditLine, maxCreditLine, amountStep, termStep, amortizationType,
+                defaultPaymentFrequency, allowedPaymentFrequencies, minApprovalScore, defaultApprovalFlow,
+                openingFeeRate, prepaymentFeeRate, eligiblePartyTypes, requiredDocuments, channelAvailabilities,
+                capabilities, rateCards, eligibilityRules, null);
+    }
+
+    /** @param billingCycle the product's billing cycle; null takes the product type's default */
+    public CreditProductDefinition create(
+            String productCode,
+            ProductType productType, String name, String description,
+            TargetAudience targetAudience, String currency,
+            BigDecimal nominalRateAnnual, BigDecimal moratoriumRateAnnual,
+            Integer minTerm, Integer maxTerm, Integer defaultTerm,
+            BigDecimal minAmount, BigDecimal maxAmount,
+            BigDecimal defaultCreditLine, BigDecimal minCreditLine, BigDecimal maxCreditLine,
+            Integer amountStep, Integer termStep,
+            AmortizationType amortizationType,
+            PaymentFrequency defaultPaymentFrequency,
+            Set<PaymentFrequency> allowedPaymentFrequencies,
+            Integer minApprovalScore, ApprovalFlow defaultApprovalFlow,
+            BigDecimal openingFeeRate, BigDecimal prepaymentFeeRate,
+            Set<String> eligiblePartyTypes, Set<RequiredDocument> requiredDocuments,
+            Set<String> channelAvailabilities,
+            Capabilities capabilities,
+            List<RateCard> rateCards,
+            List<EligibilityRule> eligibilityRules,
+            BillingCycle billingCycle
+    ) {
         validateStructuralFields(productType, minTerm, maxTerm, defaultTerm,
                 minAmount, maxAmount, defaultCreditLine, minCreditLine, maxCreditLine);
         validateInstallmentFields(productType, amortizationType, defaultPaymentFrequency, allowedPaymentFrequencies);
@@ -90,6 +120,7 @@ public class CreditProductCatalogService {
                 eligiblePartyTypes, requiredDocuments, channelAvailabilities,
                 capabilities
         );
+        definition.defineBillingCycle(billingCycle);
 
         CreditProductDefinition saved = repository.save(definition);
 
@@ -210,7 +241,12 @@ public class CreditProductCatalogService {
                 d.getProductDefinitionId(), d.getProductCode(), d.getProductVersion(),
                 d.getProductType().name(), d.getBehavior().name(), d.getTargetAudience().name(),
                 d.getNominalRateAnnual(), d.getMoratoriumRateAnnual(),
-                d.getCapabilities(), d.getActivatedAt());
+                d.getCapabilities(), d.getActivatedAt(),
+                d.getAmortizationType() != null ? d.getAmortizationType().name() : null,
+                d.getDefaultPaymentFrequency() != null ? d.getDefaultPaymentFrequency().name() : null,
+                d.getOpeningFeeRate(), d.getAmountStep(), d.getBillingCycle(),
+                d.getMinAmount(), d.getMaxAmount(), d.getMinTerm(), d.getMaxTerm(), d.getTermStep(),
+                d.getDistributorCommission());
     }
 
     @Transactional

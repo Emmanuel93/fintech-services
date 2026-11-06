@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Component
 public class KafkaWalletEventPublisher implements WalletEventPublisher {
@@ -40,7 +41,7 @@ public class KafkaWalletEventPublisher implements WalletEventPublisher {
                 instruction.getPaymentType(),
                 instruction.getExpiresAt(),
                 instruction.getPaymentRef(),
-                Instant.now());
+                BusinessClock.current().now());
         kafkaTemplate.send(TOPIC_PAYMENT_INSTRUCTION_CREATED,
                         instruction.getCreditAccountId().toString(), payload)
                 .whenComplete((r, ex) -> {
@@ -60,7 +61,7 @@ public class KafkaWalletEventPublisher implements WalletEventPublisher {
         UUID dispositionRequestId = UUID.randomUUID();
         var payload = new DispositionRequestedPayload(
                 dispositionRequestId, creditAccountId, obligorPartyId, amount, dispositionType,
-                beneficiaryPartyId, payeeAccount, payeeName, payeeTaxId, termPeriods, Instant.now());
+                beneficiaryPartyId, payeeAccount, payeeName, payeeTaxId, termPeriods, BusinessClock.current().now());
         kafkaTemplate.send(TOPIC_DISPOSITION_REQUESTED, creditAccountId.toString(), payload)
                 .whenComplete((r, ex) -> {
                     if (ex != null) log.error("disposition-requested publish failed creditAccountId={}: {}",
@@ -99,7 +100,7 @@ public class KafkaWalletEventPublisher implements WalletEventPublisher {
                 withdrawal.getAmount(),
                 withdrawal.getPayeeAccount(),
                 withdrawal.getExternalRef(),
-                Instant.now());
+                BusinessClock.current().now());
         kafkaTemplate.send(TOPIC_WITHDRAWAL_COMPLETED, withdrawal.getCreditAccountId().toString(), payload)
                 .whenComplete((r, ex) -> {
                     if (ex != null) log.error("withdrawal-completed publish failed withdrawalId={}: {}",

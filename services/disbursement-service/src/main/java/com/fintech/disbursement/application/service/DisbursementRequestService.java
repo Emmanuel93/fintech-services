@@ -2,6 +2,7 @@ package com.fintech.disbursement.application.service;
 
 import com.fintech.disbursement.application.RequestDisbursementCommand;
 import com.fintech.disbursement.application.port.in.RequestDisbursementUseCase;
+import com.fintech.disbursement.application.port.out.DisbursementEventPublisher;
 import com.fintech.disbursement.application.port.out.DisbursementEventRepository;
 import com.fintech.disbursement.application.port.out.DisbursementOrderRepository;
 import com.fintech.disbursement.domain.Beneficiary;
@@ -9,15 +10,19 @@ import com.fintech.disbursement.domain.ClabeValidator;
 import com.fintech.disbursement.domain.DisbursementEvent;
 import com.fintech.disbursement.domain.DisbursementOrder;
 import com.fintech.disbursement.domain.DisbursementStatus;
+import com.fintech.disbursement.domain.FailureCode;
 import com.fintech.disbursement.domain.InvalidBeneficiaryAccountException;
 import com.fintech.disbursement.domain.InvalidDisbursementInstructionException;
 import com.fintech.disbursement.domain.Rail;
+import com.fintech.disbursement.domain.UnresolvedCompanyException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -47,17 +52,40 @@ public class DisbursementRequestService implements RequestDisbursementUseCase {
     private final CompanyResolutionService companyResolution;
     private final RoutingService routing;
     private final TransactionTemplate transactionTemplate;
+    private final DisbursementEventPublisher publisher;
 
     public DisbursementRequestService(DisbursementOrderRepository orders,
                                       DisbursementEventRepository events,
                                       CompanyResolutionService companyResolution,
                                       RoutingService routing,
-                                      TransactionTemplate transactionTemplate) {
+                                      TransactionTemplate transactionTemplate,
+                                      DisbursementEventPublisher publisher) {
         this.orders = orders;
         this.events = events;
         this.companyResolution = companyResolution;
         this.routing = routing;
         this.transactionTemplate = transactionTemplate;
+        this.publisher = publisher;
+    }
+
+    @Override
+    public Optional<DisbursementOrder> requestOrReject(RequestDisbursementCommand command) {
+        try {
+            return Optional.of(request(command));
+        } catch (InvalidBeneficiaryAccountException e) {
+            return rejected(command, FailureCode.INVALID_BENEFICIARY_ACCOUNT, e.getMessage());
+        } catch (InvalidDisbursementInstructionException e) {
+            return rejected(command, FailureCode.INVALID_INSTRUCTION, e.getMessage());
+        } catch (UnresolvedCompanyException e) {
+            return rejected(command, FailureCode.UNRESOLVED_COMPANY, e.getMessage());
+        }
+    }
+
+    private Optional<DisbursementOrder> rejected(RequestDisbursementCommand command, FailureCode code, String reason) {
+        log.warn("Solicitud de desembolso rechazada sin orden sourceSystem={} sourceEventId={} motivo={}: {}",
+                command.sourceSystem(), command.sourceEventId(), code, reason);
+        publisher.publishRequestRejected(command, code, reason);
+        return Optional.empty();
     }
 
     /**
@@ -103,10 +131,16 @@ public class DisbursementRequestService implements RequestDisbursementUseCase {
                 command.currencyOrDefault(), command.concept(), command.numericReference(), rail,
                 command.correlationId());
 
-        // DB-05 — fuera de ventana operativa la orden espera; no se rechaza.
-        if (!routing.isOpen(rail, order.getCreatedAt())) {
-            order.scheduleFor(routing.nextOpening(rail, order.getCreatedAt()));
-            log.info("Fuera de ventana {}: disbursementId={} programado para {}",
+        // A later attempt of the same payment waits for the caller's moment; then, DB-05, a closed window makes it wait
+        // for the opening. It waits; it is not rejected.
+        Instant due = command.notBefore() != null && command.notBefore().isAfter(order.getCreatedAt())
+                ? command.notBefore() : order.getCreatedAt();
+        if (!routing.isOpen(rail, due)) {
+            due = routing.nextOpening(rail, due);
+        }
+        if (due.isAfter(order.getCreatedAt())) {
+            order.scheduleFor(due);
+            log.info("Desembolso programado {}: disbursementId={} sale a partir de {}",
                     rail, order.getDisbursementId(), order.getScheduledFor());
         }
 

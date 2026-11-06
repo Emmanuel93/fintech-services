@@ -10,6 +10,8 @@ import java.util.UUID;
 public record RiskAssessmentUpdatedPayload(
         UUID creditAccountId,
         UUID obligorPartyId,
+        String ifrs9Stage,
+        BigDecimal ead,
         BigDecimal provisionAmount,
         Instant calculatedAt
 ) {}

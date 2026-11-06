@@ -77,6 +77,14 @@ public class KafkaConfig {
     }
 
     @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, DispositionFailedPayload>
+    dispositionFailedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, DispositionFailedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, DispositionFailedPayload.class));
+        return factory;
+    }
+
+    @Bean
     public ConcurrentKafkaListenerContainerFactory<String, PreDueReminderTriggeredPayload>
     preDueReminderTriggeredListenerContainerFactory(KafkaProperties properties) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, PreDueReminderTriggeredPayload>();

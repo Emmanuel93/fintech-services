@@ -16,6 +16,10 @@ import java.util.Set;
  *
  * <p><strong>ACCEPTED no es dinero entregado.</strong> STP acepta el registro en segundos; la
  * liquidación se confirma después, por consulta.
+ *
+ * <p>A persisted SENT is an order whose registration never got an answer: sending and reading the answer happen in one
+ * transaction, so SENT outlives it only when the relay gave up on a silent STP. STP may hold the order all the same,
+ * so it is not failed: the reconciliation of its operation date settles it, or fails it once that day closed without it.
  */
 public enum StpPaymentOrderStatus {
 

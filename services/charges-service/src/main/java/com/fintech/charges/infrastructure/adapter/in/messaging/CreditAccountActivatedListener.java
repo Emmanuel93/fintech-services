@@ -39,7 +39,11 @@ public class CreditAccountActivatedListener {
                 event.principalBalance(),
                 event.openingFeeRate(),
                 // BNPL: nulo = devenga desde el alta, que es lo que son todos los créditos hoy.
-                event.accrualStartDate());
+                event.accrualStartDate(),
+                // The grace period comes from the product's billing cycle when it declares one.
+                event.billingCycle() != null ? event.billingCycle().graceDays() : null,
+                // And so does the interest mode: daily on the balance, or per period as each plan sets it.
+                event.billingCycle() != null ? event.billingCycle().interestAccrual() : null);
 
         snapshotService.initSnapshot(
                 event.creditAccountId(),

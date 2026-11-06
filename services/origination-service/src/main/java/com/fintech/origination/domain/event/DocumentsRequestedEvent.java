@@ -2,6 +2,7 @@ package com.fintech.origination.domain.event;
 
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Se pidieron documentos adicionales para una solicitud en revisión. Notifications lo consume para
@@ -22,7 +23,7 @@ public class DocumentsRequestedEvent {
     public DocumentsRequestedEvent(UUID applicationId, UUID prospectId, String productType,
                                    String requestedBy, String note, Instant deadline, String correlationId) {
         this.eventId       = UUID.randomUUID().toString();
-        this.occurredOn    = Instant.now();
+        this.occurredOn    = BusinessClock.current().now();
         this.applicationId = applicationId;
         this.prospectId    = prospectId;
         this.productType   = productType;

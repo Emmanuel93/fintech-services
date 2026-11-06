@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Instrucción de pago creada por el cliente. Ciclo: PENDING → SENT | CANCELLED | EXPIRED.
@@ -71,7 +72,7 @@ public class PaymentInstruction {
         pi.status          = "PENDING";
         pi.expiresAt       = expiresAt;
         pi.paymentRef      = paymentRef;
-        pi.createdAt       = Instant.now();
+        pi.createdAt       = BusinessClock.current().now();
         pi.updatedAt       = pi.createdAt;
         return pi;
     }
@@ -79,19 +80,19 @@ public class PaymentInstruction {
     public void markSent() {
         requirePending();
         this.status    = "SENT";
-        this.updatedAt = Instant.now();
+        this.updatedAt = BusinessClock.current().now();
     }
 
     public void cancel() {
         requirePending();
         this.status    = "CANCELLED";
-        this.updatedAt = Instant.now();
+        this.updatedAt = BusinessClock.current().now();
     }
 
     public void expire() {
         requirePending();
         this.status    = "EXPIRED";
-        this.updatedAt = Instant.now();
+        this.updatedAt = BusinessClock.current().now();
     }
 
     private void requirePending() {

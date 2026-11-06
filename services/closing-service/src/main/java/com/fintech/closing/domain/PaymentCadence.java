@@ -14,6 +14,16 @@ public enum PaymentCadence {
 
     WEEKLY(52)   { @Override public LocalDate advance(LocalDate from, int periods) { return from.plusWeeks(periods); } },
     BIWEEKLY(26) { @Override public LocalDate advance(LocalDate from, int periods) { return from.plusWeeks(2L * periods); } },
+    /**
+     * The fortnight (24 a year) on its default days, the 15th and the month's last day. Moving {@code periods} periods
+     * from a date lands on the {@code periods}-th cutoff strictly after it. A product that cuts on other days (the
+     * distributor line: the 6th and the 21st) derives its cutoffs from its own {@link SemiMonthlyCalendar}.
+     */
+    SEMI_MONTHLY(24) {
+        @Override public LocalDate advance(LocalDate from, int periods) {
+            return SemiMonthlyCalendar.CALENDAR_FORTNIGHT.advance(from, periods);
+        }
+    },
     MONTHLY(12)  { @Override public LocalDate advance(LocalDate from, int periods) { return from.plusMonths(periods); } };
 
     private final int periodsPerYear;
@@ -37,10 +47,11 @@ public enum PaymentCadence {
     public static Optional<PaymentCadence> parse(String value) {
         if (value == null || value.isBlank()) return Optional.empty();
         return switch (value.trim().toUpperCase()) {
-            case "WEEKLY"   -> Optional.of(WEEKLY);
-            case "BIWEEKLY" -> Optional.of(BIWEEKLY);
-            case "MONTHLY"  -> Optional.of(MONTHLY);
-            default          -> Optional.empty();
+            case "WEEKLY"       -> Optional.of(WEEKLY);
+            case "BIWEEKLY"     -> Optional.of(BIWEEKLY);
+            case "SEMI_MONTHLY" -> Optional.of(SEMI_MONTHLY);
+            case "MONTHLY"      -> Optional.of(MONTHLY);
+            default             -> Optional.empty();
         };
     }
 }

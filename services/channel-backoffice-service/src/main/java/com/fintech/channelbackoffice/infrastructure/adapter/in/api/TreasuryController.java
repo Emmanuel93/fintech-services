@@ -7,15 +7,20 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.Comparator;
 import java.util.List;
@@ -45,7 +50,7 @@ import java.util.stream.Collectors;
  * <p>Ninguna CLABE completa pasa por aquí: banking, disbursement y stp ya las mandan enmascaradas.
  */
 @RestController
-@Tag(name = "Tesorería", description = "Bancos / Tesorería — cuentas propias, rutas, pagos y su traza (sólo lectura)")
+@Tag(name = "Tesorería", description = "Bancos / Tesorería — cuentas propias, rutas, pagos y su traza; fondeo")
 class TreasuryController {
 
     private static final Logger log = LoggerFactory.getLogger(TreasuryController.class);
@@ -94,6 +99,52 @@ class TreasuryController {
                 .map(r -> new PayoutRouteView(r.payoutRouteId(), r.rail(), r.provider(),
                         r.minAmount(), r.maxAmount(), r.priority(), r.enabled()))
                 .toList();
+    }
+
+    // ── Fondeo ───────────────────────────────────────────────────────────────────────────────
+
+    @Operation(summary = "Fuentes de fondeo",
+               description = "Aportaciones de capital y líneas de fondeo, con lo aportado, lo dispuesto, los intereses "
+                           + "por pagar y hasta qué día están devengados.")
+    @GetMapping("/treasury/funding")
+    List<BankingClient.FundingSource> funding() {
+        return orEmpty(banking.fundingSources());
+    }
+
+    @Operation(summary = "Movimientos de una fuente de fondeo")
+    @GetMapping("/treasury/funding/{sourceId}/movements")
+    List<BankingClient.FundingMovement> fundingMovements(@PathVariable UUID sourceId) {
+        return orEmpty(banking.fundingMovements(sourceId));
+    }
+
+    /** Registers a capital contribution agreed by the shareholders' meeting. Capability {@code treasury.funding}. */
+    @PostMapping("/treasury/funding/capital")
+    ResponseEntity<BankingClient.FundingSource> registerCapital(@RequestBody Map<String, Object> body) {
+        log.info("POST /treasury/funding/capital");
+        return ResponseEntity.status(HttpStatus.CREATED).body(banking.registerFunding("capital", body));
+    }
+
+    /** Registers a funding line under its credit agreement. Capability {@code treasury.funding}. */
+    @PostMapping("/treasury/funding/credit-lines")
+    ResponseEntity<BankingClient.FundingSource> registerCreditLine(@RequestBody Map<String, Object> body) {
+        log.info("POST /treasury/funding/credit-lines");
+        return ResponseEntity.status(HttpStatus.CREATED).body(banking.registerFunding("credit-lines", body));
+    }
+
+    /** Records a contribution, drawdown, opening fee, interest payment or repayment. */
+    @PostMapping("/treasury/funding/{sourceId}/movements")
+    ResponseEntity<List<BankingClient.FundingMovement>> recordFunding(@PathVariable UUID sourceId,
+                                                                      @RequestBody Map<String, Object> body) {
+        log.info("POST /treasury/funding/{}/movements tipo={}", sourceId, body.get("type"));
+        return ResponseEntity.status(HttpStatus.CREATED).body(banking.recordFunding(sourceId, body));
+    }
+
+    /** Accrues the lines' interest through a day: what the month-end close needs. */
+    @PostMapping("/treasury/funding/accruals")
+    List<BankingClient.FundingMovement> accrueFunding(
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate through) {
+        log.info("POST /treasury/funding/accruals through={}", through);
+        return orEmpty(banking.accrueFunding(through));
     }
 
     // ── Pagos ────────────────────────────────────────────────────────────────────────────────

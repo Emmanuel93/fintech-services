@@ -1,5 +1,6 @@
 package com.fintech.accounting.infrastructure.adapter.in.messaging;
 
+import com.fintech.accounting.application.CommissionMoves.Accrual;
 import com.fintech.accounting.application.service.CommissionPostingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,7 +21,9 @@ public class CommissionAccruedListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "commissionAccruedListenerContainerFactory")
     public void onMessage(CommissionAccruedPayload p) {
-        log.debug("commission-accrued commissionId={} amount={}", p.commissionId(), p.amount());
-        commissionPostingService.onCommissionAccrued(p.commissionId(), p.creditAccountId(), p.amount(), p.occurredOn());
+        log.debug("commission-accrued commissionId={} amount={} iva={}", p.commissionId(), p.amount(), p.ivaAmount());
+        commissionPostingService.onCommissionAccrued(new Accrual(p.commissionId(), p.creditAccountId(),
+                p.beneficiaryPartyId(), p.productType(), p.amount(), p.ivaAmount(), p.commissionType(), null,
+                p.occurredOn(), p.settlement()));
     }
 }

@@ -51,7 +51,7 @@ public class PaymentPromise {
         p.promisedDate  = promisedDate;
         p.status        = PromiseStatus.ACTIVE;
         p.recordedBy    = recordedBy;
-        p.createdAt     = Instant.now();
+        p.createdAt     = BusinessClock.current().now();
         return p;
     }
 

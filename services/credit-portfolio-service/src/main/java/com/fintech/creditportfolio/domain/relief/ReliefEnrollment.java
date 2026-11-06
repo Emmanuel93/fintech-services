@@ -8,6 +8,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * El expediente de una cuenta apoyada (BK-36).
@@ -60,12 +61,12 @@ public class ReliefEnrollment {
         e.installmentsMoved          = cuotasMovidas;
         e.firstDueBefore             = antes;
         e.firstDueAfter              = despues;
-        e.enrolledAt                 = Instant.now();
+        e.enrolledAt                 = BusinessClock.current().now();
         return e;
     }
 
     /** Al vencer la vigencia el calendario retoma y el DPD vuelve a correr. */
-    public void release() { this.releasedAt = Instant.now(); }
+    public void release() { this.releasedAt = BusinessClock.current().now(); }
 
     public boolean isActive() { return releasedAt == null; }
 

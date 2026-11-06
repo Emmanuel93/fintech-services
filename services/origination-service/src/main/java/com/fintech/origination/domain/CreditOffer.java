@@ -5,6 +5,7 @@ import jakarta.persistence.Embeddable;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Snapshot of the pricing terms offered to the prospect (Phase E — OM-02, OM-04).
@@ -91,17 +92,17 @@ public class CreditOffer {
         o.openingFeeRate   = openingFeeRate;
         o.cat              = cat;
         o.validUntil       = validUntil;
-        o.presentedAt      = Instant.now();
+        o.presentedAt      = BusinessClock.current().now();
         return o;
     }
 
     /** Called when the prospect accepts the offer. */
     void markAccepted() {
-        this.acceptedAt = Instant.now();
+        this.acceptedAt = BusinessClock.current().now();
     }
 
     public boolean isExpired() {
-        return validUntil != null && Instant.now().isAfter(validUntil);
+        return validUntil != null && BusinessClock.current().now().isAfter(validUntil);
     }
 
     public String getProductCode()       { return productCode; }

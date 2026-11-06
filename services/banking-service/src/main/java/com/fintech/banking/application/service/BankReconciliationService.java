@@ -100,7 +100,7 @@ public class BankReconciliationService {
             return false;
         }
         return interno.byTrackingKey(line.getTrackingKey())
-                .filter(m -> m.amount().compareTo(line.getAmount()) == 0)
+                .filter(m -> m.amount().compareTo(line.getAmount()) == 0 && m.goes(line.getDirection()))
                 .map(m -> {
                     repo.saveMatch(BankMatch.deterministic(line.getId(), m.type(), m.reference(),
                             line.getAmount()));
@@ -120,8 +120,12 @@ public class BankReconciliationService {
     }
 
     private boolean matchByAmountAndDate(BankStatementLine line) {
+        // Same amount, same day and the same way: with the clients' payments in the cash book, a payment of 500 in
+        // and an order of 500 out on the same day are two candidates, and only one of them is this line.
         List<MovimientoInterno> candidatos =
-                interno.byAmountAndDate(line.getAmount(), line.getBusinessDate());
+                interno.byAmountAndDate(line.getAmount(), line.getBusinessDate()).stream()
+                        .filter(m -> m.goes(line.getDirection()))
+                        .toList();
 
         if (candidatos.size() != 1) {
             if (candidatos.size() > 1) {

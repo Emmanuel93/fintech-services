@@ -18,6 +18,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 
 /**
  * Planifica una corrida: la crea y materializa sus unidades.
@@ -62,6 +63,19 @@ public class CloseRunPlanner {
      */
     public Optional<Plan> plan(LocalDate businessDate, ClosePhase phase, String scopeKey,
                                          Function<CloseRun, List<CloseUnit>> materializador) {
+        return planBulk(businessDate, phase, scopeKey, run -> {
+            List<CloseUnit> nuevas = materializador.apply(run);
+            return nuevas.isEmpty() ? 0 : units.insertBatch(nuevas);
+        });
+    }
+
+    /**
+     * Igual que {@link #plan}, pero el materializador inserta él mismo y devuelve cuántas unidades
+     * creó. Es la forma para universos grandes: un {@code INSERT … SELECT} en la base en vez de
+     * traer cada cuenta a memoria para volverla a mandar.
+     */
+    public Optional<Plan> planBulk(LocalDate businessDate, ClosePhase phase, String scopeKey,
+                                   ToIntFunction<CloseRun> materializador) {
         String alcance = scopeKey == null || scopeKey.isBlank() ? "ALL" : scopeKey;
 
         // Ya existe: nada que planificar, pero sí algo que trabajar.
@@ -86,11 +100,10 @@ public class CloseRunPlanner {
 
     @Transactional
     protected CloseRun materialize(LocalDate businessDate, ClosePhase phase, String alcance,
-                                     Function<CloseRun, List<CloseUnit>> materializador) {
+                                     ToIntFunction<CloseRun> materializador) {
         CloseRun run = runs.save(CloseRun.plan(businessDate, phase, alcance));
 
-        List<CloseUnit> nuevas = materializador.apply(run);
-        int insertadas = nuevas.isEmpty() ? 0 : units.insertBatch(nuevas);
+        int insertadas = materializador.applyAsInt(run);
 
         run.materialized(insertadas);
         runs.save(run);
@@ -103,13 +116,15 @@ public class CloseRunPlanner {
     /**
      * Una fase no arranca hasta que su predecesora selló.
      *
-     * <p>Es la barrera que sustituye a las horas de reloj. Hoy el orden es 23:00 → 23:30 → 23:59
-     * → 01:00: si el devengo tarda más de 59 minutos, la mora corre sobre datos viejos y
-     * <b>nada lo detecta</b>.
+     * <p>Es la barrera para cuando el día lo orqueste este servicio. Hoy el corte no la usa: cargos y
+     * cartera cierran el día en cadena desde las 00:05 y el corte arranca con el aviso de cartera.
      */
     private void savePhaseBarrier(LocalDate businessDate, ClosePhase phase, String alcance) {
         ClosePhase required = phase.requires();
         if (required == null) return;
+        // El devengo y la mora los corren cargos y cartera, en cadena: nadie sella DELINQUENCY aquí y la
+        // barrera dejaría el corte sin correr para siempre. El orden lo da el aviso de cartera.
+        if (phase == ClosePhase.CUTOFF && !properties.getCutoff().isRequireDailyPhases()) return;
 
         boolean sellada = runs.find(businessDate, required, alcance)
                 .map(CloseRun::isSealed)

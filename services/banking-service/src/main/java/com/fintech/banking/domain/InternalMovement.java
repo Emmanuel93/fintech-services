@@ -50,6 +50,13 @@ public class InternalMovement {
     @Column(name = "projected_at", nullable = false, updatable = false)
     private OffsetDateTime projectedAt;
 
+    /**
+     * The portfolio's date for the same money (the day a payment was received, the day a disposition was made).
+     * {@link #businessDate} is the bank's: the SPEI operation date.
+     */
+    @Column(name = "portfolio_date", updatable = false)
+    private LocalDate portfolioDate;
+
     protected InternalMovement() {}
 
     public static InternalMovement from(String type, String reference, BigDecimal amount,
@@ -68,6 +75,12 @@ public class InternalMovement {
         return m;
     }
 
+    /** The same movement with the portfolio's date of its money, when it differs from the bank's. */
+    public InternalMovement withPortfolioDate(LocalDate portfolioDate) {
+        this.portfolioDate = portfolioDate;
+        return this;
+    }
+
     public UUID getId()              { return id; }
     public String getMovementType()  { return movementType; }
     public String getReference()     { return reference; }
@@ -76,4 +89,6 @@ public class InternalMovement {
     public String getTrackingKey()   { return trackingKey; }
     public String getDirection()     { return direction; }
     public String getSourceEventId() { return sourceEventId; }
+    /** The portfolio's date; the bank's when no other was given. */
+    public LocalDate getPortfolioDate() { return portfolioDate != null ? portfolioDate : businessDate; }
 }

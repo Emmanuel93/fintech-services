@@ -13,5 +13,6 @@
     <include file="db/changelog/risk/006-seed-initial-provision-policies.sql"  relativeToChangelogFile="false"/>
     <include file="db/changelog/risk/007-seed-distributor-line-provision-policy.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/risk/008-candado-de-crones.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/risk/009-ecl-por-etapa.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

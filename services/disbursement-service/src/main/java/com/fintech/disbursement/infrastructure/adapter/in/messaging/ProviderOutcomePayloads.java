@@ -44,6 +44,8 @@ public final class ProviderOutcomePayloads {
             @JsonAlias({"banxicoReason", "providerReason"}) String providerReason,
             String detail,
             boolean retryable,
+            /* Technical, not a rule: the connector says so; absent in older messages, read as a rule. */
+            boolean technical,
             Instant occurredOn
     ) {}
 

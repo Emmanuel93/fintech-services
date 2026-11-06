@@ -26,4 +26,10 @@ public record CreditAccountActivatedPayload(
         String riskTier,
         Instant activatedAt,
         /** BNPL: desde cuándo devenga. Nulo = desde el alta (BK-28). */
-        java.time.LocalDate accrualStartDate) {}
+        java.time.LocalDate accrualStartDate,
+        /** The product's billing cycle: its grace period and its interest mode. Null for older products. */
+        BillingCycle billingCycle) {
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BillingCycle(Integer graceDays, String interestAccrual) {}
+}

@@ -8,6 +8,7 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Un programa de apoyo por contingencia: se corren N pagos a quienes cumplan un criterio.
@@ -121,7 +122,7 @@ public class ReliefProgram {
         p.accrualDuringRelief   = accrualDuringRelief != null ? accrualDuringRelief : "ACCRUES";
         p.status                = "PROPOSED";
         p.proposedBy            = proposedBy;
-        p.createdAt             = Instant.now();
+        p.createdAt             = BusinessClock.current().now();
         return p;
     }
 
@@ -143,7 +144,7 @@ public class ReliefProgram {
         }
         this.status     = "APPROVED";
         this.approvedBy = approvedBy;
-        this.approvedAt = Instant.now();
+        this.approvedAt = BusinessClock.current().now();
     }
 
     public void reject(String rejectedBy) {
@@ -152,7 +153,7 @@ public class ReliefProgram {
         }
         this.status     = "REJECTED";
         this.approvedBy = rejectedBy;
-        this.approvedAt = Instant.now();
+        this.approvedAt = BusinessClock.current().now();
     }
 
     public void close() { this.status = "CLOSED"; }

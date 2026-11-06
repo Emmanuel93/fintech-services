@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,9 @@ public class LedgerQueryDao {
     /** `null` significa «sin sucursal» y hay que preguntarlo con IS NULL, no con IN. */
     private static final String SIN_SUCURSAL = "SIN_SUCURSAL";
 
+    /** A {@code null} product is the institution's (its funding and its interest): asked with IS NULL as well. */
+    public static final String INSTITUCION = "INSTITUCION";
+
     @PersistenceContext
     private EntityManager em;
 
@@ -57,7 +61,7 @@ public class LedgerQueryDao {
                 SELECT v.voucher_id, v.voucher_type, v.folio, v.period, v.voucher_date, v.org_unit_code,
                        v.concept, v.trigger_event, v.source_event_id, v.credit_account_id, v.obligor_party_id,
                        v.total_debit, v.total_credit, v.status, v.is_late_posting, v.original_period,
-                       v.reversal_ref
+                       v.reversal_ref, v.product_type
                   FROM accounting.vouchers v
                  WHERE 1=1""");
         Map<String, Object> params = new LinkedHashMap<>();
@@ -72,6 +76,20 @@ public class LedgerQueryDao {
         return rows.stream().map(r -> voucherOf(r, List.of())).toList();
     }
 
+    /**
+     * The bank's side of a loan's money: the order that paid it out (named by the payout link) and the SPEI credits
+     * that paid it (named by its payments' clearing items). Resolved when read, so it does not depend on which fact
+     * arrived first, and no posted voucher is touched.
+     */
+    private static final String BANK_SIDE_OF_A_LOAN = """
+            SELECT b.voucher_id FROM accounting.vouchers b
+             WHERE b.trigger_event LIKE 'TREASURY_%'
+               AND b.clearing_ref IN (SELECT l.payment_request_id::text FROM accounting.payout_links l
+                                       WHERE l.credit_account_id = :creditAccountId
+                                      UNION ALL
+                                      SELECT p.clearing_ref FROM accounting.vouchers p
+                                       WHERE p.credit_account_id = :creditAccountId AND p.clearing_ref IS NOT NULL)""";
+
     private void appendVoucherFilters(StringBuilder sql, Map<String, Object> params, String period,
                                       List<String> unitCodes, String type,
                                       UUID creditAccountId, UUID partyId) {
@@ -85,7 +103,8 @@ public class LedgerQueryDao {
             params.put("type", type);
         }
         if (creditAccountId != null) {
-            sql.append(" AND v.credit_account_id = :creditAccountId");
+            sql.append(" AND (v.credit_account_id = :creditAccountId OR v.voucher_id IN (")
+                    .append(BANK_SIDE_OF_A_LOAN).append("))");
             params.put("creditAccountId", creditAccountId);
         }
         if (partyId != null) {
@@ -104,18 +123,31 @@ public class LedgerQueryDao {
      */
     private void appendUnitScope(StringBuilder sql, Map<String, Object> params,
                                  List<String> unitCodes, String column) {
-        if (unitCodes == null || unitCodes.isEmpty()) return;
-        boolean sinSucursal = unitCodes.contains(SIN_SUCURSAL);
-        List<String> reales = unitCodes.stream().filter(c -> !SIN_SUCURSAL.equals(c)).toList();
+        appendScope(sql, params, unitCodes, column, SIN_SUCURSAL, "unitCodes");
+    }
 
-        if (sinSucursal && reales.isEmpty()) {
+    /** The scope by product: {@code INSTITUCION} is not a product but the absence of one, asked with IS NULL. */
+    private void appendProductScope(StringBuilder sql, Map<String, Object> params,
+                                    List<String> productTypes, String column) {
+        appendScope(sql, params, productTypes, column, INSTITUCION, "productTypes");
+    }
+
+    /** A filter by a dimension's codes, where {@code noneCode} stands for the rows that have none. */
+    private void appendScope(StringBuilder sql, Map<String, Object> params, List<String> codes, String column,
+                             String noneCode, String param) {
+        if (codes == null || codes.isEmpty()) return;
+        boolean none = codes.contains(noneCode);
+        List<String> real = codes.stream().filter(c -> !noneCode.equals(c)).toList();
+
+        if (none && real.isEmpty()) {
             sql.append(" AND ").append(column).append(" IS NULL");
-        } else if (sinSucursal) {
-            sql.append(" AND (").append(column).append(" IN :unitCodes OR ").append(column).append(" IS NULL)");
-            params.put("unitCodes", reales);
+        } else if (none) {
+            sql.append(" AND (").append(column).append(" IN :").append(param).append(" OR ").append(column)
+                    .append(" IS NULL)");
+            params.put(param, real);
         } else {
-            sql.append(" AND ").append(column).append(" IN :unitCodes");
-            params.put("unitCodes", reales);
+            sql.append(" AND ").append(column).append(" IN :").append(param);
+            params.put(param, real);
         }
     }
 
@@ -156,7 +188,7 @@ public class LedgerQueryDao {
                 SELECT v.voucher_id, v.voucher_type, v.folio, v.period, v.voucher_date, v.org_unit_code,
                        v.concept, v.trigger_event, v.source_event_id, v.credit_account_id, v.obligor_party_id,
                        v.total_debit, v.total_credit, v.status, v.is_late_posting, v.original_period,
-                       v.reversal_ref
+                       v.reversal_ref, v.product_type
                   FROM accounting.vouchers v WHERE v.voucher_id = :voucherId
                 """);
         q.setParameter("voucherId", voucherId);
@@ -168,25 +200,40 @@ public class LedgerQueryDao {
     // ── Balanza ──────────────────────────────────────────────────────────────
 
     public List<TrialBalanceRowView> trialBalance(String period, List<String> unitCodes) {
-        StringBuilder sql = new StringBuilder("""
+        return trialBalance(period, unitCodes, List.of());
+    }
+
+    /** The trial balance of the branches and products asked for; none asked, all of them. */
+    public List<TrialBalanceRowView> trialBalance(String period, List<String> unitCodes, List<String> productTypes) {
+        boolean byPeriod = period != null && !period.isBlank();
+        // Periods are YYYYMM, so they compare as text: what came before the period is its opening balance.
+        StringBuilder sql = new StringBuilder(byPeriod ? """
                 SELECT a.code, a.name, a.type,
-                       COALESCE(SUM(m.debit), 0), COALESCE(SUM(m.credit), 0)
+                       COALESCE(SUM(m.debit) FILTER (WHERE m.period = :period), 0),
+                       COALESCE(SUM(m.credit) FILTER (WHERE m.period = :period), 0),
+                       COALESCE(SUM(m.debit - m.credit) FILTER (WHERE m.period < :period), 0)
+                """ : """
+                SELECT a.code, a.name, a.type,
+                       COALESCE(SUM(m.debit), 0), COALESCE(SUM(m.credit), 0), 0::numeric
+                """);
+        sql.append("""
                   FROM (
                         SELECT e.debit_account AS code, e.amount AS debit, 0::numeric AS credit,
-                               e.period, e.org_unit_code
+                               e.period, e.org_unit_code, e.product_type
                           FROM accounting.journal_entries e
                         UNION ALL
-                        SELECT e.credit_account, 0::numeric, e.amount, e.period, e.org_unit_code
+                        SELECT e.credit_account, 0::numeric, e.amount, e.period, e.org_unit_code, e.product_type
                           FROM accounting.journal_entries e
                        ) m
                   JOIN accounting.ledger_accounts a ON a.code = m.code
                  WHERE 1=1""");
         Map<String, Object> params = new LinkedHashMap<>();
-        if (period != null && !period.isBlank()) {
-            sql.append(" AND m.period = :period");
+        if (byPeriod) {
+            sql.append(" AND m.period <= :period");
             params.put("period", period);
         }
         appendUnitScope(sql, params, unitCodes, "m.org_unit_code");
+        appendProductScope(sql, params, productTypes, "m.product_type");
         sql.append(" GROUP BY a.code, a.name, a.type ORDER BY a.code");
 
         Query q = em.createNativeQuery(sql.toString());
@@ -196,9 +243,110 @@ public class LedgerQueryDao {
                 .map(r -> {
                     BigDecimal d = dec(r[3]);
                     BigDecimal c = dec(r[4]);
-                    return new TrialBalanceRowView(str(r[0]), str(r[1]), str(r[2]), d, c, d.subtract(c));
+                    BigDecimal opening = dec(r[5]);
+                    return new TrialBalanceRowView(str(r[0]), str(r[1]), str(r[2]), d, c, d.subtract(c),
+                            opening, opening.add(d).subtract(c));
                 })
                 .toList();
+    }
+
+    /**
+     * The trial balance of {@code period} by product and branch: what the close keeps next to the whole one, so a closed
+     * month shows what it closed with. Only what a product·branch moved in the period or still holds.
+     */
+    public List<DimensionBalanceView> trialBalanceByProduct(String period) {
+        Query q = em.createNativeQuery("""
+                SELECT m.product_type, m.org_unit_code, a.code, a.name, a.type,
+                       COALESCE(SUM(m.debit) FILTER (WHERE m.period = :period), 0),
+                       COALESCE(SUM(m.credit) FILTER (WHERE m.period = :period), 0),
+                       COALESCE(SUM(m.debit - m.credit) FILTER (WHERE m.period < :period), 0)
+                  FROM (
+                        SELECT e.debit_account AS code, e.amount AS debit, 0::numeric AS credit,
+                               e.period, e.org_unit_code, e.product_type
+                          FROM accounting.journal_entries e WHERE e.period <= :period
+                        UNION ALL
+                        SELECT e.credit_account, 0::numeric, e.amount, e.period, e.org_unit_code, e.product_type
+                          FROM accounting.journal_entries e WHERE e.period <= :period
+                       ) m
+                  JOIN accounting.ledger_accounts a ON a.code = m.code
+                 GROUP BY m.product_type, m.org_unit_code, a.code, a.name, a.type
+                HAVING COALESCE(SUM(m.debit + m.credit) FILTER (WHERE m.period = :period), 0) <> 0
+                    OR SUM(m.debit - m.credit) <> 0
+                 ORDER BY m.product_type NULLS FIRST, m.org_unit_code NULLS FIRST, a.code
+                """);
+        q.setParameter("period", period);
+        @SuppressWarnings("unchecked") List<Object[]> rows = q.getResultList();
+        return rows.stream()
+                .map(r -> {
+                    BigDecimal d = dec(r[5]);
+                    BigDecimal c = dec(r[6]);
+                    BigDecimal opening = dec(r[7]);
+                    return new DimensionBalanceView(str(r[0]), str(r[1]), str(r[2]), str(r[3]), str(r[4]), d, c,
+                            opening, opening.add(d).subtract(c));
+                })
+                .toList();
+    }
+
+    /**
+     * A product's accounting scheme, as the ledger booked it: each concept (the kind of fact) with the pairs of accounts
+     * it moved, how many entries and how much. {@code INSTITUCION} is the scheme of what belongs to no product.
+     */
+    public ProductSchemeView productScheme(String productType, String from, String to) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        StringBuilder scope = new StringBuilder();
+        if (INSTITUCION.equals(productType)) {
+            scope.append(" AND e.product_type IS NULL");
+        } else {
+            scope.append(" AND e.product_type = :product");
+            params.put("product", productType);
+        }
+        if (from != null && !from.isBlank()) {
+            scope.append(" AND e.period >= :from");
+            params.put("from", from);
+        }
+        if (to != null && !to.isBlank()) {
+            scope.append(" AND e.period <= :to");
+            params.put("to", to);
+        }
+        Query pairs = em.createNativeQuery("""
+                SELECT e.trigger_event, e.debit_account, da.name, e.credit_account, ca.name,
+                       COUNT(*), SUM(e.amount), MIN(e.description), COUNT(DISTINCT e.voucher_id)
+                  FROM accounting.journal_entries e
+                  JOIN accounting.ledger_accounts da ON da.code = e.debit_account
+                  JOIN accounting.ledger_accounts ca ON ca.code = e.credit_account
+                 WHERE 1=1""" + scope + """
+
+                 GROUP BY e.trigger_event, e.debit_account, da.name, e.credit_account, ca.name
+                 ORDER BY e.trigger_event, SUM(e.amount) DESC, e.debit_account, e.credit_account""");
+        params.forEach(pairs::setParameter);
+        // The concept a kind of fact is booked with: its vouchers' most frequent text.
+        Query concepts = em.createNativeQuery("""
+                SELECT e.trigger_event, MODE() WITHIN GROUP (ORDER BY v.concept), COUNT(DISTINCT e.voucher_id),
+                       SUM(e.amount)
+                  FROM accounting.journal_entries e
+                  JOIN accounting.vouchers v ON v.voucher_id = e.voucher_id
+                 WHERE 1=1""" + scope + """
+
+                 GROUP BY e.trigger_event""");
+        params.forEach(concepts::setParameter);
+
+        Map<String, Object[]> byTrigger = new LinkedHashMap<>();
+        @SuppressWarnings("unchecked") List<Object[]> conceptRows = concepts.getResultList();
+        conceptRows.forEach(r -> byTrigger.put(str(r[0]), r));
+        Map<String, List<SchemePairView>> pairsByTrigger = new LinkedHashMap<>();
+        @SuppressWarnings("unchecked") List<Object[]> pairRows = pairs.getResultList();
+        for (Object[] r : pairRows) {
+            pairsByTrigger.computeIfAbsent(str(r[0]), k -> new ArrayList<>())
+                    .add(new SchemePairView(str(r[1]), str(r[2]), str(r[3]), str(r[4]), num(r[5]), dec(r[6]), str(r[7])));
+        }
+        List<SchemeConceptView> out = pairsByTrigger.entrySet().stream()
+                .map(e -> {
+                    Object[] c = byTrigger.get(e.getKey());
+                    return new SchemeConceptView(e.getKey(), c == null ? null : str(c[1]), c == null ? 0 : num(c[2]),
+                            c == null ? BigDecimal.ZERO : dec(c[3]), List.copyOf(e.getValue()));
+                })
+                .toList();
+        return new ProductSchemeView(productType, from, to, out);
     }
 
     // ── Resumen y sucursales ─────────────────────────────────────────────────
@@ -211,13 +359,31 @@ public class LedgerQueryDao {
      * mucho y colocó poco aparecería como la de mayor movimiento.
      */
     public List<UnitMovementView> unitMovements(String period, List<String> unitCodes) {
-        StringBuilder sql = new StringBuilder("""
-                SELECT v.org_unit_code,
+        return movements("v.org_unit_code", period, unitCodes).stream()
+                .map(r -> new UnitMovementView(str(r[0]), num(r[1]), num(r[2]),
+                        // Cargos = abonos por construcción (cada par aporta lo mismo a los dos lados),
+                        // así que la misma suma sirve para las dos columnas.
+                        dec(r[3]), dec(r[3]), dec(r[4]), dec(r[5]), dec(r[6]), dec(r[7])))
+                .toList();
+    }
+
+    /** The movement of each product in the period, measured as a branch's; the institution's own facts apart. */
+    public List<ProductMovementView> productMovements(String period, List<String> unitCodes) {
+        return movements("v.product_type", period, unitCodes).stream()
+                .map(r -> new ProductMovementView(r[0] == null ? INSTITUCION : str(r[0]), num(r[1]), num(r[2]),
+                        dec(r[3]), dec(r[3]), dec(r[4]), dec(r[5]), dec(r[6]), dec(r[7])))
+                .toList();
+    }
+
+    /** The movement of the period grouped by one dimension of the voucher ({@code groupColumn}). */
+    private List<Object[]> movements(String groupColumn, String period, List<String> unitCodes) {
+        StringBuilder sql = new StringBuilder("SELECT " + groupColumn + ",").append("""
+
                        COUNT(DISTINCT v.voucher_id),
                        COUNT(DISTINCT v.credit_account_id),
                        COALESCE(SUM(CASE WHEN a.type <> 'ORDER' THEN e.amount ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN e.credit_account = '4101' THEN e.amount
-                                         WHEN e.debit_account  = '4101' THEN -e.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN e.credit_account IN ('4101', '4106') THEN e.amount
+                                         WHEN e.debit_account  IN ('4101', '4106') THEN -e.amount ELSE 0 END), 0),
                        COALESCE(SUM(CASE WHEN e.credit_account = '4102' THEN e.amount
                                          WHEN e.debit_account  = '4102' THEN -e.amount ELSE 0 END), 0),
                        COALESCE(SUM(CASE WHEN e.credit_account = '4103' THEN e.amount
@@ -234,17 +400,12 @@ public class LedgerQueryDao {
             params.put("period", period);
         }
         appendUnitScope(sql, params, unitCodes, "v.org_unit_code");
-        sql.append(" GROUP BY v.org_unit_code ORDER BY 4 DESC");
+        sql.append(" GROUP BY ").append(groupColumn).append(" ORDER BY 4 DESC");
 
         Query q = em.createNativeQuery(sql.toString());
         params.forEach(q::setParameter);
         @SuppressWarnings("unchecked") List<Object[]> rows = q.getResultList();
-        return rows.stream()
-                .map(r -> new UnitMovementView(str(r[0]), num(r[1]), num(r[2]),
-                        // Cargos = abonos por construcción (cada par aporta lo mismo a los dos lados),
-                        // así que la misma suma sirve para las dos columnas.
-                        dec(r[3]), dec(r[3]), dec(r[4]), dec(r[5]), dec(r[6]), dec(r[7])))
-                .toList();
+        return rows;
     }
 
     /** Los totales del período. Una consulta, no la suma en memoria de las sucursales. */
@@ -253,8 +414,8 @@ public class LedgerQueryDao {
                 SELECT COUNT(DISTINCT v.voucher_id),
                        COALESCE(SUM(CASE WHEN a.type <> 'ORDER' THEN e.amount ELSE 0 END), 0),
                        COALESCE(SUM(CASE WHEN a.type =  'ORDER' THEN e.amount ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN e.credit_account = '4101' THEN e.amount
-                                         WHEN e.debit_account  = '4101' THEN -e.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN e.credit_account IN ('4101', '4106') THEN e.amount
+                                         WHEN e.debit_account  IN ('4101', '4106') THEN -e.amount ELSE 0 END), 0),
                        COALESCE(SUM(CASE WHEN e.credit_account = '4102' THEN e.amount
                                          WHEN e.debit_account  = '4102' THEN -e.amount ELSE 0 END), 0),
                        COALESCE(SUM(CASE WHEN e.credit_account = '4103' THEN e.amount
@@ -286,6 +447,49 @@ public class LedgerQueryDao {
         Query q = em.createNativeQuery(sql.toString());
         params.forEach(q::setParameter);
         return (Object[]) q.getSingleResult();
+    }
+
+    /**
+     * The bridge from recognized revenue to what was charged and has to be invoiced, for a period. What was charged is
+     * the invoiceable items (one per charge, IVA its own item); the rest comes from the ledger.
+     */
+    public BillingBridgeView billingBridge(String period, List<String> unitCodes) {
+        StringBuilder ledger = new StringBuilder("""
+                SELECT COALESCE(SUM(CASE WHEN e.credit_account IN ('4101', '4102', '4103', '4106') THEN e.amount
+                                         WHEN e.debit_account  IN ('4101', '4102', '4103', '4106') THEN -e.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN e.credit_account = '2110' THEN e.amount
+                                         WHEN e.debit_account  = '2110' THEN -e.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN e.debit_account = '7401' THEN e.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN e.credit_account = '2150' AND e.debit_account = '1203' THEN e.amount
+                                         WHEN e.debit_account = '2150' AND e.credit_account = '1203' THEN -e.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN e.debit_account = '2150' AND e.credit_account = '4106' THEN e.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN e.debit_account = '4106' AND e.credit_account = '1205' THEN e.amount ELSE 0 END), 0)
+                  FROM accounting.journal_entries e
+                 WHERE e.period = :period""");
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("period", period);
+        appendUnitScope(ledger, params, unitCodes, "e.org_unit_code");
+        Query q = em.createNativeQuery(ledger.toString());
+        params.forEach(q::setParameter);
+        Object[] r = (Object[]) q.getSingleResult();
+
+        StringBuilder items = new StringBuilder("""
+                SELECT COALESCE(SUM(i.amount), 0)
+                  FROM accounting.invoiceable_items i
+                  LEFT JOIN accounting.account_balance_shadows s ON s.credit_account_id = i.credit_account_id
+                 WHERE i.period = :period""");
+        Map<String, Object> itemParams = new LinkedHashMap<>();
+        itemParams.put("period", period);
+        appendUnitScope(items, itemParams, unitCodes, "s.org_unit_code");
+        Query qi = em.createNativeQuery(items.toString());
+        itemParams.forEach(qi::setParameter);
+        BigDecimal charged = dec(qi.getSingleResult());
+
+        BigDecimal revenue = dec(r[0]), iva = dec(r[1]), stage3 = dec(r[2]), feesCharged = dec(r[3]),
+                feesRecognized = dec(r[4]), costs = dec(r[5]);
+        BigDecimal explained = revenue.add(iva).add(stage3).add(feesCharged).subtract(feesRecognized).add(costs);
+        return new BillingBridgeView(charged, revenue, iva, stage3, feesCharged, feesRecognized, costs,
+                charged.subtract(explained));
     }
 
     // ── Auxiliar de un préstamo ──────────────────────────────────────────────
@@ -440,8 +644,8 @@ public class LedgerQueryDao {
                        MAX(v.voucher_date),
                        COALESCE(SUM(CASE WHEN a.type <> 'ORDER' THEN e.amount ELSE 0 END), 0),
                        COALESCE(SUM(CASE WHEN a.type =  'ORDER' THEN e.amount ELSE 0 END), 0),
-                       COALESCE(SUM(CASE WHEN e.credit_account = '4101' THEN e.amount
-                                         WHEN e.debit_account  = '4101' THEN -e.amount ELSE 0 END), 0),
+                       COALESCE(SUM(CASE WHEN e.credit_account IN ('4101', '4106') THEN e.amount
+                                         WHEN e.debit_account  IN ('4101', '4106') THEN -e.amount ELSE 0 END), 0),
                        COALESCE(SUM(CASE WHEN e.credit_account = '4102' THEN e.amount
                                          WHEN e.debit_account  = '4102' THEN -e.amount ELSE 0 END), 0),
                        COALESCE(SUM(CASE WHEN e.credit_account = '4103' THEN e.amount
@@ -487,7 +691,7 @@ public class LedgerQueryDao {
                 (UUID) r[0], str(r[1]), num(r[2]), str(r[3]), instant(r[4]), str(r[5]),
                 str(r[6]), str(r[7]), str(r[8]), (UUID) r[9], (UUID) r[10],
                 dec(r[11]), dec(r[12]), str(r[13]),
-                Boolean.TRUE.equals(r[14]), str(r[15]), (UUID) r[16],
+                Boolean.TRUE.equals(r[14]), str(r[15]), (UUID) r[16], str(r[17]),
                 lines);
     }
 

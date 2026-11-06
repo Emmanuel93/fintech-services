@@ -6,6 +6,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.regex.Pattern;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Una colocación: un distribuidor le presta a una persona con cargo a su línea revolvente.
@@ -223,7 +224,7 @@ public class Placement {
         p.verificationMode            = verificationMode;
         p.inviteExpiresAt             = inviteExpiresAt;
         p.status                      = PlacementStatus.INVITED;
-        p.createdAt                   = Instant.now();
+        p.createdAt                   = BusinessClock.current().now();
         p.updatedAt                   = p.createdAt;
         return p;
     }
@@ -310,7 +311,7 @@ public class Placement {
                             ? ScreeningVerdict.unavailable("no se consultó el veredicto")
                             : screening);
         }
-        this.decidedAt = Instant.now();
+        this.decidedAt = BusinessClock.current().now();
         transitionTo(PlacementStatus.APPROVED, null);
     }
 
@@ -329,7 +330,7 @@ public class Placement {
      */
     public void recordVerificationNotes(String notes) {
         this.identityReviewNotes = notes;
-        this.updatedAt = Instant.now();
+        this.updatedAt = BusinessClock.current().now();
     }
 
     public void reviewIdentity(IdentityDecision decision, VerificationSource source,
@@ -357,15 +358,15 @@ public class Placement {
         this.identityDecision           = decision;
         this.identityVerificationSource = source;
         this.identityDecidedBy          = decidedBy;
-        this.identityDecidedAt          = Instant.now();
+        this.identityDecidedAt          = BusinessClock.current().now();
         this.identityRejectionReason    =
                 decision == IdentityDecision.REJECTED ? rejectionReason : null;
-        this.updatedAt = Instant.now();
+        this.updatedAt = BusinessClock.current().now();
     }
 
     /** El distribuidor vio el historial y decidió no colocar. */
     public void reject(String reason) {
-        this.decidedAt = Instant.now();
+        this.decidedAt = BusinessClock.current().now();
         transitionTo(PlacementStatus.REJECTED, reason);
     }
 
@@ -396,7 +397,7 @@ public class Placement {
 
     /** El SPEI llegó a su CLABE. */
     public void markDisbursed() {
-        this.disbursedAt = Instant.now();
+        this.disbursedAt = BusinessClock.current().now();
         transitionTo(PlacementStatus.DISBURSED, null);
     }
 
@@ -425,7 +426,7 @@ public class Placement {
             throw new InvalidPlacementTransitionException(placementId, status, status);
         }
         this.inviteExpiresAt = newExpiry;
-        this.updatedAt       = Instant.now();
+        this.updatedAt       = BusinessClock.current().now();
     }
 
     /** Si la liga ya venció a la fecha dada. Lo consulta el barrido de vencimiento. */
@@ -457,7 +458,7 @@ public class Placement {
         }
         this.status       = target;
         this.statusReason = reason;
-        this.updatedAt    = Instant.now();
+        this.updatedAt    = BusinessClock.current().now();
     }
 
     private static void requireNotNull(Object value, String field) {

@@ -13,5 +13,8 @@ public record CreditAccountActivatedPayload(
         UUID creditAccountId,
         UUID obligorPartyId,
         BigDecimal creditLimit,
-        Instant activatedAt
+        Instant activatedAt,
+        /** The numeric reference a SPEI transfer uses to name this loan. */
+        Long paymentReference,
+        String productType
 ) {}

@@ -1,9 +1,12 @@
 package com.fintech.shared.time;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
 import java.util.Objects;
 
 /**
@@ -40,10 +43,50 @@ public final class BusinessClock {
      */
     private static volatile BusinessClock current = of(ZoneId.of(DEFAULT_ZONE));
 
-    private final Clock clock;
+    /** The real clock; {@link #clock} is the one read, and differs only while a shift is in place. */
+    private final Clock base;
+    private volatile Clock clock;
+    /** The {@link Clock} view handed to APIs that want one; it follows every shift (see {@link #asClock()}). */
+    private final Clock view;
 
     public BusinessClock(Clock clock) {
-        this.clock = Objects.requireNonNull(clock, "clock");
+        this.base  = Objects.requireNonNull(clock, "clock");
+        this.clock = this.base;
+        this.view  = new FollowingClock(this, null);
+    }
+
+    /**
+     * Shifts the clock so that "today" is {@code today}, with the time of day still running. Meant for
+     * test environments: it lets many day closes run without waiting each night or moving data
+     * backwards. Exposed by {@code /internal/test-support/clock}, which only exists with test support
+     * enabled and never in production ({@code SimulatorGuard}).
+     */
+    public void shiftTo(LocalDate today) {
+        long days = ChronoUnit.DAYS.between(LocalDate.now(base), Objects.requireNonNull(today, "today"));
+        this.clock = days == 0 ? base : Clock.offset(base, Duration.ofDays(days));
+    }
+
+    /**
+     * Shifts the clock so that "now" is {@code at}, a date and a time of day in the operation's zone, with the clock
+     * running from there. This is what makes a simulated day deterministic: the operations of the day happen at 10:00
+     * whatever the hour the run is started, an after-cutoff payment at 18:30, and the night at 00:05 of the next day.
+     * Shifting only the date kept the real time of day, so the same run gave other SPEI operation dates depending on
+     * when it was launched.
+     */
+    public void shiftTo(LocalDateTime at) {
+        Instant target = Objects.requireNonNull(at, "at").atZone(base.getZone()).toInstant();
+        Duration offset = Duration.between(base.instant(), target);
+        this.clock = offset.isZero() ? base : Clock.offset(base, offset);
+    }
+
+    /** Back to the real clock. */
+    public void resetShift() {
+        this.clock = base;
+    }
+
+    /** How many days the clock is shifted from the real one; zero when there is no shift. */
+    public long shiftedDays() {
+        return clock == base ? 0 : Duration.between(base.instant(), clock.instant()).toDays();
     }
 
     public static BusinessClock of(ZoneId zone) {
@@ -76,5 +119,47 @@ public final class BusinessClock {
     /** El reloj subyacente, para APIs que lo piden ({@code LocalDate.now(Clock)}, etc.). */
     public Clock clock() {
         return clock;
+    }
+
+    /**
+     * A {@link Clock} that always reads this business clock, shifts included. {@link #clock()} returns a snapshot: a
+     * bean built from it keeps the time it had when it was taken, and a service whose timestamps came from a snapshot
+     * and whose dates came from the business clock wrote facts that disagreed with each other. Inject this view
+     * wherever a component wants a {@code java.time.Clock}.
+     */
+    public Clock asClock() {
+        return view;
+    }
+
+    /** The view: every read goes to the business clock in force, so a later shift is seen at once. */
+    private static final class FollowingClock extends Clock {
+
+        private final BusinessClock owner;
+        private final ZoneId zone;
+
+        private FollowingClock(BusinessClock owner, ZoneId zone) {
+            this.owner = owner;
+            this.zone  = zone;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return zone != null ? zone : owner.clock.getZone();
+        }
+
+        @Override
+        public Clock withZone(ZoneId newZone) {
+            return new FollowingClock(owner, Objects.requireNonNull(newZone, "zone"));
+        }
+
+        @Override
+        public Instant instant() {
+            return owner.clock.instant();
+        }
+
+        @Override
+        public long millis() {
+            return owner.clock.millis();
+        }
     }
 }

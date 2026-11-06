@@ -19,5 +19,6 @@
     <include file="db/changelog/notifications/013-seed-backoffice-policies.sql"  relativeToChangelogFile="false"/>
     <include file="db/changelog/notifications/014-aviso-de-asignacion-singular.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/notifications/015-rename-template-placeholders.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/notifications/016-aviso-de-desembolso-fallido.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

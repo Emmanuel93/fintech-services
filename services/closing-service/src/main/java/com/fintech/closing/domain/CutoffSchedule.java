@@ -98,6 +98,10 @@ public class CutoffSchedule {
     public BigDecimal getAmountDue()   { return amountDue; }
     public BigDecimal getMinimumPayment() { return minimumPayment; }
     public BigDecimal getBalanceAtCutoff() { return balanceAtCutoff; }
+    public BigDecimal getPrincipalAtCutoff() { return principalAtCutoff; }
+    public BigDecimal getInterestAtCutoff()  { return interestAtCutoff; }
+    public BigDecimal getPenaltyAtCutoff()   { return penaltyAtCutoff; }
+    public java.time.Instant getSealedAt()   { return sealedAt; }
     public Integer getMovementCount()  { return movementCount; }
 
     public static class Key implements Serializable {

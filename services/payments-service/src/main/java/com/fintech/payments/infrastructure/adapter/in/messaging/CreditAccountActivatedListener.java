@@ -23,6 +23,7 @@ public class CreditAccountActivatedListener {
             containerFactory = "creditAccountActivatedListenerContainerFactory")
     public void onCreditAccountActivated(CreditAccountActivatedPayload event) {
         log.info("credit-account-activated received creditAccountId={}", event.creditAccountId());
-        snapshotService.initSnapshot(event.creditAccountId(), event.obligorPartyId(), event.creditLimit());
+        snapshotService.initSnapshot(event.creditAccountId(), event.obligorPartyId(), event.creditLimit(),
+                event.activatedAt(), event.paymentReference(), event.productType());
     }
 }

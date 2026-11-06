@@ -31,7 +31,11 @@ public record CreditAccountActivatedPayload(
          */
         BigDecimal principalBalance,
         String originUnitCode,
-        Instant occurredOn
+        /** The loan's product (PERSONAL_LOAN, DISTRIBUTOR_LINE…): the dimension of the trial balance by product. */
+        String productType,
+        Instant occurredOn,
+        Integer termPeriods,
+        String paymentFrequency
 ) {
     /**
      * Lo que se registra en cuentas de orden: la línea autorizada.

@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import com.fintech.shared.time.BusinessClock;
 import java.util.UUID;
 
 /**
@@ -53,10 +55,46 @@ public class BalanceEvent {
     @Column(name = "applied_at", nullable = false, updatable = false)
     private Instant appliedAt;
 
+    /**
+     * La fecha valor: el día de negocio al que pertenece el movimiento. Casi siempre es el día en que
+     * se aplicó; el devengo no — el del día D se aplica a las 00:05 de D+1 y es de D. El estado de
+     * cuenta arma el periodo por esta fecha.
+     */
+    @Column(name = "value_date", nullable = false, updatable = false)
+    private LocalDate valueDate;
+
+    /** El cierre del día cuyo lote trajo este cargo; nulo para todo lo demás. */
+    @Column(name = "day_close_date", updatable = false)
+    private LocalDate dayCloseDate;
+
+    /**
+     * What the entry moved in each bucket, signed (a payment is negative). Measured where the mutation
+     * happens; it is what lets a returned payment put back exactly what its payment had covered. Null in
+     * entries written before the columns existed.
+     */
+    @Column(name = "principal_delta", updatable = false)
+    private BigDecimal principalDelta;
+
+    @Column(name = "interest_delta", updatable = false)
+    private BigDecimal interestDelta;
+
+    @Column(name = "iva_delta", updatable = false)
+    private BigDecimal ivaDelta;
+
+    @Column(name = "penalty_delta", updatable = false)
+    private BigDecimal penaltyDelta;
+
     protected BalanceEvent() {}
 
+    /** Un movimiento del día de hoy (en hora de negocio). */
     public static BalanceEvent record(UUID creditAccountId, String sourceEventId, String eventType,
                                       BigDecimal deltaAmount, CreditAccount account) {
+        return record(creditAccountId, sourceEventId, eventType, deltaAmount, account, null);
+    }
+
+    /** @param valueDate el día al que pertenece; {@code null} = hoy en hora de negocio. */
+    public static BalanceEvent record(UUID creditAccountId, String sourceEventId, String eventType,
+                                      BigDecimal deltaAmount, CreditAccount account, LocalDate valueDate) {
         BalanceEvent e = new BalanceEvent();
         e.balanceEventId  = UUID.randomUUID();
         e.creditAccountId = creditAccountId;
@@ -67,7 +105,8 @@ public class BalanceEvent {
         e.interestAfter   = account.getAccruedInterestBalance();
         e.penaltyAfter    = account.getPenaltyBalance();
         e.availableAfter  = account.getAvailableCredit();
-        e.appliedAt       = Instant.now();
+        e.appliedAt       = BusinessClock.current().now();
+        e.valueDate       = valueDate != null ? valueDate : BusinessClock.current().today();
         return e;
     }
 
@@ -81,4 +120,27 @@ public class BalanceEvent {
     public BigDecimal getPenaltyAfter()   { return penaltyAfter; }
     public BigDecimal getAvailableAfter() { return availableAfter; }
     public Instant getAppliedAt()      { return appliedAt; }
+    public LocalDate getValueDate()    { return valueDate; }
+    public LocalDate getDayCloseDate() { return dayCloseDate; }
+
+    /** Lo anota como parte del lote del cierre de ese día. */
+    public BalanceEvent inDayClose(LocalDate businessDate) {
+        this.dayCloseDate = businessDate;
+        return this;
+    }
+
+    /** Records what the entry moved in each bucket (signed). */
+    public BalanceEvent withBreakdown(BigDecimal principal, BigDecimal interest, BigDecimal iva, BigDecimal penalty) {
+        this.principalDelta = principal;
+        this.interestDelta  = interest;
+        this.ivaDelta       = iva;
+        this.penaltyDelta   = penalty;
+        return this;
+    }
+
+    public boolean hasBreakdown()          { return principalDelta != null; }
+    public BigDecimal getPrincipalDelta()  { return principalDelta; }
+    public BigDecimal getInterestDelta()   { return interestDelta; }
+    public BigDecimal getIvaDelta()        { return ivaDelta; }
+    public BigDecimal getPenaltyDelta()    { return penaltyDelta; }
 }

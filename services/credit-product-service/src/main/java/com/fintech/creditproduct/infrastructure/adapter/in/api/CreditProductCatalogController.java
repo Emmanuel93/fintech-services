@@ -65,7 +65,7 @@ class CreditProductCatalogController {
                 ApprovalFlow.valueOf(request.defaultApprovalFlow()),
                 request.openingFeeRate(), request.prepaymentFeeRate(),
                 request.eligiblePartyTypes(), requiredDocs, request.channelAvailabilities(),
-                request.capabilities(), rateCards, eligibilityRules
+                request.capabilities(), rateCards, eligibilityRules, request.billingCycle()
         );
 
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()

@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Proyección del estado de CreditProduct visible al usuario.
@@ -101,7 +102,7 @@ public class WalletView {
         v.availableCredit       = availableCredit;
         v.walletBalance         = BigDecimal.ZERO;
         v.status                = "ACTIVE";
-        v.lastUpdatedAt         = Instant.now();
+        v.lastUpdatedAt         = BusinessClock.current().now();
         v.createdAt             = v.lastUpdatedAt;
         v.balanceVersion        = 0L;
         return v;
@@ -122,54 +123,54 @@ public class WalletView {
         this.availableCredit        = availableCredit;
         this.status                 = accountStatus;
         this.balanceVersion         = balanceVersion;
-        this.lastUpdatedAt          = Instant.now();
+        this.lastUpdatedAt          = BusinessClock.current().now();
     }
 
     public void applyInstallmentDue(BigDecimal installmentAmount, LocalDate dueDate) {
         this.nextInstallmentAmount = installmentAmount;
         this.paymentDueDate        = dueDate;
-        this.lastUpdatedAt         = Instant.now();
+        this.lastUpdatedAt         = BusinessClock.current().now();
     }
 
     public void applyStatementGenerated(BigDecimal minimumPayment, LocalDate paymentDueDate) {
         this.minimumPayment  = minimumPayment;
         this.paymentDueDate  = paymentDueDate;
-        this.lastUpdatedAt   = Instant.now();
+        this.lastUpdatedAt   = BusinessClock.current().now();
     }
 
     public void reserveCredit(BigDecimal amount) {
         if (availableCredit != null) {
             this.availableCredit = this.availableCredit.subtract(amount);
-            this.lastUpdatedAt   = Instant.now();
+            this.lastUpdatedAt   = BusinessClock.current().now();
         }
     }
 
     public void liberateCredit(BigDecimal amount) {
         if (availableCredit != null) {
             this.availableCredit = this.availableCredit.add(amount);
-            this.lastUpdatedAt   = Instant.now();
+            this.lastUpdatedAt   = BusinessClock.current().now();
         }
     }
 
     public void markSettled() {
         this.status        = "SETTLED";
-        this.lastUpdatedAt = Instant.now();
+        this.lastUpdatedAt = BusinessClock.current().now();
     }
 
     public void markWrittenOff() {
         this.status        = "WRITTEN_OFF";
-        this.lastUpdatedAt = Instant.now();
+        this.lastUpdatedAt = BusinessClock.current().now();
     }
 
     public void registerClabe(String clabe) {
         this.registeredClabe = clabe;
-        this.lastUpdatedAt   = Instant.now();
+        this.lastUpdatedAt   = BusinessClock.current().now();
     }
 
     /** DispositionCompleted (SELF_USE) → money stayed on the platform, credit the spendable balance. */
     public void credit(BigDecimal amount) {
         this.walletBalance = this.walletBalance.add(amount);
-        this.lastUpdatedAt  = Instant.now();
+        this.lastUpdatedAt  = BusinessClock.current().now();
     }
 
     /** Withdrawal request → debit the spendable balance. */
@@ -178,7 +179,7 @@ public class WalletView {
             throw new InsufficientWalletBalanceException(amount, walletBalance);
         }
         this.walletBalance = this.walletBalance.subtract(amount);
-        this.lastUpdatedAt  = Instant.now();
+        this.lastUpdatedAt  = BusinessClock.current().now();
     }
 
     public boolean isRevolvingProduct() {

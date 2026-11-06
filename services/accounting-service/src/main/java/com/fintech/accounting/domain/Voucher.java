@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Póliza contable: el encabezado de un hecho económico, con folio consecutivo por (tipo, sucursal,
@@ -84,6 +85,17 @@ public class Voucher {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** The item of a clearing account the voucher moves (see {@code VoucherRequest#clearingRef}). */
+    @Column(name = "clearing_ref", updatable = false, length = 64)
+    private String clearingRef;
+
+    /**
+     * The product the fact belongs to: its loan's, or its item's when it has no loan; {@code null} for the institution's
+     * own facts. A dimension learned later fills it only in open months (by SQL, never by this entity).
+     */
+    @Column(name = "product_type", updatable = false, length = 40)
+    private String productType;
+
     protected Voucher() {}
 
     public static Voucher open(VoucherType type, String orgUnitCode, String period, long folio,
@@ -109,8 +121,20 @@ public class Voucher {
         // es el caso normal y no merece bandera.
         v.latePosting     = originalPeriod != null && !originalPeriod.equals(period);
         v.originalPeriod  = v.latePosting ? originalPeriod : null;
-        v.createdAt       = Instant.now();
+        v.createdAt       = BusinessClock.current().now();
         return v;
+    }
+
+    /** Names the item of a clearing account this voucher moves; {@code null} when it moves none. */
+    public Voucher forClearingItem(String item) {
+        this.clearingRef = item;
+        return this;
+    }
+
+    /** Attributes the voucher to a product; {@code null} leaves it to the institution. */
+    public Voucher forProduct(String product) {
+        this.productType = product;
+        return this;
     }
 
     /** La deja cancelada apuntando a la reversa que la neutraliza. */
@@ -137,4 +161,6 @@ public class Voucher {
     public String getOriginalPeriod()  { return originalPeriod; }
     public UUID getReversalRef()       { return reversalRef; }
     public Instant getCreatedAt()      { return createdAt; }
+    public String getClearingRef()     { return clearingRef; }
+    public String getProductType()     { return productType; }
 }

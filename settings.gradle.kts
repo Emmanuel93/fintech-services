@@ -37,7 +37,8 @@ val services = listOf(
     "disbursement-service",
     "stp-service",
     "beneficiary-service",
-    "compliance-service"
+    "compliance-service",
+    "statement-service"
 )
 
 services.forEach { name ->

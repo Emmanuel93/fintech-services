@@ -23,6 +23,8 @@ import java.util.UUID;
  * REQUESTED + ROUTED   disbursement.stp-requested  el despacho al conector, con la cuenta que eligió tesorería
  * (origen) + DISPATCHED disbursement.accepted       el proveedor tomó la orden; trae de qué crédito viene y la clave
  * DISPATCHED + SETTLED  stp.order-settled           la liquidación; completa la fecha de operación
+ * FAILED                disbursement.failed         terminó sin que saliera el dinero (rechazo, nunca registrada)
+ * RETURNED              disbursement.returned       el banco receptor lo devolvió
  * RECONCILED            —                           sin productor: no se ingieren cargos del estado de cuenta
  * POSTED                —                           sin productor: la póliza no lleva el id del pago
  * </pre>
@@ -65,6 +67,18 @@ public class PayoutTraceRecorder {
         open(payoutId, null, null, null, amount, eventId);
         retrying(payoutId, () -> traces.onDispatch(payoutId, trackingKey, businessDate, eventId));
         retrying(payoutId, () -> traces.onSettle(payoutId, settledAt, eventId));
+    }
+
+    /** The payout ended without the money leaving: rejected by the bank, or never registered. */
+    public void failed(UUID payoutId, BigDecimal amount, String reason, String eventId) {
+        open(payoutId, null, null, null, amount, eventId);
+        retrying(payoutId, () -> traces.onFail(payoutId, reason, eventId));
+    }
+
+    /** The receiving bank returned the money. */
+    public void returned(UUID payoutId, BigDecimal amount, String eventId) {
+        open(payoutId, null, null, null, amount, eventId);
+        retrying(payoutId, () -> traces.onReturn(payoutId, eventId));
     }
 
     private void open(UUID payoutId, String sourceSystem, String sourceReference,

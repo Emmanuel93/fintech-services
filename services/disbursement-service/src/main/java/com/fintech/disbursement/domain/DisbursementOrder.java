@@ -1,5 +1,6 @@
 package com.fintech.disbursement.domain;
 
+import com.fintech.shared.time.BusinessClock;
 import jakarta.persistence.Column;
 import jakarta.persistence.Embedded;
 import jakarta.persistence.Entity;
@@ -152,7 +153,7 @@ public class DisbursementOrder {
         order.status = DisbursementStatus.REQUESTED.name();
         order.attemptCount = 0;
         order.correlationId = correlationId;
-        order.createdAt = Instant.now();
+        order.createdAt = BusinessClock.current().now();
         return order;
     }
 
@@ -167,7 +168,7 @@ public class DisbursementOrder {
         this.provider = provider.name();
         this.status = DisbursementStatus.DISPATCHED.name();
         this.attemptCount++;
-        this.dispatchedAt = Instant.now();
+        this.dispatchedAt = BusinessClock.current().now();
         this.scheduledFor = null;
     }
 
@@ -212,8 +213,8 @@ public class DisbursementOrder {
         this.status = DisbursementStatus.SETTLED.name();
         this.externalRef = externalRef != null ? externalRef : this.externalRef;
         this.cepUrl = cepUrl;
-        this.settledAt = settledAt != null ? settledAt : Instant.now();
-        this.terminatedAt = Instant.now();
+        this.settledAt = settledAt != null ? settledAt : BusinessClock.current().now();
+        this.terminatedAt = BusinessClock.current().now();
     }
 
     public void reject(String failureCode, String failureReason) {
@@ -236,7 +237,7 @@ public class DisbursementOrder {
         this.status = DisbursementStatus.RETURNED.name();
         this.failureCode = FailureCode.RETURNED_BY_BENEFICIARY_BANK.name();
         this.failureReason = causeCode;
-        this.terminatedAt = Instant.now();
+        this.terminatedAt = BusinessClock.current().now();
     }
 
     public void fail(String failureCode, String failureReason) {
@@ -253,7 +254,7 @@ public class DisbursementOrder {
         this.status = target.name();
         this.failureCode = failureCode;
         this.failureReason = failureReason;
-        this.terminatedAt = Instant.now();
+        this.terminatedAt = BusinessClock.current().now();
     }
 
     public DisbursementStatus status() { return DisbursementStatus.valueOf(status); }

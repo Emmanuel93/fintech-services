@@ -58,6 +58,9 @@ springdoc:
     path: /swagger-ui.html
 
 fintech:
+  test-support:
+    # /internal/test-support/clock — the E2E moves the Banxico day of operation; off by default.
+    enabled: ${TEST_SUPPORT_ENABLED:false}
   stp:
     # Topic de entrada. Configurable para que un comprador lo apunte a su nomenclatura.
     inbound-topic: ${STP_INBOUND_TOPIC:disbursement.stp-requested}
@@ -67,12 +70,23 @@ fintech:
     crypto:
       # KY-02: la KEK nunca vive aquí. Esto es sólo el id; el material va en STP_KEK_<ID>.
       current-kek-id: ${STP_CURRENT_KEK_ID:local}
+    # SPEI operation date: from the cutoff (Mexico City) on, or on a non-business day, the next business day; outgoing
+    # orders registered within `hold` of the cutoff wait until it has passed (SpeiOperatingDay).
+    operating-day:
+      cutoff: "${STP_SPEI_CUTOFF:18:00}"
+      hold: ${STP_SPEI_HOLD:PT10M}
     gateway:
       # stub | real. En prod DEBE ser real: el stub se niega a arrancar con perfil prod.
       mode: ${STP_GATEWAY_MODE:stub}
       stub:
-        settle-after: 30s
+        # The local stack sets 0: the E2E settles on demand, at a moment it controls, not after real seconds.
+        settle-after: ${STP_STUB_SETTLE_AFTER:30s}
         latency: 200ms
+        # ANY: an amount's cents pick the stub's scenario for every order (the connector's tests). ARMED: only for the
+        # amounts a test armed (PUT /internal/test-support/stub/scenario-amounts); any other order settles. The local
+        # stack arms: the platform computes amounts of its own (a commission lot, a funding payment), and one in nine
+        # would otherwise land on a failure's cents.
+        scenario-amounts: ${STP_STUB_SCENARIO_AMOUNTS:ANY}
     settlement:
       # ENFORCE | WARN | OFF. Objetivo en producción: ENFORCE, una vez confirmada contra la
       # especificación de STP la cadena exacta que firma en la respuesta de conciliación.
@@ -81,7 +95,7 @@ fintech:
       enabled: ${STP_POLLING_ENABLED:true}
       # ISO-8601 obligatorio: lo lee @Scheduled, que no entiende "3m".
       interval: ${STP_POLLING_INTERVAL:PT3M}
-      grace: 30s
+      grace: ${STP_POLLING_GRACE:30s}
       settlement-timeout: 24h
       page-size: 1000
       max-pages-per-run: 20
@@ -90,6 +104,9 @@ fintech:
       relay-interval: PT5S
       batch-size: 50
       max-attempts: 6
+      # The wait before a message's first retry, doubled on each later one. Zero in the local stack (its stub answers
+      # at once): a transient rejection is then retried at the simulated moment the order was registered.
+      base-backoff: ${STP_OUTBOX_BASE_BACKOFF:PT5S}
     http:
       connect-timeout: 5s
       read-timeout: 30s

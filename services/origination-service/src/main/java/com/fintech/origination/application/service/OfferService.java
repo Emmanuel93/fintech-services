@@ -21,6 +21,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Service
 @Transactional
@@ -56,11 +57,16 @@ public class OfferService implements PresentOfferUseCase, AcceptOfferUseCase, Re
         BigDecimal amount = resolveAmount(cmd, app, product, revolving);
         Integer term      = resolveTerm(cmd, app, product, revolving);
 
+        // The calculator takes percentages; the catalog keeps rates as fractions (0.32 = 32 %). Passing them as they
+        // were made every offer's CAT a hundred times too low (a 32 % loan showed 0.4 %), and a weekly or biweekly
+        // plan was valued as if it paid monthly.
         BigDecimal cat = revolving
-                ? CatCalculator.calculateRevolving(product.nominalRateAnnual())
+                ? CatCalculator.calculateRevolving(CatCalculator.percent(product.nominalRateAnnual()),
+                        CatCalculator.periodsPerYear(product.defaultPaymentFrequency()))
                 : CatCalculator.calculateInstallment(
-                        amount, product.nominalRateAnnual(), term,
-                        product.openingFeeRate());
+                        amount, CatCalculator.percent(product.nominalRateAnnual()), term,
+                        CatCalculator.percent(product.openingFeeRate()),
+                        CatCalculator.periodsPerYear(product.defaultPaymentFrequency()));
 
         CreditOffer offer = CreditOffer.create(
                 product.productCode(),
@@ -74,7 +80,7 @@ public class OfferService implements PresentOfferUseCase, AcceptOfferUseCase, Re
                 product.moratoriumRateAnnual(),
                 product.openingFeeRate() != null ? product.openingFeeRate() : BigDecimal.ZERO,
                 cat,
-                Instant.now().plus(OFFER_TTL_HOURS, ChronoUnit.HOURS));
+                BusinessClock.current().now().plus(OFFER_TTL_HOURS, ChronoUnit.HOURS));
 
         app.presentOffer(offer);
         CreditApplication saved = applicationRepository.save(app);

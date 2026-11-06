@@ -1,5 +1,6 @@
 package com.fintech.collections.application.port.out;
 
+import com.fintech.collections.application.PaymentOrigin;
 import com.fintech.collections.domain.CollectionAgreement;
 import com.fintech.collections.domain.ContactAttempt;
 import com.fintech.collections.domain.PaymentPromise;
@@ -55,6 +56,10 @@ public interface CollectionsEventPublisher {
 
     void publishBureauReportSubmitted(com.fintech.collections.domain.BureauReport report);
 
+    /**
+     * @param origin    where the recovered money came from, passed on for accounting
+     * @param paymentId the payment order recovered: each recovery is its own fact (a write-off can recover many times)
+     */
     void publishRecoveryPaymentApplied(UUID writeOffId, UUID creditAccountId,
-                                        BigDecimal recoveredAmount, String paymentMethod);
+                                       BigDecimal recoveredAmount, PaymentOrigin origin, UUID paymentId);
 }

@@ -2,6 +2,7 @@ package com.fintech.origination.domain.event;
 
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /** Published when a prospect electronically signs the credit contract. */
 public class ContractSignedEvent {
@@ -21,7 +22,7 @@ public class ContractSignedEvent {
             String signatureMethod,
             String clabeAccount) {
         this.eventId        = UUID.randomUUID().toString();
-        this.occurredOn     = Instant.now();
+        this.occurredOn     = BusinessClock.current().now();
         this.applicationId  = applicationId;
         this.prospectId     = prospectId;
         this.contractNumber = contractNumber;

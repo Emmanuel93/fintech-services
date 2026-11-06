@@ -18,5 +18,17 @@
     <include file="db/changelog/accounting/011-bank-suspense.sql"          relativeToChangelogFile="false"/>
     <include file="db/changelog/accounting/012-disposition-always-to-bank.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/accounting/013-candado-de-crones.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/014-interes-etapa-3-neto.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/015-comision-de-apertura-diferida.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/016-cierre-conciliado.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/017-tasa-efectiva.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/018-fondeo.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/019-tipo-de-diferimiento.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/020-libro-de-caja.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/021-cierre-del-ejercicio.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/022-transito-spei-y-saldos-a-favor.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/023-comisiones-impuestos-y-pago-por-carril.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/024-dimension-producto.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/accounting/025-credito-cancelado.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

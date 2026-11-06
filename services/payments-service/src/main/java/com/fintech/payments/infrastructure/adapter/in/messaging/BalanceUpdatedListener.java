@@ -35,9 +35,16 @@ public class BalanceUpdatedListener {
                 event.penaltyBalance(), event.availableCredit(),
                 event.totalDebt(), event.balanceVersion(), event.accountStatus());
 
-        // If this balance-updated was triggered by PAYMENT_APPLIED, confirm the order
-        // (credit-portfolio uses the paymentOrderId as sourceEventId in balance_events)
-        // Confirmation is best-effort — the eventId in balance-updated is the balance event ID,
-        // not the source payment event ID, so we rely on payment-rejected for failure cases.
+        // The portfolio applied a payment: its balance-updated carries the payment order id as the
+        // source event, and that is what confirms the order. Without this every order stayed PENDING
+        // forever, and nothing could be reversed.
+        if (("PAYMENT_APPLIED".equals(event.triggerEvent()) || "RECOVERY_PAYMENT".equals(event.triggerEvent()))
+                && event.sourceEventId() != null) {
+            try {
+                paymentService.confirmByEventId(event.sourceEventId());
+            } catch (IllegalArgumentException ex) {
+                log.debug("balance-updated sourceEventId={} is not a payment order id", event.sourceEventId());
+            }
+        }
     }
 }

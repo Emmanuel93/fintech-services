@@ -6,19 +6,17 @@ import com.fintech.creditportfolio.domain.Installment;
 import com.fintech.creditportfolio.domain.event.InstallmentDueEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
 import com.fintech.shared.time.BusinessClock;
 
 /**
- * Diario a las 00:01 — busca las mensualidades pendientes que vencen hoy
- * <b>o que ya vencieron</b> y publica InstallmentDue para que notificaciones y
- * cobranza reaccionen.
+ * Busca las mensualidades pendientes que vencen hoy <b>o que ya vencieron</b> y publica
+ * InstallmentDue para que notificaciones y cobranza reaccionen. Sin cron propio: lo corre
+ * {@link DayCloseRunner} en el cierre del día, con la fecha del día que empieza.
  *
  * <p>Antes sólo miraba "vence hoy". Una corrida fallida, o una fecha movida,
  * dejaba esa mensualidad PENDING para siempre: nadie la marcaba vencida y el
@@ -43,8 +41,6 @@ public class InstallmentDueJob {
         this.eventPublisher        = eventPublisher;
     }
 
-    @SchedulerLock(name = "credit-portfolio.installment-due", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
-    @Scheduled(cron = "0 1 0 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     @Transactional(readOnly = true)
     public void run() {
         runFor(businessClock.today());

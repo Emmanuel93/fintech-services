@@ -16,6 +16,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * GL-09: asienta la estimación preventiva por <strong>delta</strong> contra {@link
@@ -42,15 +43,23 @@ public class ProvisionPostingService {
 
     public void onRiskAssessment(UUID creditAccountId, UUID obligorPartyId,
                                  BigDecimal provisionAmount, Instant calculatedAt) {
+        onRiskAssessment(creditAccountId, obligorPartyId, provisionAmount, calculatedAt, null, null);
+    }
+
+    /** Also remembers the stage and exposure risk measured: they decide how a Stage 3 interest charge is booked. */
+    public void onRiskAssessment(UUID creditAccountId, UUID obligorPartyId, BigDecimal provisionAmount,
+                                 Instant calculatedAt, String ifrs9Stage, BigDecimal ead) {
         if (provisionAmount == null) return;
         ProvisionLedgerEntry entry = provisionLedgerRepository.findById(creditAccountId)
                 .orElseGet(() -> ProvisionLedgerEntry.init(creditAccountId));
+        entry.observe(ifrs9Stage, ead);
+        entry.measuredAt(calculatedAt != null ? calculatedAt : BusinessClock.current().now());
         BigDecimal delta = entry.book(provisionAmount);
         provisionLedgerRepository.save(entry);
 
         if (delta.signum() == 0) return;
 
-        Instant at = calculatedAt != null ? calculatedAt : Instant.now();
+        Instant at = calculatedAt != null ? calculatedAt : BusinessClock.current().now();
         String sourceEventId = "PROV-" + creditAccountId + "-" + at.toEpochMilli();
         // La sucursal sale del shadow: risk no la conoce ni tiene por qué. Es la misma que llevan las
         // demás pólizas del crédito, así que el deterioro se atribuye a quien colocó el préstamo.

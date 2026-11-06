@@ -3,6 +3,7 @@ package com.fintech.disbursement.infrastructure.config;
 import com.fintech.disbursement.infrastructure.adapter.in.messaging.CreditAccountActivatedPayload;
 import com.fintech.disbursement.infrastructure.adapter.in.messaging.DispositionAuthorizedPayload;
 import com.fintech.disbursement.infrastructure.adapter.in.messaging.ProviderOutcomePayloads;
+import com.fintech.disbursement.infrastructure.adapter.in.messaging.CommissionLotPayoutPayload;
 import com.fintech.disbursement.infrastructure.adapter.in.messaging.WalletWithdrawalCompletedPayload;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.TopicPartition;
@@ -64,6 +65,12 @@ public class KafkaConfig {
     public ConcurrentKafkaListenerContainerFactory<String, WalletWithdrawalCompletedPayload>
     walletWithdrawalListenerContainerFactory(KafkaProperties p, DefaultErrorHandler h) {
         return factory(p, WalletWithdrawalCompletedPayload.class, h);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, CommissionLotPayoutPayload>
+    commissionLotPayoutListenerContainerFactory(KafkaProperties p, DefaultErrorHandler h) {
+        return factory(p, CommissionLotPayoutPayload.class, h);
     }
 
     // ── Resultados de los conectores ──────────────────────────────────────────

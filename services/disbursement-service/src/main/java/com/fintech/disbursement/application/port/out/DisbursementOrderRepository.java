@@ -21,6 +21,9 @@ public interface DisbursementOrderRepository {
      */
     List<DisbursementOrder> lockDueForDispatch(int batchSize);
 
+    /** How many orders {@link #lockDueForDispatch} would take now, counted without locking: the queue's due work. */
+    long countDueForDispatch();
+
     List<DisbursementOrder> findByCompany(UUID companyId, int page, int size);
 
     /**

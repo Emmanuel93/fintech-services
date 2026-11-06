@@ -24,6 +24,11 @@
 
 x-otel-agent: &otel-agent
   JAVA_TOOL_OPTIONS: "-javaagent:/otel/opentelemetry-javaagent.jar"
+  # The agent instruments every class it loads: about 50 MB more metaspace and heap per service. Without the collector
+  # (no `--profile observability`) every exporter is `none` and it produces nothing, so it stays off; it is turned on
+  # together with the profile:
+  #   OTEL_JAVAAGENT_ENABLED=true OTEL_TRACES_EXPORTER=otlp docker compose --profile observability up -d
+  OTEL_JAVAAGENT_ENABLED: "${OTEL_JAVAAGENT_ENABLED:-false}"
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
   OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
   # El collector sólo existe con `--profile observability`. Con el exportador
@@ -47,6 +52,9 @@ x-otel-agent: &otel-agent
 # Un despliegue real no declara `local`, y entonces ningún simulador arranca.
 x-plataforma: &plataforma
   FINTECH_ENVIRONMENT: "${FINTECH_ENVIRONMENT:-local}"
+  # Crones de negocio en pausa (sólo fuera de producción): la simulación dispara cada job en su momento simulado. Los
+  # de recuperación (monitores y reintentos) siguen encendidos.
+  FINTECH_SCHEDULING_PAUSED: "${BUSINESS_CRONS_PAUSED:-false}"
 
 x-app-mem: &app-mem
   deploy:
@@ -67,7 +75,8 @@ services:
     # max_connections default (100) no alcanza cuando los 19 servicios arrancan a la vez —
     # cada uno abre su propio pool HikariCP (~10 conexiones) + Liquibase — hallazgo real al
     # verificar el stack completo en vivo (2026-07-18), no relacionado con T7 en sí.
-    command: ["postgres", "-c", "max_connections=250"]
+    # 2026-11-01: 223 de 250 ocupadas; las réplicas que se agregan para repartir el cierre necesitan margen.
+    command: ["postgres", "-c", "max_connections=400", "-c", "shared_buffers=256MB"]
     environment:
       POSTGRES_DB: fintech
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
@@ -80,9 +89,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1536M
         reservations:
-          memory: 256M
+          memory: 768M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U fintech -d fintech"]
       interval: 5s
@@ -125,14 +134,18 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      # El heap por omisión de la imagen es 1 GB: con un límite de 1 GB, el resto de la JVM lo rebasaba y el
+      # kernel mataba al broker (sin log de apagado; 134 reinicios en un día). Kafka vive del caché de páginas,
+      # no del heap: 768 MB de heap y margen para el resto.
+      KAFKA_HEAP_OPTS: "-Xms768m -Xmx768m"
     volumes:
       - kafka_data:/var/lib/kafka/data
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: 1536M
         reservations:
-          memory: 512M
+          memory: 1024M
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 9092"]
       interval: 5s
@@ -335,6 +348,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
       # La credencial sale del ambiente (.env, gestor de secretos), nunca del repo. Con el mock
       # encendido no se usa; el adaptador real no arranca sin ella.
       CIRCULO_CREDITO_API_KEY: ${CIRCULO_CREDITO_API_KEY:-}
@@ -443,7 +457,19 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
-    <<: *app-mem
+      # A day close interrupted by a restart is taken over by the retry job once it is stale. In production the
+      # lease is two hours; here the simulation closes a night every few seconds, so the job runs every minute and
+      # takes over after three (3 Nov: an OOM restart left 9-sep RUNNING and the demo waited for nothing).
+      CREDIT_PORTFOLIO_DAY_CLOSE_RETRY_CRON: "${CREDIT_PORTFOLIO_DAY_CLOSE_RETRY_CRON:-0 * * * * *}"
+      CREDIT_PORTFOLIO_DAY_CLOSE_STALE_AFTER: ${CREDIT_PORTFOLIO_DAY_CLOSE_STALE_AFTER:-PT3M}
+    # The core of the platform: with 512M the heap at 75 % left no room for the OTel agent and metaspace, and the
+    # kernel killed it in the middle of a day close (3 Nov: three restarts at 500/512 MiB). Same as closing.
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 384M
     depends_on:
       postgres:
         condition: service_healthy
@@ -473,6 +499,8 @@ services:
       <<: [*otel-agent, *plataforma]
       OTEL_SERVICE_NAME: "banking-service"
       SPRING_PROFILES_ACTIVE: docker
+      # /internal/test-support/*: whether its crons are paused and whether it consumed what it listens to.
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
       SERVER_PORT: 8080
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
@@ -548,13 +576,69 @@ services:
       # Identidad del pod en el arrendamiento del candado. Con `docker compose up --scale`,
       # cada réplica trae la suya y el reparto se reparte de verdad.
       HOSTNAME: ${HOSTNAME:-closing-1}
+      # Las pruebas que corren el reloj cortan días que todavía no llegan.
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
+      # La foto diaria por cuenta se copia de cartera al planear el corte.
+      CREDIT_PORTFOLIO_SERVICE_URL: http://credit-portfolio-service:8080
+      CLOSING_CUTOFF_CONCURRENCY: ${CLOSING_CUTOFF_CONCURRENCY:-4}
+      CLOSING_CUTOFF_PARTITIONS: ${CLOSING_CUTOFF_PARTITIONS:-12}
     ports:
       - "${CLOSING_PORT:-8103}:8080"
-    <<: *app-mem
+    # Más que el resto: es el trabajador del corte (4 consumidores de cutoff-due, Redisson, ShedLock).
+    # Con 512M el heap al 75 % no dejaba lugar al agente OTel ni a Netty y el kernel lo mataba al arrancar.
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 384M
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      kafka:
+        condition: service_started
+      otel-agent-init:
+        condition: service_completed_successfully
+    restart: on-failure
+    networks:
+      - fintech-network
+
+  # Estados de cuenta: un PDF por cada corte sellado. Sin puerto en el host a propósito, para poder
+  # escalar con `docker compose up --scale statement-service=N`: cada réplica toma sus particiones de
+  # closing.cutoff-closed. Se consulta por la red interna (o por los BFF).
+  statement-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: statement-service
+    image: fintech/statement-service:latest
+    volumes:
+      - otel-agent-vol:/otel:ro
+    environment:
+      <<: [*otel-agent, *plataforma]
+      OTEL_SERVICE_NAME: "statement-service"
+      SPRING_PROFILES_ACTIVE: docker
+      SERVER_PORT: 8080
+      POSTGRES_USER: ${POSTGRES_USER:-fintech}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
+      STATEMENT_CONCURRENCY: ${STATEMENT_CONCURRENCY:-4}
+      STATEMENT_PARTITIONS: ${STATEMENT_PARTITIONS:-12}
+    # Más que el resto: rinde los PDF con Jasper (4 a la vez), con las fuentes Inter y el logotipo en memoria.
+    # Con 512M el heap al 75 % (384M) más el agente OTel y la metaspace rebasaba el límite: el kernel lo mató dos
+    # veces la noche del 1 de octubre de la demo, con 20 estados de cuenta en el mismo corte.
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 384M
+    depends_on:
+      postgres:
         condition: service_healthy
       kafka:
         condition: service_started
@@ -582,7 +666,19 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
-    <<: *app-mem
+      # La foto diaria por cuenta se jala de cartera antes de repartir el día.
+      CREDIT_PORTFOLIO_SERVICE_URL: http://credit-portfolio-service:8080
+      # El cierre del día se reparte por cuenta: hilos por pod y particiones del tópico de trabajo.
+      # Para acelerarlo: docker compose up -d --scale charges-service=3 (techo = particiones).
+      CHARGES_ACCRUAL_CONCURRENCY: ${CHARGES_ACCRUAL_CONCURRENCY:-4}
+      CHARGES_ACCRUAL_PARTITIONS: ${CHARGES_ACCRUAL_PARTITIONS:-12}
+    # Sin puerto en el host, para poder escalar réplicas. Los trabajadores del cierre necesitan más que el resto.
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+        reservations:
+          memory: 384M
     depends_on:
       postgres:
         condition: service_healthy
@@ -614,6 +710,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
     <<: *app-mem
     depends_on:
       postgres:
@@ -740,6 +837,8 @@ services:
       BANKING_SERVICE_URL: http://banking-service:8080
       DISBURSEMENT_SERVICE_URL: http://disbursement-service:8080
       STP_SERVICE_URL: http://stp-service:8080
+      # Los estados de cuenta (lista y PDF) que se descargan desde el expediente del cliente.
+      STATEMENT_SERVICE_URL: http://statement-service:8080
       # Credencial propia del canal contra identity, para que la bitácora resuelva quién actuó sin
       # depender de los permisos del que actúa. Sembrada en identity:013 — rotar antes de exponer.
       IDENTITY_SERVICE_CLIENT_ID: channel-backoffice-service
@@ -849,6 +948,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
     <<: *app-mem
     depends_on:
       postgres:
@@ -885,6 +985,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
     <<: *app-mem
     depends_on:
       postgres:
@@ -952,6 +1053,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
     <<: *app-mem
     depends_on:
       postgres:
@@ -984,6 +1086,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
     <<: *app-mem
     depends_on:
       postgres:
@@ -1016,6 +1119,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
     <<: *app-mem
     depends_on:
       postgres:
@@ -1051,6 +1155,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
       REDIS_HOST: redis
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
       # Los servicios que compone. La colocación no reinventa dominio: la línea la lleva
       # credit-portfolio, el buró scoring, la disposición wallet y el expediente origination.
       CREDIT_PORTFOLIO_SERVICE_URL: http://credit-portfolio-service:8080
@@ -1169,6 +1274,8 @@ services:
       OTEL_SERVICE_NAME: "disbursement-service"
       SPRING_APPLICATION_NAME: "disbursement-service"
       SPRING_PROFILES_ACTIVE: docker
+      # /internal/test-support/*: whether its crons are paused and whether it consumed what it listens to.
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
       SERVER_PORT: 8080
       POSTGRES_USER: ${POSTGRES_USER:-fintech}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fintech}
@@ -1226,6 +1333,22 @@ services:
       STP_ACCOUNT_HASH_SALT: ${STP_ACCOUNT_HASH_SALT:-cambiar-en-cada-ambiente}
       STP_BASE_URL: ${STP_BASE_URL:-https://demo.stpmex.com:7024/speiws/rest/}
       STP_CONSULTA_BASE_URL: ${STP_CONSULTA_BASE_URL:-https://efws-dev.stpmex.com/efws/API/}
+      # Habilita /internal/test-support/clock: el E2E mueve el día de operación de las órdenes. Apagado fuera de local.
+      TEST_SUPPORT_ENABLED: ${TEST_SUPPORT_ENABLED:-false}
+      # Corte SPEI (hora CDMX) y retención de órdenes salientes alrededor de él.
+      STP_SPEI_CUTOFF: ${STP_SPEI_CUTOFF:-18:00}
+      STP_SPEI_HOLD: ${STP_SPEI_HOLD:-PT10M}
+      # Local: el stub liquida en cuanto se le consulta y el poller no espera; el E2E dispara la consulta.
+      STP_STUB_SETTLE_AFTER: ${STP_STUB_SETTLE_AFTER:-PT0S}
+      # Local: the stub plays a failure only for the amounts a run arms (PUT /internal/test-support/stub/scenario-amounts);
+      # every other order settles. The platform computes amounts of its own (a commission lot, a funding payment), and one
+      # in nine would land on a failure's cents. ANY reads every amount's cents, as the connector's own tests do.
+      STP_STUB_SCENARIO_AMOUNTS: ${STP_STUB_SCENARIO_AMOUNTS:-ARMED}
+      STP_POLLING_GRACE: ${STP_POLLING_GRACE:-PT0S}
+      # Local: a transient rejection (-30) is retried without waiting, since the stub answers at once. The connector's
+      # tries all happen at the simulated moment the order was registered, not spread over the E2E's clock moves by
+      # how long each move took (D63).
+      STP_OUTBOX_BASE_BACKOFF: ${STP_OUTBOX_BASE_BACKOFF:-PT0S}
     <<: *app-mem
     depends_on:
       postgres:

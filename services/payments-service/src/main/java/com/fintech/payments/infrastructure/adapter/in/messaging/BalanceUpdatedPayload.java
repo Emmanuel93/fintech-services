@@ -17,5 +17,7 @@ public record BalanceUpdatedPayload(
         BigDecimal availableCredit,
         BigDecimal totalDebt,
         String accountStatus,
-        long balanceVersion
+        long balanceVersion,
+        String triggerEvent,
+        String sourceEventId
 ) {}

@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Read model: local projection of credit-portfolio balance state.
@@ -53,6 +54,17 @@ public class AccountBalanceSnapshot {
     @Column(name = "snapshot_at", nullable = false)
     private Instant snapshotAt;
 
+    /** When the loan was activated: its seniority when a credit is applied by rule. */
+    @Column(name = "activated_at")
+    private Instant activatedAt;
+
+    /** The numeric reference a SPEI transfer uses to name this loan. */
+    @Column(name = "payment_reference")
+    private Long paymentReference;
+
+    @Column(name = "product_type")
+    private String productType;
+
     protected AccountBalanceSnapshot() {}
 
     public static AccountBalanceSnapshot init(UUID creditAccountId, UUID obligorPartyId,
@@ -68,7 +80,7 @@ public class AccountBalanceSnapshot {
         s.creditLimit            = creditLimit;
         s.balanceVersion         = 0;
         s.accountStatus          = "PENDING_ACTIVATION";
-        s.snapshotAt             = Instant.now();
+        s.snapshotAt             = BusinessClock.current().now();
         return s;
     }
 
@@ -82,12 +94,31 @@ public class AccountBalanceSnapshot {
         this.totalDebt              = totalDebt;
         this.balanceVersion         = balanceVersion;
         this.accountStatus          = accountStatus;
-        this.snapshotAt             = Instant.now();
+        this.snapshotAt             = BusinessClock.current().now();
     }
+
+    /** What the activation tells about the loan: its age, its payment reference and its product. */
+    public void describe(Instant activatedAt, Long paymentReference, String productType) {
+        if (activatedAt != null) this.activatedAt = activatedAt;
+        if (paymentReference != null) this.paymentReference = paymentReference;
+        if (productType != null) this.productType = productType;
+    }
+
+    public Instant getActivatedAt()   { return activatedAt; }
+    public Long getPaymentReference() { return paymentReference; }
+    public String getProductType()    { return productType; }
 
     /** True only for accounts that can receive payments (not terminal). */
     public boolean isAccountActive() {
         return "ACTIVE".equals(accountStatus) || "SUSPENDED".equals(accountStatus);
+    }
+
+    /**
+     * A written-off loan still has an owner who may pay: that money is a recovery (IFRS 9 §5.4.4 — the asset left
+     * the balance sheet, the right to collect did not). It is accepted and booked as such downstream.
+     */
+    public boolean isWrittenOff() {
+        return "WRITTEN_OFF".equals(accountStatus);
     }
 
     /** Validates the payment amount is positive. Overpayments are allowed — the service handles excess. */

@@ -1,5 +1,6 @@
 package com.fintech.closing.infrastructure.adapter.in.messaging;
 
+import com.fintech.closing.domain.BillingCycle;
 import com.fintech.closing.application.service.AccountProjectionService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -71,11 +72,17 @@ public class PortfolioEventListener {
                 event.creditAccountId(), event.productType(),
                 event.paymentFrequency(), event.termPeriods());
 
+        BillingCycle billingCycle = event.billingCycle() == null ? null
+                : BillingCycle.parse(event.billingCycle().cutoffRule(), event.billingCycle().cutoffDay(),
+                        event.billingCycle().paymentDueOffsetDays(), event.billingCycle().graceDays(),
+                        event.billingCycle().minimumPaymentRate(), event.billingCycle().nonBusinessDayShift(),
+                        event.billingCycle().cutoffDays(), event.billingCycle().paymentDueDays())
+                .orElse(null);
         projection.onAccountActivated(
                 event.creditAccountId(), event.obligorPartyId(), event.productType(),
                 event.productBehavior(), event.originUnitCode(), activatedOn,
                 event.paymentFrequency(), event.termPeriods(),
-                event.nominalRate(), event.principalBalance());
+                event.nominalRate(), event.principalBalance(), billingCycle);
     }
 
     @KafkaListener(
@@ -87,7 +94,7 @@ public class PortfolioEventListener {
 
         // Sin orgUnitCode: este evento no lo trae, y `learnOrgUnit` sólo lo aprende si falta.
         projection.onBalanceUpdated(event.creditAccountId(), event.principalBalance(),
-                event.totalDebt(), event.accountStatus(), event.balanceVersion(), null);
+                event.totalDebt(), event.accountStatus(), event.balanceVersion(), null, event.valueDate());
     }
 
     @KafkaListener(

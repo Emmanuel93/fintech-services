@@ -4,6 +4,8 @@ public enum EventType {
     OFFER_PRESENTED,
     WELCOME_ACTIVATED,
     DISBURSEMENT_COMPLETED,
+    /** The money could not be deposited, and the credit (or that disposition) was undone at no cost (D63). */
+    DISBURSEMENT_FAILED,
     PAYMENT_REMINDER,
     /** La mensualidad venció y sigue sin cubrirse. */
     PAYMENT_OVERDUE,

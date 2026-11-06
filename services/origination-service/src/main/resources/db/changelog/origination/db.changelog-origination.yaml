@@ -160,3 +160,11 @@ databaseChangeLog:
             path: db/changelog/origination/018-candado-de-crones.sql
             relativeToChangelogFile: false
             splitStatements: true
+  - changeSet:
+      id: 019-desembolso-fallido
+      author: origination-service
+      changes:
+        - sqlFile:
+            path: db/changelog/origination/019-desembolso-fallido.sql
+            relativeToChangelogFile: false
+            splitStatements: true

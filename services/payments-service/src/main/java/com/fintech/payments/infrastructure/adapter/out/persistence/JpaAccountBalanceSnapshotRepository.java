@@ -4,6 +4,7 @@ import com.fintech.payments.application.port.out.AccountBalanceSnapshotRepositor
 import com.fintech.payments.domain.AccountBalanceSnapshot;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -15,4 +16,7 @@ public interface JpaAccountBalanceSnapshotRepository
 
     @Override
     boolean existsByCreditAccountId(UUID creditAccountId);
+
+    @Override
+    List<AccountBalanceSnapshot> findByObligorPartyId(UUID obligorPartyId);
 }

@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Entity
 @Table(schema = "charges", name = "charge_records")
@@ -47,6 +48,13 @@ public class ChargeRecord {
     @Column(name = "accrual_date", nullable = false, updatable = false)
     private LocalDate accrualDate;
 
+    /**
+     * El cierre del día que generó este cargo, si salió de uno. Las cifras de control del día cuentan
+     * este lote y nada más: un cargo del mismo día sembrado a mano no es parte del cierre.
+     */
+    @Column(name = "day_close_date")
+    private LocalDate dayCloseDate;
+
     @Column(name = "linked_charge_id")
     private UUID linkedChargeId;
 
@@ -82,7 +90,7 @@ public class ChargeRecord {
         r.totalAmount     = amount.add(r.taxAmount);
         r.accrualDate     = accrualDate;
         r.linkedChargeId  = linkedChargeId;
-        r.createdAt       = Instant.now();
+        r.createdAt       = BusinessClock.current().now();
         return r;
     }
 
@@ -100,7 +108,7 @@ public class ChargeRecord {
         }
         this.status        = ChargeStatus.REVERSED.name();
         this.reversalReason = reason;
-        this.reversedAt    = Instant.now();
+        this.reversedAt    = BusinessClock.current().now();
     }
 
     public void waive(String waivedByUser) {
@@ -110,7 +118,7 @@ public class ChargeRecord {
         }
         this.status    = ChargeStatus.WAIVED.name();
         this.waivedBy  = waivedByUser;
-        this.reversedAt = Instant.now();
+        this.reversedAt = BusinessClock.current().now();
     }
 
     public boolean isApplied() { return ChargeStatus.APPLIED.name().equals(status); }
@@ -127,6 +135,10 @@ public class ChargeRecord {
     public BigDecimal getTaxAmount()   { return taxAmount; }
     public BigDecimal getTotalAmount() { return totalAmount; }
     public LocalDate getAccrualDate()  { return accrualDate; }
+    public LocalDate getDayCloseDate() { return dayCloseDate; }
+
+    /** Marca el cargo como parte del lote del cierre de ese día. */
+    public void markDayClose(LocalDate businessDate) { this.dayCloseDate = businessDate; }
     public UUID getLinkedChargeId()    { return linkedChargeId; }
     public String getReversalReason()  { return reversalReason; }
     public String getWaivedBy()        { return waivedBy; }

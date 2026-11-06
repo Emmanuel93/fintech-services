@@ -13,6 +13,7 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Collection;
 import java.util.List;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Normaliza los filtros antes de la consulta.
@@ -58,7 +59,7 @@ class JpaCollectionsQueueAdapter implements CollectionsQueueRepository {
         return jpa.searchContactAttempts(
                 emptyToNull(results), emptyToNull(channels), emptyToNull(buckets), emptyToNull(agentIds),
                 from != null ? from : Instant.EPOCH,
-                to   != null ? to   : Instant.now(),
+                to   != null ? to   : BusinessClock.current().now(),
                 pageable);
     }
 

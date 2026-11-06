@@ -116,7 +116,8 @@ public class ProviderOutcomeService implements ApplyProviderOutcomeUseCase {
         }
         DisbursementStatus from = order.status();
 
-        // DB-08: transitorio vuelve a la cola; sólo lo terminal termina.
+        // DB-08: transitorio vuelve a la cola; sólo lo terminal termina. STP publishes only final rejections (it retries
+        // what is transient itself), so this serves a provider that answers a transient code at once.
         if (rejected.retryable() && order.getAttemptCount() < properties.getDispatch().getMaxAttempts()) {
             order.scheduleRetry(rejected.providerCode(), rejected.reason(),
                     nextAttempt(order.getAttemptCount()));
@@ -126,8 +127,13 @@ public class ProviderOutcomeService implements ApplyProviderOutcomeUseCase {
             return;
         }
 
-        order.reject(FailureCode.REJECTED_BY_PROVIDER.name(),
-                rejected.providerCode() + " " + rejected.reason());
+        // A rejection the bank never gave (STP never registered the order) carries no provider code. A technical one
+        // (the link, an order never registered) is told apart from a rule: the caller may ask again after it (D63).
+        String code = rejected.providerCode();
+        FailureCode failure = rejected.technical() ? FailureCode.PROVIDER_TECHNICAL_FAILURE
+                : FailureCode.REJECTED_BY_PROVIDER;
+        order.reject(failure.name(),
+                code == null || code.isBlank() ? rejected.reason() : code + " " + rejected.reason());
         orders.save(order);
         events.save(DisbursementEvent.record(order, from, DisbursementStatus.REJECTED,
                 rejected.providerCode(), rejected.reason(), "PROVIDER"));

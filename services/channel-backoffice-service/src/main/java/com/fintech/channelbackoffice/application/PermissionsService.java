@@ -1,5 +1,7 @@
 package com.fintech.channelbackoffice.application;
 
+import org.springframework.scheduling.annotation.Scheduled;
+import jakarta.annotation.PostConstruct;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.IdentityClient;
 
 import org.slf4j.Logger;
@@ -41,26 +43,26 @@ public class PermissionsService {
      */
     private static final Map<String, Set<String>> CAPABILITY_ROLES = Map.ofEntries(
             Map.entry("dashboard.view",       roles("ADMIN", "OPS_SUPERVISOR", "CREDIT_ANALYST", "UNDERWRITER",
-                    "COMMITTEE", "EXECUTIVE", "RISK_ANALYST", "PRODUCT_MANAGER", "FINANCE", "AUDITOR", "SUPPORT")),
-            Map.entry("dashboard.commercial", roles("ADMIN", "OPS_SUPERVISOR", "EXECUTIVE", "RISK_ANALYST", "FINANCE", "AUDITOR")),
+                    "COMMITTEE", "EXECUTIVE", "RISK_ANALYST", "PRODUCT_MANAGER", "FINANCE", "AUDITOR", "SUPPORT", "COMMERCIAL_MANAGER")),
+            Map.entry("dashboard.commercial", roles("ADMIN", "OPS_SUPERVISOR", "EXECUTIVE", "RISK_ANALYST", "FINANCE", "AUDITOR", "COMMERCIAL_MANAGER")),
             Map.entry("portfolio.view",       roles("ADMIN", "OPS_SUPERVISOR", "CREDIT_ANALYST", "UNDERWRITER",
-                    "COMMITTEE", "EXECUTIVE", "RISK_ANALYST", "COLLECTIONS_AGENT", "FINANCE", "AUDITOR", "SUPPORT")),
+                    "COMMITTEE", "EXECUTIVE", "RISK_ANALYST", "COLLECTIONS_AGENT", "FINANCE", "AUDITOR", "SUPPORT", "COMMERCIAL_MANAGER")),
             Map.entry("clients.view",         roles("ADMIN", "OPS_SUPERVISOR", "CREDIT_ANALYST", "UNDERWRITER",
-                    "COMMITTEE", "EXECUTIVE", "RISK_ANALYST", "SUPPORT", "AUDITOR")),
-            Map.entry("clients.assign-executive", roles("ADMIN", "OPS_SUPERVISOR")),
+                    "COMMITTEE", "EXECUTIVE", "RISK_ANALYST", "SUPPORT", "AUDITOR", "COMMERCIAL_MANAGER")),
+            Map.entry("clients.assign-executive", roles("ADMIN", "OPS_SUPERVISOR", "COMMERCIAL_MANAGER")),
             // Mesa de KYC de la colocación B2B2C. Es verificación de identidad, no de riesgo: por
             // eso la tienen los perfiles que comprueban personas (cumplimiento, soporte, análisis)
             // y no los que deciden crédito. La distribuidora decide a quién le presta; aquí sólo se
             // vigila que la persona a la que se le va a depositar sea quien dice ser.
             Map.entry("beneficiaries.view",   roles("ADMIN", "OPS_SUPERVISOR", "CREDIT_ANALYST",
-                    "RISK_ANALYST", "SUPPORT", "AUDITOR")),
+                    "RISK_ANALYST", "SUPPORT", "AUDITOR", "COMMITTEE")),
             // Dictaminar identidad **no** es ver la bandeja: es el analista de crédito y nadie más.
             // El auditor lee todo y no decide nada; soporte atiende clientes pero no firma la
             // comprobación de una persona; y riesgo evalúa cartera, no identidades.
             // OPS_SUPERVISOR va también porque así lo siembra identity (`017`): el respaldo tiene que
             // coincidir con la base, o el día que identity no conteste la mesa de KYC se queda sin
             // quién firme.
-            Map.entry("beneficiaries.review-identity", roles("ADMIN", "CREDIT_ANALYST", "OPS_SUPERVISOR")),
+            Map.entry("beneficiaries.review-identity", roles("ADMIN", "CREDIT_ANALYST", "OPS_SUPERVISOR", "SUPPORT")),
             // Mesa de cumplimiento. Mismo reparto que el seed `018`: la cola la ve quien la trabaja
             // y el auditor; dictaminar y adjudicar, sólo quien trabaja la mesa.
             Map.entry("compliance.view",            roles("ADMIN", "OPS_SUPERVISOR", "AUDITOR")),
@@ -69,15 +71,15 @@ public class PermissionsService {
             // Dictaminar documentos del expediente. Misma lógica y los mismos perfiles que arriba,
             // más el underwriter: es el que ya decide sobre la solicitud completa.
             Map.entry("applications.review-documents", roles("ADMIN", "CREDIT_ANALYST",
-                    "UNDERWRITER", "RISK_ANALYST")),
+                    "UNDERWRITER", "RISK_ANALYST", "COMMITTEE")),
             Map.entry("applications.view",    roles("ADMIN", "OPS_SUPERVISOR", "CREDIT_ANALYST", "UNDERWRITER",
                     "COMMITTEE", "RISK_ANALYST", "AUDITOR")),
             Map.entry("applications.analyze", roles("ADMIN", "CREDIT_ANALYST", "UNDERWRITER", "COMMITTEE", "RISK_ANALYST", "AUDITOR")),
             Map.entry("applications.decide",  roles("ADMIN", "UNDERWRITER", "COMMITTEE")),
             Map.entry("applications.request-documents", roles("ADMIN", "CREDIT_ANALYST", "UNDERWRITER", "COMMITTEE")),
             Map.entry("products.manage",      roles("ADMIN", "PRODUCT_MANAGER")),
-            Map.entry("salesorg.view",        roles("ADMIN", "OPS_SUPERVISOR", "EXECUTIVE", "RISK_ANALYST", "FINANCE", "AUDITOR")),
-            Map.entry("salesorg.manage",      roles("ADMIN", "OPS_SUPERVISOR")),
+            Map.entry("salesorg.view",        roles("ADMIN", "OPS_SUPERVISOR", "EXECUTIVE", "RISK_ANALYST", "FINANCE", "AUDITOR", "COMMERCIAL_MANAGER")),
+            Map.entry("salesorg.manage",      roles("ADMIN", "OPS_SUPERVISOR", "COMMERCIAL_MANAGER")),
             Map.entry("audit.view",           roles("ADMIN", "AUDITOR")),
             // Contabilidad. El respaldo tiene que llevar las mismas que el seed `014`: si identity
             // no contesta al arrancar —lo que pasa cada vez que los dos se recrean juntos— este mapa
@@ -89,19 +91,32 @@ public class PermissionsService {
             // opera los pagos y el auditor. Dar de alta cuentas o rutas no pasa por aquí: es ADMIN
             // en banking, porque decide por dónde sale el dinero.
             Map.entry("treasury.view",        roles("ADMIN", "OPS_SUPERVISOR", "FINANCE", "AUDITOR")),
+            // Recording funding (capital paid in, a line drawn, its interest and repayments): treasury's
+            // bookkeeping of where the lent money comes from. Seed `021`.
+            Map.entry("treasury.funding",     roles("ADMIN", "FINANCE")),
             // La pantalla de roles. Faltaba aquí aunque identity sí la publica, así que el día que
             // identity no conteste al arrancar, el respaldo dejaba a ADMIN sin poder abrir la
             // matriz — es decir, sin forma de arreglar los permisos desde la consola, que es
             // justamente lo que este respaldo existe para evitar. Ver a ADMIN y OPS_SUPERVISOR,
             // editar sólo ADMIN, igual que el seed `011-create-role-capabilities`.
             Map.entry("permissions.view",     roles("ADMIN", "OPS_SUPERVISOR")),
-            Map.entry("permissions.manage",   roles("ADMIN")));
+            Map.entry("permissions.manage",   roles("ADMIN")),
+            // Programas de apoyo (seed `016`): ver el padrón y otorgarlo. Faltaban aquí: con identity aún arrancando,
+            // riesgo recibía 403 al proponer un programa que la base sí le permite (E2E del 2 de noviembre, E28).
+            Map.entry("portfolio.relief-view",  roles("ADMIN", "RISK_ANALYST", "COMMITTEE", "AUDITOR")),
+            Map.entry("portfolio.relief-grant", roles("ADMIN", "RISK_ANALYST")),
+            // Cobranza (seed `020`): gestionar es del gestor; autorizar convenios y quebrantos, del comité.
+            Map.entry("collections.manage",     roles("ADMIN", "COLLECTIONS_AGENT", "OPS_SUPERVISOR")),
+            Map.entry("collections.authorize",  roles("ADMIN", "COMMITTEE")));
 
     /** Caché: rol → capacidades. Se refresca desde identity con {@link #reload()}. */
     private volatile Map<String, Set<String>> roleCapabilities = invert();
 
     /** De dónde salió lo que está cacheado ahora. Se expone para no depurar a ciegas. */
     private volatile String source = "respaldo en código (aún no se consulta a identity)";
+
+    /** Si la caché ya vino de identity alguna vez; mientras no, se relee seguido. */
+    private volatile boolean loadedFromIdentity = false;
 
     private final IdentityClient identityClient;
 
@@ -173,6 +188,7 @@ public class PermissionsService {
                     r.capabilities() == null ? Set.of() : Set.copyOf(r.capabilities())));
             this.roleCapabilities = Map.copyOf(updated);
             this.source = "identity-service (" + roles.size() + " roles)";
+            this.loadedFromIdentity = true;
             log.info("Matriz de permisos recargada desde identity: {} roles", roles.size());
         } catch (Exception ex) {
             log.warn("No se pudo leer la matriz de identity ({}); se conserva {}", ex.getMessage(), source);
@@ -180,7 +196,7 @@ public class PermissionsService {
     }
 
     /** Al arrancar se intenta una vez; si falla, queda el respaldo y se reintenta al primer cambio. */
-    @jakarta.annotation.PostConstruct
+    @PostConstruct
     void loadOnStartup() {
         reload();
     }
@@ -200,10 +216,22 @@ public class PermissionsService {
      * <p>Cada cinco minutos y no cada minuto: la matriz cambia con una edición humana, y esas ya
      * llaman a {@link #reload()} directamente. Esto es la red de abajo, no el camino principal.
      */
-    @org.springframework.scheduling.annotation.Scheduled(
+    @Scheduled(
             initialDelayString = "PT30S", fixedDelayString = "${fintech.backoffice.permisos.refresco:PT5M}")
     void releerPeriodicamente() {
         reload();
+    }
+
+    /**
+     * Mientras la caché siga siendo el respaldo en código, se relee cada 15 segundos. Al recrear el stack, el
+     * backoffice arranca antes que identity y su primera lectura falla; esperar al ciclo de cinco minutos dejaba
+     * esos minutos con el respaldo, y cualquier capacidad que el respaldo no conociera era un 403.
+     */
+    @Scheduled(initialDelayString = "PT15S", fixedDelayString = "PT15S")
+    void releerMientrasNoHayaMatriz() {
+        if (!loadedFromIdentity) {
+            reload();
+        }
     }
 
     private static Map<String, Set<String>> invert() {

@@ -13,5 +13,9 @@
     <include file="db/changelog/commission/007-seed-commission-policies.sql"   relativeToChangelogFile="false"/>
     <include file="db/changelog/commission/008-idempotencia-liquidacion.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/commission/009-candado-de-crones.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/010-impuestos-lotes-y-pago-por-carril.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/011-bitacora-de-liquidaciones.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/012-comision-distribuidora-18.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/commission/013-comision-neteada.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

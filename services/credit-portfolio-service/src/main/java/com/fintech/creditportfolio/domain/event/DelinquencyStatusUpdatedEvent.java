@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Los días de atraso de una cuenta, y <b>sobre cuánto</b>.
@@ -37,7 +38,7 @@ public class DelinquencyStatusUpdatedEvent {
         this.daysDelinquent   = daysDelinquent;
         this.overduePrincipal = overduePrincipal != null ? overduePrincipal : BigDecimal.ZERO;
         this.oldestDueDate    = oldestDueDate;
-        this.occurredAt       = Instant.now();
+        this.occurredAt       = BusinessClock.current().now();
     }
 
     public UUID getCreditAccountId()        { return creditAccountId; }

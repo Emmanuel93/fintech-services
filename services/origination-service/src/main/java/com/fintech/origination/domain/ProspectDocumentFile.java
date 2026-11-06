@@ -9,6 +9,7 @@ import jakarta.persistence.Table;
 
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * El archivo de un documento del expediente.
@@ -92,7 +93,7 @@ public class ProspectDocumentFile {
         f.contentType = contentType;
         f.content = content;
         f.sizeBytes = content == null ? 0 : content.length;
-        f.uploadedAt = Instant.now();
+        f.uploadedAt = BusinessClock.current().now();
         f.reviewStatus = DocumentReviewStatus.PENDING_REVIEW;
         return f;
     }
@@ -103,7 +104,7 @@ public class ProspectDocumentFile {
         this.contentType = contentType;
         this.content = content;
         this.sizeBytes = content == null ? 0 : content.length;
-        this.uploadedAt = Instant.now();
+        this.uploadedAt = BusinessClock.current().now();
 
         // Un archivo nuevo invalida el dictamen anterior. Conservarlo aprobaría a ciegas una foto
         // que nadie vio —que es justo el caso de quien vuelve a subir tras un rechazo—.
@@ -141,7 +142,7 @@ public class ProspectDocumentFile {
         this.reviewStatus       = decision;
         this.verificationSource = source;
         this.reviewedBy         = reviewedBy;
-        this.reviewedAt         = Instant.now();
+        this.reviewedAt         = BusinessClock.current().now();
         this.rejectionReason    = decision == DocumentReviewStatus.REJECTED ? rejectionReason : null;
     }
 

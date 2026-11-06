@@ -1,5 +1,6 @@
 package com.fintech.commission.infrastructure.adapter.in.messaging;
 
+import com.fintech.commission.application.BalanceMove;
 import com.fintech.commission.application.service.CommissionAccrualService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,10 +21,12 @@ public class BalanceUpdatedListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "balanceUpdatedListenerContainerFactory")
     public void onMessage(BalanceUpdatedPayload p) {
-        log.debug("balance-updated creditAccountId={} trigger={} interest={}",
-                p.creditAccountId(), p.triggerEvent(), p.accruedInterestBalance());
-        accrualService.onBalanceUpdated(p.eventId(), p.creditAccountId(),
-                p.accruedInterestBalance() != null ? p.accruedInterestBalance() : java.math.BigDecimal.ZERO,
-                p.triggerEvent(), p.balanceVersion());
+        log.debug("balance-updated creditAccountId={} trigger={} interest={} interestDelta={}",
+                p.creditAccountId(), p.triggerEvent(), p.accruedInterestBalance(), p.interestDelta());
+        BalanceUpdatedPayload.NettingPayload n = p.commission();
+        accrualService.onBalanceUpdated(new BalanceMove(p.eventId(), p.creditAccountId(), p.triggerEvent(),
+                p.balanceVersion(), p.accruedInterestBalance(), p.interestDelta(), p.sourceEventId(), p.valueDate(),
+                p.commissionSettlement(), n == null ? null : new BalanceMove.Netting(n.cycleNumber(), n.paymentDueDate(),
+                        n.daysLate(), n.rate(), n.onTimeRate(), n.basis(), n.amount(), n.paymentOrder())));
     }
 }

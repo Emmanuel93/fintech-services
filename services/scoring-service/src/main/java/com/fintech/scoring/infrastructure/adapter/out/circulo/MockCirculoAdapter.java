@@ -35,6 +35,7 @@ import com.fintech.scoring.application.port.out.BureauUnavailableException;
  * <table>
  *   <tr><th>CURP empieza por</th><th>Qué pasa</th><th>Para qué</th></tr>
  *   <tr><td>{@code XEXX}</td><td>FICO 480, reporte válido</td><td>la banda de RECHAZO</td></tr>
+ *   <tr><td>{@code ZZMR}</td><td>FICO 660, reporte válido</td><td>la banda MEDIA: la política la manda a la mesa de análisis (o a comité por monto)</td></tr>
  *   <tr><td>{@code ZZER}</td><td>{@code ERROR}</td><td>el buró contesta que no pudo</td></tr>
  *   <tr><td>{@code ZZNH}</td><td>{@code NO_HIT}</td><td>persona sin historial</td></tr>
  *   <tr><td>{@code ZZNF}</td><td>{@code NOT_FOUND}</td><td>el buró no la encuentra</td></tr>
@@ -100,8 +101,11 @@ class MockCirculoAdapter implements CirculoGateway {
         }
 
         boolean forceReject = curp.startsWith("XEXX");
+        // A borderline profile: FICO 650-699 adds the smallest FICO step and lands in the MEDIO band, which every
+        // B2C policy routes to human review. The desk is reached by the policy, not by moving the application.
+        boolean borderline = curp.startsWith("ZZMR");
         // 720..819 para CURPs normales (>=700 → banda AUTO_APPROVED en la política B2C).
-        int fico = forceReject ? 480 : 720 + Math.floorMod(curp.hashCode(), 100);
+        int fico = forceReject ? 480 : borderline ? 660 : 720 + Math.floorMod(curp.hashCode(), 100);
 
         log.warn("[MOCK BURÓ] Reporte determinista prospectId={} curp={} fico={} — fintech.circulo.mock-enabled=true, NO usar en prod",
                 prospectId, curp, fico);
@@ -118,7 +122,7 @@ class MockCirculoAdapter implements CirculoGateway {
                 .personaCurp(curp)
                 .personaNacionalidad("MX")
                 .ficoScoreValor(fico)
-                .ficoScoreRazones(forceReject ? "MOCK-REJECT" : "MOCK-CLEAN")
+                .ficoScoreRazones(forceReject ? "MOCK-REJECT" : borderline ? "MOCK-BORDERLINE" : "MOCK-CLEAN")
                 .build();
         // Historial vacío a propósito: sin créditos → sin mora → la decisión la fija la banda FICO.
     }

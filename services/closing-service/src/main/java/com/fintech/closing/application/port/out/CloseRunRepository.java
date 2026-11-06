@@ -9,4 +9,5 @@ import java.util.Optional;
 public interface CloseRunRepository {
     Optional<CloseRun> find(LocalDate businessDate, ClosePhase phase, String scopeKey);
     CloseRun save(CloseRun run);
+    Optional<CloseRun> findById(java.util.UUID runId);
 }

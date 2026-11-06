@@ -11,5 +11,9 @@ public record PaymentAppliedPayload(
         String eventId,
         UUID creditAccountId,
         BigDecimal amount,
-        long snapshotVersion
+        long snapshotVersion,
+        /** Where the money came from (SPEI_CREDIT, CREDIT_BALANCE, DIRECT); travels on with a recovery. */
+        String fundingSource,
+        /** The SPEI credit received on a collection CLABE that paid it, when it was one. */
+        UUID inboundCreditId
 ) {}

@@ -45,6 +45,9 @@ public interface InstallmentRepository {
     java.util.Map<UUID, com.fintech.creditportfolio.domain.PaymentPlanSummary>
             planSummaries(java.util.Collection<UUID> scheduleIds);
 
+    /** The highest installment number ever used on a schedule (replaced ones included). */
+    int maxInstallmentNumber(UUID scheduleId);
+
     /** Dev-only (test-support): reasigna due_date para simular el paso del tiempo. */
     void shiftDueDate(UUID scheduleId, int installmentNumber, LocalDate newDueDate);
 }

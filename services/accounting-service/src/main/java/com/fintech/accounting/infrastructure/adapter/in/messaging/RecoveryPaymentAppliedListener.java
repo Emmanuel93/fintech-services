@@ -1,5 +1,6 @@
 package com.fintech.accounting.infrastructure.adapter.in.messaging;
 
+import com.fintech.accounting.domain.PaymentOrigin;
 import com.fintech.accounting.application.service.PostingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +22,10 @@ public class RecoveryPaymentAppliedListener {
             containerFactory = "recoveryPaymentAppliedListenerContainerFactory")
     public void onMessage(RecoveryPaymentAppliedPayload p) {
         log.debug("recovery-payment-applied creditAccountId={} amount={}", p.creditAccountId(), p.recoveredAmount());
-        postingService.onRecoveryPayment("RECOVERY-" + p.writeOffId(), p.creditAccountId(), null,
-                p.recoveredAmount(), p.occurredOn());
+        // One voucher per recovery: keyed by the write-off alone, only the first recovery was ever booked.
+        String clave = "RECOVERY-" + (p.paymentId() != null ? p.paymentId() : p.writeOffId());
+        // The method of a recovery is where its money came from (payments' funding source).
+        postingService.onRecoveryPayment(clave, p.creditAccountId(), null, p.recoveredAmount(), p.occurredOn(),
+                new PaymentOrigin(p.paymentMethod(), p.inboundCreditId()));
     }
 }

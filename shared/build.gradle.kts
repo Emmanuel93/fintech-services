@@ -51,12 +51,24 @@ dependencies {
     // se activa por @ConditionalOnClass. `spring-jdbc` también: ya llega con JPA en esos servicios.
     compileOnly("net.javacrumbs.shedlock:shedlock-spring:${property("shedlockVersion")}")
     compileOnly("net.javacrumbs.shedlock:shedlock-provider-jdbc-template:${property("shedlockVersion")}")
+    testImplementation("net.javacrumbs.shedlock:shedlock-spring:${property("shedlockVersion")}")
     compileOnly("org.springframework:spring-jdbc")
+
+    // Compuertas del cierre (com.fintech.shared.kafka): ¿ya consumió este grupo todo lo publicado?
+    // `compileOnly`: los servicios con Kafka ya traen spring-kafka, y la autoconfiguración se activa
+    // por @ConditionalOnClass.
+    compileOnly("org.springframework.kafka:spring-kafka")
+
+    // Correlation id over HTTP (com.fintech.shared.trace): the WebClient customizer applies only where WebFlux's
+    // client is on the classpath, so it enters as `compileOnly` and activates by @ConditionalOnClass.
+    compileOnly("org.springframework:spring-webflux")
 
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.kafka:spring-kafka")
+    testImplementation("org.springframework.kafka:spring-kafka-test")
     testImplementation("org.redisson:redisson-spring-boot-starter:3.40.2")
     testImplementation("org.testcontainers:testcontainers:1.20.4")
     testImplementation("org.testcontainers:junit-jupiter:1.20.4")

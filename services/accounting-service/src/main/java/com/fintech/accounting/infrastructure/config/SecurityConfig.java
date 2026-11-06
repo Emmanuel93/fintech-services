@@ -1,6 +1,7 @@
 package com.fintech.accounting.infrastructure.config;
 
 import com.fintech.accounting.infrastructure.adapter.in.api.JwtAuthenticationFilter;
+import org.springframework.http.HttpMethod;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -27,9 +28,17 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/actuator/info", "/actuator/metrics", "/actuator/prometheus").permitAll()
+                        // Test support (clock shift, job triggers): only exists with fintech.test-support.enabled=true; the gateway never routes /internal/*.
+                        .requestMatchers("/internal/test-support/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/v3/api-docs", "/v3/api-docs.yaml", "/v3/api-docs/**",
                                 "/swagger-ui.html", "/swagger-ui/**").permitAll()
+                        // Closing, reopening and billing a period publish the numbers: the console asks for
+                        // `accounting.close` (ADMIN, FINANCE), and the service asks for the same roles, so a
+                        // caller that skips the console cannot close the month.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/accounting/periods/**").hasAnyRole("ADMIN", "FINANCE")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/accounting/billing-runs").hasAnyRole("ADMIN", "FINANCE")
+                        .requestMatchers(HttpMethod.POST, "/api/v1/accounting/products/sweep").hasAnyRole("ADMIN", "FINANCE")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)

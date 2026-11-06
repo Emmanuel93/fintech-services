@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -34,7 +35,17 @@ public record CreditAccountActivatedPayload(
         String riskTier,
         Instant activatedAt,
         String originUnitCode,
-        /** La periodicidad del producto: `WEEKLY` · `BIWEEKLY` · `MONTHLY`. */
+        /** La periodicidad del producto: `WEEKLY` · `BIWEEKLY` · `SEMI_MONTHLY` · `MONTHLY`. */
         String paymentFrequency,
+        /** The product's billing cycle pinned to the account; null for products that never declared one. */
+        BillingCyclePayload billingCycle,
         /** Nulo en un revolvente: una línea no tiene plazo, lo tiene cada disposición. */
-        Integer termPeriods) {}
+        Integer termPeriods) {
+
+    /** What the product declared about cutting and paying, as the portfolio republishes it. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record BillingCyclePayload(String cutoffRule, Integer cutoffDay, Integer paymentDueOffsetDays,
+                                      Integer graceDays, BigDecimal minimumPaymentRate, String nonBusinessDayShift,
+                                      /** SEMI_MONTHLY: the two cutoff days, and the day each statement is paid by. */
+                                      List<Integer> cutoffDays, List<Integer> paymentDueDays) {}
+}

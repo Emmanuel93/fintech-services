@@ -4,9 +4,11 @@ import com.fintech.channelbackoffice.infrastructure.adapter.out.client.Accountin
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.AccountingClient.UnitMovementResponse;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.AccountingClient.VoucherResponse;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.CreditPortfolioClient;
+import com.fintech.channelbackoffice.infrastructure.adapter.out.client.CreditProductClient;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.InvoicingClient;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.PartyClient;
 import com.fintech.channelbackoffice.infrastructure.adapter.out.client.SalesOrgClient;
+import com.fintech.channelbackoffice.infrastructure.adapter.out.client.SelfCheckClient;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.slf4j.Logger;
@@ -14,6 +16,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -57,15 +60,32 @@ class AccountingController {
     private final SalesOrgClient salesOrgClient;
     private final PartyClient partyClient;
     private final CreditPortfolioClient creditPortfolioClient;
+    private final CreditProductClient creditProductClient;
+    private final SelfCheckClient selfCheckClient;
+
+    /** What belongs to no product in accounting's trial balance: the institution's funding and its interest. */
+    private static final String INSTITUCION = "INSTITUCION";
 
     AccountingController(AccountingClient accountingClient, InvoicingClient invoicingClient,
                          SalesOrgClient salesOrgClient, PartyClient partyClient,
-                         CreditPortfolioClient creditPortfolioClient) {
+                         CreditPortfolioClient creditPortfolioClient, CreditProductClient creditProductClient,
+                         SelfCheckClient selfCheckClient) {
         this.accountingClient      = accountingClient;
         this.invoicingClient       = invoicingClient;
         this.salesOrgClient        = salesOrgClient;
         this.partyClient           = partyClient;
         this.creditPortfolioClient = creditPortfolioClient;
+        this.creditProductClient   = creditProductClient;
+        this.selfCheckClient       = selfCheckClient;
+    }
+
+    // ── Autoverificación ─────────────────────────────────────────────────────
+
+    @GetMapping("/accounting/self-checks")
+    @Operation(summary = "Lo que cada servicio dice de sí mismo: comisiones, tesorería, cartera y estados de cuenta, con "
+            + "sus comprobaciones que deben cumplirse y las que informan")
+    ResponseEntity<List<Map<String, Object>>> selfChecks() {
+        return ResponseEntity.ok(selfCheckClient.all());
     }
 
     // ── Períodos ─────────────────────────────────────────────────────────────
@@ -86,11 +106,22 @@ class AccountingController {
         return ResponseEntity.ok(body);
     }
 
+    /**
+     * Closes the month if it reconciles. 409 with the reconciliation when it does not: the month stays open and the
+     * screen lists what is off.
+     */
     @PostMapping("/accounting/periods/{period}/close")
-    @Operation(summary = "Cierra un período contable")
+    @Operation(summary = "Cierra un período contable si concilia")
     ResponseEntity<Map<String, Object>> close(@PathVariable String period) {
         log.info("POST /accounting/periods/{}/close", period);
-        return ResponseEntity.ok(accountingClient.closePeriod(period));
+        var outcome = accountingClient.closePeriod(period);
+        return ResponseEntity.status(outcome.status()).body(outcome.body());
+    }
+
+    @GetMapping("/accounting/periods/{period}/reconciliation")
+    @Operation(summary = "Conciliación del cierre de un período")
+    ResponseEntity<Map<String, Object>> reconciliation(@PathVariable String period) {
+        return ResponseEntity.ok(accountingClient.reconciliation(period));
     }
 
     @PostMapping("/accounting/periods/{period}/reopen")
@@ -136,22 +167,23 @@ class AccountingController {
         var vivas = invoices == null ? List.<InvoicingClient.InvoiceResponse>of()
                 : safe(invoices.content()).stream()
                         .filter(i -> !"CANCELLED".equalsIgnoreCase(i.status())).toList();
-        java.math.BigDecimal invoiced = vivas.stream()
+        BigDecimal invoiced = vivas.stream()
                 .map(InvoicingClient.InvoiceResponse::total)
                 .filter(Objects::nonNull)
-                .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         // ── Conciliación del período ─────────────────────────────────────────
         //
-        // Lo facturable **incluye el IVA**, porque el total de un CFDI lo incluye. Restar un
-        // devengado sin IVA contra un facturado con IVA daba una diferencia igual al impuesto —aquí,
-        // 50,766.20 sobre 1.38 M— que además se recortaba a cero por el `max(ZERO)` y escondía las
-        // dos cosas a la vez: el error de la resta y el hecho de que el período cuadra exacto.
-        java.math.BigDecimal facturable = nz(s.accruedInterest())
-                .add(nz(s.moratoriumInterest()))
-                .add(nz(s.fees()))
-                .add(nz(s.ivaAccrued()));
-        java.math.BigDecimal diferencia = facturable.subtract(invoiced);
+        // What has to be invoiced is what was charged to the clients in the month, IVA included (a CFDI's total
+        // includes it): the fiscal base. It is not the revenue the books recognize: since the opening fee is
+        // deferred and Stage 3 interest is recognized on the net, revenue and charges differ by design, and comparing
+        // revenue against the CFDIs showed "facturado de más" in every closed month while invoicing matched the
+        // charges to the centavo. The bridge between both comes with its items, so the difference has a name.
+        var bridge = s.billing();
+        BigDecimal facturable = bridge != null ? nz(bridge.charged())
+                : nz(s.accruedInterest()).add(nz(s.moratoriumInterest())).add(nz(s.fees())).add(nz(s.ivaAccrued()));
+        BigDecimal diferencia = facturable.subtract(invoiced);
+        body.put("billingBridge", bridge);
 
         body.put("ivaAccrued", s.ivaAccrued());
         body.put("billable", facturable);
@@ -160,8 +192,8 @@ class AccountingController {
         // Con signo: negativo significa facturado de más —un CFDI de otro período, o una corrida
         // repetida— y recortarlo a cero haría desaparecer justo el caso que hay que investigar.
         body.put("billingDifference", diferencia);
-        body.put("billingReconciled", diferencia.abs().compareTo(new java.math.BigDecimal("0.01")) < 0);
-        body.put("pendingToBill", diferencia.max(java.math.BigDecimal.ZERO));
+        body.put("billingReconciled", diferencia.abs().compareTo(new BigDecimal("0.01")) < 0);
+        body.put("pendingToBill", diferencia.max(BigDecimal.ZERO));
         return ResponseEntity.ok(body);
     }
 
@@ -287,12 +319,49 @@ class AccountingController {
     // ── Balanza ──────────────────────────────────────────────────────────────
 
     @GetMapping("/accounting/trial-balance")
-    @Operation(summary = "Balanza de comprobación del período, acotable por sucursal")
+    @Operation(summary = "Balanza de comprobación del período, acotable por sucursal y por producto")
     ResponseEntity<List<AccountingClient.TrialBalanceRowResponse>> trialBalance(
             @RequestParam String period,
             @RequestParam(required = false) UUID unitId,
-            @RequestParam(required = false) String unitCode) {
-        return ResponseEntity.ok(safe(accountingClient.trialBalance(period, scopeCodes(unitId, unitCode))));
+            @RequestParam(required = false) String unitCode,
+            @RequestParam(required = false) List<String> productTypes) {
+        return ResponseEntity.ok(safe(accountingClient.trialBalance(period, scopeCodes(unitId, unitCode), productTypes)));
+    }
+
+    @GetMapping("/accounting/products")
+    @Operation(summary = "Movimiento contable por producto del período: lo que ofrece el selector «Producto»")
+    ResponseEntity<List<Map<String, Object>>> products(@RequestParam String period,
+                                                        @RequestParam(required = false) UUID unitId,
+                                                        @RequestParam(required = false) String unitCode) {
+        Map<String, String> names = productNames();
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (var p : safe(accountingClient.products(period, scopeCodes(unitId, unitCode)))) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("productType", p.productType());
+            m.put("productName", nameOf(p.productType(), names));
+            m.put("vouchers", p.vouchers());
+            m.put("loans", p.loans());
+            m.put("totalDebit", p.totalDebit());
+            m.put("totalCredit", p.totalCredit());
+            m.put("accruedInterest", p.accruedInterest());
+            m.put("moratoriumInterest", p.moratoriumInterest());
+            m.put("fees", p.fees());
+            m.put("provision", p.provision());
+            out.add(m);
+        }
+        return ResponseEntity.ok(out);
+    }
+
+    @GetMapping("/accounting/products/{productType}/scheme")
+    @Operation(summary = "Esquema contable de un producto: sus conceptos y las cuentas que mueve cada uno")
+    ResponseEntity<Map<String, Object>> productScheme(@PathVariable String productType,
+                                                       @RequestParam(required = false) String from,
+                                                       @RequestParam(required = false) String to) {
+        Map<String, Object> scheme = new LinkedHashMap<>();
+        scheme.put("productName", nameOf(productType, productNames()));
+        Map<String, Object> ledger = accountingClient.productScheme(productType, from, to);
+        if (ledger != null) scheme.putAll(ledger);
+        return ResponseEntity.ok(scheme);
     }
 
     // ── Ficha contable de un préstamo ────────────────────────────────────────
@@ -715,6 +784,9 @@ class AccountingController {
      */
     private record Atribucion(String codigo, String branch, String responsable) {}
 
+    /** Accounting books the institution's own movements (funding) to this unit. */
+    private static final String CORPORATE_UNIT = "CORPORATIVO";
+
     /**
      * Resuelve cada unidad sellada a <b>sucursal + responsable</b>.
      *
@@ -779,6 +851,12 @@ class AccountingController {
             m.put("orgUnitManager", null);
             return;
         }
+        if (CORPORATE_UNIT.equals(codigo)) {
+            // The institution's own movements (funding: capital, lines and their interest): not a branch's.
+            m.put("orgUnitName", "Corporativo (tesorería)");
+            m.put("orgUnitManager", null);
+            return;
+        }
         Atribucion a = attr.get(codigo);
         m.put("orgUnitName", a != null ? a.branch() : codigo);
         m.put("orgUnitManager", a != null ? a.responsable() : null);
@@ -797,6 +875,38 @@ class AccountingController {
         } catch (Exception ex) {
             return Map.of();
         }
+    }
+
+    /**
+     * The name of each product type, from the catalog: the active version when there is one, else the latest. Empty
+     * when the catalog does not answer — the screen shows the type's code instead of failing.
+     */
+    private Map<String, String> productNames() {
+        try {
+            Map<String, CreditProductClient.CreditProductResponse> best = new HashMap<>();
+            for (var p : safe(creditProductClient.findAll())) {
+                if (p.productType() == null || p.name() == null) continue;
+                best.merge(p.productType(), p, (a, b) -> preferred(a, b) ? a : b);
+            }
+            Map<String, String> names = new HashMap<>();
+            best.forEach((type, p) -> names.put(type, p.name()));
+            return names;
+        } catch (RuntimeException e) {
+            log.warn("Sin catálogo de productos para nombrar la balanza por producto: {}", e.getMessage());
+            return Map.of();
+        }
+    }
+
+    /** Whether {@code a} names its product type better than {@code b}: active first, then the latest version. */
+    private static boolean preferred(CreditProductClient.CreditProductResponse a, CreditProductClient.CreditProductResponse b) {
+        boolean aActive = "ACTIVE".equals(a.status()), bActive = "ACTIVE".equals(b.status());
+        if (aActive != bActive) return aActive;
+        return Objects.requireNonNullElse(a.productVersion(), 0) >= Objects.requireNonNullElse(b.productVersion(), 0);
+    }
+
+    private static String nameOf(String productType, Map<String, String> names) {
+        if (productType == null || INSTITUCION.equals(productType)) return "Institución";
+        return names.getOrDefault(productType, productType);
     }
 
     private List<Map<String, Object>> withUnitNames(List<UnitMovementResponse> rows) {
@@ -914,7 +1024,7 @@ class AccountingController {
 
     private static <T> List<T> safe(List<T> list) { return list == null ? List.of() : list; }
 
-    private static java.math.BigDecimal nz(java.math.BigDecimal v) {
-        return v == null ? java.math.BigDecimal.ZERO : v;
+    private static BigDecimal nz(BigDecimal v) {
+        return v == null ? BigDecimal.ZERO : v;
     }
 }

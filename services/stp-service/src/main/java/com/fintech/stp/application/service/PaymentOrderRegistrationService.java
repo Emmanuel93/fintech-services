@@ -1,5 +1,7 @@
 package com.fintech.stp.application.service;
 
+import com.fintech.shared.banking.SpeiOperatingDay;
+import com.fintech.shared.time.BusinessClock;
 import com.fintech.stp.application.RegisterPaymentOrderCommand;
 import com.fintech.stp.application.port.in.RegisterPaymentOrderUseCase;
 import com.fintech.stp.application.port.out.OutboxMessageRepository;
@@ -22,7 +24,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 
 /**
@@ -45,7 +47,8 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
     private final TrackingKeySequencePort trackingKeySequence;
     private final OutboxMessageRepository outboxRepository;
     private final AccountHasher accountHasher;
-    private final Clock clock;
+    private final BusinessClock businessClock;
+    private final SpeiOperatingDay operatingDay;
 
     public PaymentOrderRegistrationService(StpPaymentOrderRepository orderRepository,
                                            StpPaymentOrderEventRepository eventRepository,
@@ -53,14 +56,16 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
                                            TrackingKeySequencePort trackingKeySequence,
                                            OutboxMessageRepository outboxRepository,
                                            AccountHasher accountHasher,
-                                           Clock clock) {
+                                           BusinessClock businessClock,
+                                           SpeiOperatingDay operatingDay) {
         this.orderRepository = orderRepository;
         this.eventRepository = eventRepository;
         this.companyRepository = companyRepository;
         this.trackingKeySequence = trackingKeySequence;
         this.outboxRepository = outboxRepository;
         this.accountHasher = accountHasher;
-        this.clock = clock;
+        this.businessClock = businessClock;
+        this.operatingDay = operatingDay;
     }
 
     @Override
@@ -98,7 +103,12 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
                             + AccountHasher.mask(cmd.beneficiaryAccount()));
         }
 
-        LocalDate businessDate = LocalDate.now(clock);
+        // The SPEI operation date, as STP will book it: the business day of the moment the order can be sent. From the
+        // cutoff on, or on a non-business day, that is the next business day; within the hold around the cutoff the
+        // order waits for the cutoff to pass and takes the next business day too.
+        Instant registeredAt = businessClock.now();
+        Instant sendAt = operatingDay.releaseAt(registeredAt);
+        LocalDate businessDate = operatingDay.orderOperationDate(registeredAt);
         TrackingKey trackingKey = TrackingKey.generate(
                 company.getTrackingPrefix(),
                 businessDate,
@@ -121,7 +131,11 @@ public class PaymentOrderRegistrationService implements RegisterPaymentOrderUseC
         // El payload del outbox es sólo el id: el relay relee la orden. Así no hay dos copias de
         // la verdad y una migración de esquema no invalida lo que quedó encolado.
         outboxRepository.save(OutboxMessage.registerOrder(
-                order.getStpPaymentOrderId(), order.getStpPaymentOrderId().toString()));
+                order.getStpPaymentOrderId(), order.getStpPaymentOrderId().toString(), sendAt));
+        if (sendAt.isAfter(registeredAt)) {
+            log.info("Orden retenida por el cambio de fecha de operación: sale a las {} con fecha {} trackingKey={}",
+                    sendAt.atZone(operatingDay.zone()).toLocalTime(), businessDate, trackingKey.value());
+        }
 
         log.info("STP payment order registered paymentRequestId={} companyId={} trackingKey={} amount={} account={}",
                 cmd.paymentRequestId(), company.getCompanyId(), trackingKey.value(),

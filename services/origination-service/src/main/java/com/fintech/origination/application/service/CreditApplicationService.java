@@ -44,6 +44,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Service
 @Transactional
@@ -118,7 +119,7 @@ public class CreditApplicationService
         }
 
         // UW-06: cooldown after rejection
-        Instant cooldownSince = Instant.now().minus(properties.getCooldownDays(), ChronoUnit.DAYS);
+        Instant cooldownSince = BusinessClock.current().now().minus(properties.getCooldownDays(), ChronoUnit.DAYS);
         applicationRepository.findMostRecentRejectionAfter(
                 cmd.prospectId(), cmd.productType(), cooldownSince).ifPresent(rejected -> {
             log.warn("Cooldown active prospectId={} productType={} rejectedAt={}",
@@ -295,7 +296,7 @@ public class CreditApplicationService
         CreditApplication app = applicationRepository.findById(cmd.applicationId())
                 .orElseThrow(() -> new CreditApplicationNotFoundException(cmd.applicationId().toString()));
 
-        Instant deadline = Instant.now().plus(properties.getDocumentsTtlDays(), ChronoUnit.DAYS);
+        Instant deadline = BusinessClock.current().now().plus(properties.getDocumentsTtlDays(), ChronoUnit.DAYS);
         app.requestDocuments(cmd.requestedBy(), cmd.note(), deadline);
         applicationRepository.save(app);
         log.info("Documents requested applicationId={} by={} deadline={}",

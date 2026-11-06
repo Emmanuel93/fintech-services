@@ -70,6 +70,9 @@ management:
       show-details: when-authorized
 
 fintech:
+  test-support:
+    # /internal/test-support/* (scheduling state, rest): only for the E2E, off by default.
+    enabled: ${TEST_SUPPORT_ENABLED:false}
   lock:
     enabled: true
     provider: redisson

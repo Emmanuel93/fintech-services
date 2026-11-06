@@ -34,6 +34,7 @@ public class CutoffClosedListener {
 
         cycleClose.onCutoffClosed(new CorteCerrado(
                 event.creditAccountId(), event.cycleNumber(), event.cutoffDate(),
-                event.paymentDueDate(), event.balanceAtCutoff()));
+                event.paymentDueDate(), event.balanceAtCutoff(), event.minimumPayment(), event.periodStart(),
+                event.principalAtCutoff()));
     }
 }

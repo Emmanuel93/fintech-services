@@ -1,6 +1,7 @@
 package com.fintech.creditportfolio.infrastructure.adapter.in.messaging;
 
 import com.fintech.creditportfolio.application.port.in.SettleDisbursementUseCase;
+import com.fintech.creditportfolio.application.port.in.SettleDisbursementUseCase.DisbursementFailure;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -32,13 +33,17 @@ public class DisbursementOutcomeListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "disbursementCompletedListenerContainerFactory")
     public void onDisbursementCompleted(DisbursementCompletedPayload event) {
+        if (!ours(event.sourceSystem(), event.sourceType())) {
+            return;
+        }
         UUID dispositionId = dispositionId(event.sourceMetadata(), event.sourceReference());
         if (dispositionId == null) {
             log.warn("disbursement.completed sin dispositionId correlacionable disbursementId={} — ignorado",
                     event.disbursementId());
             return;
         }
-        settleDisbursement.onDisbursementCompleted(dispositionId, event.externalRef());
+        settleDisbursement.onDisbursementCompleted(dispositionId, attempt(null, event.sourceMetadata()),
+                event.externalRef());
     }
 
     @KafkaListener(
@@ -46,13 +51,18 @@ public class DisbursementOutcomeListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "disbursementFailedListenerContainerFactory")
     public void onDisbursementFailed(DisbursementFailedPayload event) {
+        if (!ours(event.sourceSystem(), event.sourceType())) {
+            return;
+        }
         UUID dispositionId = dispositionId(event.sourceMetadata(), event.sourceReference());
         if (dispositionId == null) {
             log.warn("disbursement.failed sin dispositionId correlacionable disbursementId={} — ignorado",
                     event.disbursementId());
             return;
         }
-        settleDisbursement.onDisbursementFailed(dispositionId, event.failureCode(), event.failureReason());
+        settleDisbursement.onDisbursementFailed(new DisbursementFailure(dispositionId,
+                attempt(event.attempt(), event.sourceMetadata()), event.failureCode(), event.failureReason(),
+                Boolean.TRUE.equals(event.retryable())));
     }
 
     /**
@@ -66,6 +76,9 @@ public class DisbursementOutcomeListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "disbursementReturnedListenerContainerFactory")
     public void onDisbursementReturned(DisbursementReturnedPayload event) {
+        if (!ours(event.sourceSystem(), event.sourceType())) {
+            return;
+        }
         UUID dispositionId = dispositionId(event.sourceMetadata(), event.sourceReference());
         if (dispositionId == null) {
             log.warn("disbursement.returned sin dispositionId correlacionable disbursementId={} — ignorado",
@@ -73,6 +86,28 @@ public class DisbursementOutcomeListener {
             return;
         }
         settleDisbursement.onDisbursementReturned(dispositionId, event.returnReason());
+    }
+
+    /**
+     * Only this service's dispositions: disbursement pays commission lots and withdrawals on the same topics. A
+     * message without its origin (older ones) is let through and correlated by the disposition id, as before.
+     */
+    private static boolean ours(String sourceSystem, String sourceType) {
+        return (sourceSystem == null || "credit-portfolio".equals(sourceSystem))
+                && (sourceType == null || "DISPOSITION".equals(sourceType));
+    }
+
+    /** The attempt the outcome is about: said in the event, else echoed in the metadata, else the first. */
+    private static int attempt(Integer said, Map<String, String> metadata) {
+        if (said != null && said > 0) {
+            return said;
+        }
+        String echoed = metadata != null ? metadata.get("attempt") : null;
+        try {
+            return echoed == null ? 1 : Math.max(1, Integer.parseInt(echoed));
+        } catch (NumberFormatException e) {
+            return 1;
+        }
     }
 
     /** Prefiere el eco explícito de metadata; cae a sourceReference (que este servicio pobló con el id). */

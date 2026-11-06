@@ -1,5 +1,6 @@
 package com.fintech.stp.infrastructure.adapter.out.messaging;
 
+import com.fintech.shared.time.BusinessClock;
 import com.fintech.stp.application.port.out.StpEventPublisher;
 import com.fintech.stp.domain.BanxicoResponseCode;
 import com.fintech.stp.domain.ObservedVia;
@@ -13,6 +14,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -37,6 +39,8 @@ public class KafkaStpEventPublisher implements StpEventPublisher {
     static final String TOPIC_ORDER_REJECTED = "stp.order-rejected";
     static final String TOPIC_ORDER_SETTLED  = "stp.order-settled";
     static final String TOPIC_ORDER_RETURNED = "stp.order-returned";
+    /** The reason of a rejection that STP never gave: the order never reached it. */
+    static final String NOT_REGISTERED = "NO_REGISTRADA";
 
     private static final Logger log = LoggerFactory.getLogger(KafkaStpEventPublisher.class);
 
@@ -50,14 +54,25 @@ public class KafkaStpEventPublisher implements StpEventPublisher {
     public void publishOrderAccepted(StpPaymentOrder order) {
         send(TOPIC_ORDER_ACCEPTED, order, new StpOrderAcceptedPayload(
                 order.getPaymentRequestId(), order.getCompanyId(),
-                order.getStpOrderId(), order.getTrackingKey(), Instant.now()));
+                order.getStpOrderId(), order.getTrackingKey(), BusinessClock.current().now()));
     }
 
     @Override
     public void publishOrderRejected(StpPaymentOrder order, BanxicoResponseCode code, String detail) {
+        // Never retryable: a transient code reaches here only once the relay exhausted its own attempts. That one is
+        // technical, though: the link failed, not a rule, and a new request may go through.
+        boolean technical = code.terminality() == BanxicoResponseCode.Terminality.RETRYABLE;
         send(TOPIC_ORDER_REJECTED, order, new StpOrderRejectedPayload(
                 order.getPaymentRequestId(), order.getCompanyId(), code.code(), code.name(),
-                detail, code.isRetryable(), Instant.now()));
+                detail, false, technical, BusinessClock.current().now()));
+    }
+
+    @Override
+    public void publishOrderNotRegistered(StpPaymentOrder order, String detail) {
+        // Not a Banxico answer, so no Banxico code: the reason names what happened. Technical: nothing reached STP.
+        send(TOPIC_ORDER_REJECTED, order, new StpOrderRejectedPayload(
+                order.getPaymentRequestId(), order.getCompanyId(), null, NOT_REGISTERED,
+                detail, false, true, BusinessClock.current().now()));
     }
 
     @Override
@@ -67,8 +82,8 @@ public class KafkaStpEventPublisher implements StpEventPublisher {
         send(TOPIC_ORDER_SETTLED, order, new StpOrderSettledPayload(
                 stableEventId(TOPIC_ORDER_SETTLED, order), order.getPaymentRequestId(),
                 order.getCompanyId(), order.getTrackingKey(), order.getAmount(),
-                order.getBusinessDate(), cepUrl, cepBeneficiaryName, beneficiaryNameMatches,
-                settledAt, observedVia.name(), Instant.now()));
+                order.getBusinessDate(), registeredOn(order), cepUrl, cepBeneficiaryName, beneficiaryNameMatches,
+                settledAt, observedVia.name(), BusinessClock.current().now()));
     }
 
     @Override
@@ -76,10 +91,16 @@ public class KafkaStpEventPublisher implements StpEventPublisher {
                                      ObservedVia observedVia) {
         send(TOPIC_ORDER_RETURNED, order, new StpOrderReturnedPayload(
                 order.getPaymentRequestId(), order.getCompanyId(), order.getTrackingKey(),
-                status, returnCauseCode, observedVia.name(), Instant.now()));
+                status, returnCauseCode, observedVia.name(), BusinessClock.current().now()));
     }
 
     private static final long SEND_TIMEOUT_SECONDS = 10L;
+
+    /** The calendar day the order was registered, in the business zone; null for an order without that record. */
+    static LocalDate registeredOn(StpPaymentOrder order) {
+        return order.getCreatedAt() == null ? null
+                : order.getCreatedAt().atZone(BusinessClock.current().zone()).toLocalDate();
+    }
 
     /**
      * El mismo id para el mismo hecho de la misma orden. Liquidar ocurre una vez por orden —la

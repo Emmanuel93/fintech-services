@@ -69,6 +69,9 @@ springdoc:
     path: /swagger-ui.html
 
 fintech:
+  test-support:
+    # Endpoints /internal/test-support/* — solo para pruebas E2E, deshabilitados por default.
+    enabled: ${TEST_SUPPORT_ENABLED:false}
   beneficiary:
     # Vigencia de la liga de invitación. El diseño la fija en 7 días (L2066) y la promesa está
     # escrita en la pantalla 23, así que no es un parámetro que se toque a la ligera.
@@ -79,15 +82,19 @@ fintech:
     # Reenvíos de liga permitidos por colocación. Reenviar revoca la anterior y NO extiende la
     # ventana de 7 días: si extendiera, la vigencia sería infinita a punta de reenvíos.
     max-invite-resends: ${BENEFICIARY_MAX_INVITE_RESENDS:3}
-    # Monto mínimo de una colocación — arranque del slider de la pantalla 22.
-    min-placement-amount: ${BENEFICIARY_MIN_PLACEMENT_AMOUNT:5000}
+    # Monto mínimo de una colocación — arranque del slider de la pantalla 22. La línea de distribuidora coloca
+    # microcréditos: de $1,000 a $10,000 de $500 en $500, a 6–24 quincenas, al 95 % anual (catálogo, migración 023).
+    min-placement-amount: ${BENEFICIARY_MIN_PLACEMENT_AMOUNT:1000}
     # Tope por beneficiario. No es el tamaño de la línea: acota cuánto puede darle a UNA persona,
     # para que quien tenga $500,000 no se los coloque completos a un solo cliente.
-    max-placement-amount: ${BENEFICIARY_MAX_PLACEMENT_AMOUNT:60000}
-    amount-step: ${BENEFICIARY_AMOUNT_STEP:1000}
-    default-annual-rate: ${BENEFICIARY_ANNUAL_RATE:0.289}
+    max-placement-amount: ${BENEFICIARY_MAX_PLACEMENT_AMOUNT:10000}
+    amount-step: ${BENEFICIARY_AMOUNT_STEP:500}
+    term-fortnights: 12,14,16,18,20,22,24
+    default-annual-rate: ${BENEFICIARY_ANNUAL_RATE:0.95}
     periods-per-year: 24
-    commission-on-time-rate: ${BENEFICIARY_COMMISSION_RATE:0.20}
+    # El IVA del interés va dentro del pago quincenal, como en el plan de cartera.
+    vat-rate: ${BENEFICIARY_VAT_RATE:0.16}
+    commission-on-time-rate: ${BENEFICIARY_COMMISSION_RATE:0.18}
     # ── Verificación de identidad ────────────────────────────────────────────
     # false = TODO lo revisa una persona. Es el estado vigente: no hay contrato con proveedor.
     # true  = el proveedor resuelve lo que cae dentro de sus umbrales y el analista sólo ve las

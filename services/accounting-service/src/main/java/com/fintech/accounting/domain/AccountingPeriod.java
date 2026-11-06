@@ -3,6 +3,7 @@ package com.fintech.accounting.domain;
 import jakarta.persistence.*;
 
 import java.time.Instant;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Un mes contable y si acepta asientos.
@@ -37,7 +38,7 @@ public class AccountingPeriod {
 
     public void close() {
         this.status   = PeriodStatus.CLOSED;
-        this.closedAt = Instant.now();
+        this.closedAt = BusinessClock.current().now();
     }
 
     public void reopen() {

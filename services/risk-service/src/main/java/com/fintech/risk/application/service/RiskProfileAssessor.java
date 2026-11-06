@@ -52,14 +52,13 @@ public class RiskProfileAssessor {
         ProvisionPolicy policy = policyRepository.findActiveByProductType(profile.getProductType())
                 .orElseThrow(() -> new MissingProvisionPolicyException(profile.getProductType()));
 
-        DelinquencyBucket bucket = DelinquencyBucket.fromDaysDelinquent(profile.getDaysDelinquent());
-        BigDecimal rate = policy.rateFor(bucket);
-
         boolean stageChanged = profile.reassess(
                 properties.getStage2DaysThreshold(),
                 properties.getStage3DaysThreshold(),
                 properties.getCureMonths(),
-                rate, now);
+                properties.getStage3ProbationDays(),
+                properties.getStage2ProbationDays(),
+                policy, now);
 
         profileRepository.save(profile);
         eventPublisher.publishRiskAssessmentUpdated(profile, stageChanged);  // siempre (PR-01)

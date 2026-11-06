@@ -28,6 +28,11 @@ public class PromiseBrokenCheckJob {
     @SchedulerLock(name = "collections.promise-broken-check", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
     @Scheduled(cron = "0 0 8 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
+        execute();
+    }
+
+    /** The job's work without the scheduler lock: what test support runs once per simulated day. */
+    public void execute() {
         LocalDate today = businessClock.today();
         log.info("PromiseBrokenCheckJob starting date={}", today);
         promiseService.checkBrokenPromises(today);

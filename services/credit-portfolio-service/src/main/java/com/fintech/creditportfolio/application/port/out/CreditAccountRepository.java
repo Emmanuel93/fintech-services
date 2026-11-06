@@ -13,7 +13,24 @@ import java.util.UUID;
 
 public interface CreditAccountRepository {
     CreditAccount save(CreditAccount account);
+
+    /** Loans opened before payment references existed: they are given one at startup. */
+    List<CreditAccount> findWithoutPaymentReference();
     Optional<CreditAccount> findById(UUID creditAccountId);
+
+    /**
+     * Takes the account's row lock for the current transaction, so concurrent balance changes on the same
+     * account are applied one after the other. No-op outside a transaction.
+     */
+    void lockForUpdate(UUID creditAccountId);
+
+    /**
+     * Locks the account row and returns its current state. The lock alone is not enough when the same
+     * transaction already read the account before (the overpayment check does): JPA would hand back the
+     * copy it holds, read before the lock, and the mutation would run on stale balances. This refreshes
+     * after the lock is granted, so what gets mutated is what the previous writer committed.
+     */
+    Optional<CreditAccount> lockAndLoad(UUID creditAccountId);
     Optional<CreditAccount> findByContractId(UUID contractId);
     List<CreditAccount> findByObligorPartyId(UUID obligorPartyId);
     List<CreditAccount> findAllByStatus(CreditAccountStatus status);

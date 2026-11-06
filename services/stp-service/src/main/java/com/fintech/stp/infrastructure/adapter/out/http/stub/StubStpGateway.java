@@ -2,6 +2,7 @@ package com.fintech.stp.infrastructure.adapter.out.http.stub;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fintech.shared.time.BusinessClock;
 import com.fintech.stp.application.StpProperties;
 import com.fintech.stp.application.port.out.SigningKeyProvider;
 import com.fintech.stp.application.port.out.StpCompanyRepository;
@@ -61,6 +62,7 @@ public class StubStpGateway implements StpGatewayPort {
     private final ObjectMapper objectMapper;
     private final StpProperties properties;
     private final Environment environment;
+    private final StubScenarioAmounts scenarioAmounts;
 
     private final AtomicLong sequence = new AtomicLong(System.currentTimeMillis());
     private final KeyPair stubKeyPair;
@@ -70,13 +72,15 @@ public class StubStpGateway implements StpGatewayPort {
                           SigningKeyProvider signingKeyProvider,
                           ObjectMapper objectMapper,
                           StpProperties properties,
-                          Environment environment) {
+                          Environment environment,
+                          StubScenarioAmounts scenarioAmounts) {
         this.stubOrders = stubOrders;
         this.companyRepository = companyRepository;
         this.signingKeyProvider = signingKeyProvider;
         this.objectMapper = objectMapper;
         this.properties = properties;
         this.environment = environment;
+        this.scenarioAmounts = scenarioAmounts;
         this.stubKeyPair = generateStubKeyPair();
     }
 
@@ -92,6 +96,21 @@ public class StubStpGateway implements StpGatewayPort {
     @PostConstruct
     void refuseToRunInProduction() {
         SimulatorGuard.requireNonProduction(environment, "StubStpGateway (STP/SPEI)", "STP_GATEWAY_MODE=real");
+        log.info("Stub de STP: los centavos eligen el escenario de {}",
+                armedOnly() ? "los importes armados; cualquier otra orden se liquida" : "todo importe");
+    }
+
+    /** Whether only the amounts a test armed play their cents' scenario. */
+    private boolean armedOnly() {
+        return properties.getGateway().getStub().getScenarioAmounts() == StpProperties.ScenarioAmounts.ARMED;
+    }
+
+    /**
+     * The scenario the order plays: its cents', unless the stub plays only armed amounts and this one was not armed.
+     * The armed set is asked only about an amount whose cents name a scenario.
+     */
+    private StubScenario scenarioFor(BigDecimal amount) {
+        return armedOnly() ? StubScenario.forAmount(amount, scenarioAmounts::isArmed) : StubScenario.forAmount(amount);
     }
 
     /** La pública del stub, para registrarla como llave de verificación en el ambiente. */
@@ -104,7 +123,7 @@ public class StubStpGateway implements StpGatewayPort {
     public RegistrationResult registerPaymentOrder(PaymentOrderRequest request) {
         simulateLatency();
 
-        StubScenario scenario = StubScenario.forAmount(request.monto());
+        StubScenario scenario = scenarioFor(request.monto());
 
         if (scenario == StubScenario.TIMEOUT) {
             throw new IllegalStateException("Stub: timeout simulado hacia STP (escenario .10)");
@@ -115,6 +134,13 @@ public class StubStpGateway implements StpGatewayPort {
             log.error("Stub REJECTS order {}: la firma está ausente o mal formada.", request.claveRastreo());
             return new RegistrationResult(BanxicoResponseCode.VALOR_INVALIDO.code(),
                     "Stub: la firma recibida no es válida");
+        }
+
+        if (scenario == StubScenario.TRANSIENT_ONCE && refusesFirstAttempt(request, signatureValid)) {
+            BanxicoResponseCode link = BanxicoResponseCode.ENLACE_FINANCIERO_MODO_CONSULTAS;
+            log.info("Stub refuses the first attempt claveRastreo={} scenario={} code={}",
+                    request.claveRastreo(), scenario, link.code());
+            return new RegistrationResult(link.code(), link.description());
         }
 
         BanxicoResponseCode rejection = scenario.registrationRejection();
@@ -133,6 +159,21 @@ public class StubStpGateway implements StpGatewayPort {
                 rejection != null ? rejection.description() : null);
     }
 
+    /**
+     * Scenario .11: the first order of a beneficiary account and amount is refused on every try (the connector exhausts
+     * it), marked so the next one is known. Another order of the same payment, with its own tracking key, goes through.
+     */
+    private boolean refusesFirstAttempt(PaymentOrderRequest request, Boolean signatureValid) {
+        var first = stubOrders.findFirstByCuentaBeneficiarioAndMontoAndScenarioOrderByReceivedAt(
+                request.cuentaBeneficiario(), request.monto(), StubScenario.FIRST_ATTEMPT_REFUSED.name());
+        if (first.isEmpty()) {
+            stubOrders.save(StubOrder.capture(request, StubScenario.FIRST_ATTEMPT_REFUSED,
+                    BanxicoResponseCode.ENLACE_FINANCIERO_MODO_CONSULTAS.code(), signatureValid));
+            return true;
+        }
+        return first.get().getClaveRastreo().equals(request.claveRastreo());
+    }
+
     @Override
     @Transactional(readOnly = true)
     public ReconciliationPage queryReconciliation(String stpEmpresa, String tipoOrden, LocalDate businessDate,
@@ -140,7 +181,7 @@ public class StubStpGateway implements StpGatewayPort {
         simulateLatency();
 
         List<StubOrder> all = stubOrders.findByEmpresaAndBusinessDateOrderByReceivedAt(stpEmpresa, businessDate);
-        Instant now = Instant.now();
+        Instant now = BusinessClock.current().now();
 
         List<ReconciliationEntry> entries = new ArrayList<>();
         for (StubOrder order : all) {
@@ -218,8 +259,8 @@ public class StubStpGateway implements StpGatewayPort {
         Map<String, Object> raw = Map.of("claveRastreo", fake, "estado", "LQ");
         String rawPayload = serialize(raw);
         return new ReconciliationEntry(fake, "LQ", null, CEP_BASE + fake, "BENEFICIARIO DESCONOCIDO",
-                null, signRaw(rawPayload, StubScenario.SETTLED), Instant.now().toEpochMilli(),
-                Instant.now().toEpochMilli(), BigDecimal.ONE, "000000000000000000",
+                null, signRaw(rawPayload, StubScenario.SETTLED), BusinessClock.current().now().toEpochMilli(),
+                BusinessClock.current().now().toEpochMilli(), BigDecimal.ONE, "000000000000000000",
                 rawPayload, rawPayload);
     }
 

@@ -66,6 +66,10 @@ public class JournalEntry {
     @Column(name = "line_no")
     private Short lineNo;
 
+    /** Copied from the voucher, as the branch is: the trial balance by product aggregates entries. */
+    @Column(name = "product_type", updatable = false, length = 40)
+    private String productType;
+
     protected JournalEntry() {}
 
     /**
@@ -116,4 +120,11 @@ public class JournalEntry {
     public UUID getVoucherId()        { return voucherId; }
     public String getOrgUnitCode()    { return orgUnitCode; }
     public Short getLineNo()          { return lineNo; }
+    public String getProductType()    { return productType; }
+
+    /** The product of its voucher; {@code null} for the institution's own facts. */
+    public JournalEntry forProduct(String product) {
+        this.productType = product;
+        return this;
+    }
 }

@@ -1,7 +1,10 @@
 package com.fintech.disbursement.infrastructure.adapter.out.messaging;
 
 import com.fintech.disbursement.application.port.out.DisbursementEventPublisher;
+import com.fintech.disbursement.application.RequestDisbursementCommand;
 import com.fintech.disbursement.domain.DisbursementOrder;
+import com.fintech.disbursement.domain.DisbursementStatus;
+import com.fintech.disbursement.domain.FailureCode;
 import com.fintech.disbursement.infrastructure.config.DisbursementTopicProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,7 +13,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.time.Instant;
+import java.time.Clock;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -38,11 +42,13 @@ public class KafkaDisbursementEventPublisher implements DisbursementEventPublish
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final DisbursementTopicProperties topics;
+    private final Clock clock;
 
     public KafkaDisbursementEventPublisher(KafkaTemplate<String, Object> kafkaTemplate,
-                                           DisbursementTopicProperties topics) {
+                                           DisbursementTopicProperties topics, Clock clock) {
         this.kafkaTemplate = kafkaTemplate;
         this.topics = topics;
+        this.clock = clock;
     }
 
     @Override
@@ -51,7 +57,7 @@ public class KafkaDisbursementEventPublisher implements DisbursementEventPublish
                 order.getDisbursementId(), order.getCompanyId(), order.getSourceSystem(),
                 order.getSourceType(), order.getSourceReference(), order.getSourceEventId(),
                 order.getSourceMetadata(), order.getAmount(), order.getCurrency(),
-                order.getProvider(), order.getExternalRef(), order.getCorrelationId(), Instant.now()));
+                order.getProvider(), order.getExternalRef(), order.getCorrelationId(), clock.instant()));
     }
 
     @Override
@@ -61,7 +67,7 @@ public class KafkaDisbursementEventPublisher implements DisbursementEventPublish
                 order.getSourceType(), order.getSourceReference(), order.getSourceEventId(),
                 order.getSourceMetadata(), order.getAmount(), order.getCurrency(),
                 order.getProvider(), order.getExternalRef(), order.getCepUrl(),
-                beneficiaryNameMatches, order.getSettledAt(), order.getCorrelationId(), Instant.now()));
+                beneficiaryNameMatches, order.getSettledAt(), order.getCorrelationId(), clock.instant()));
     }
 
     @Override
@@ -71,7 +77,39 @@ public class KafkaDisbursementEventPublisher implements DisbursementEventPublish
                 order.getSourceType(), order.getSourceReference(), order.getSourceEventId(),
                 order.getSourceMetadata(), order.getAmount(), order.getCurrency(),
                 order.getProvider(), order.getStatus(), order.getFailureCode(),
-                order.getFailureReason(), order.getCorrelationId(), Instant.now()));
+                order.getFailureReason(), anotherAttemptMayWork(order.getFailureCode()),
+                attemptOf(order.getSourceMetadata()), order.getCorrelationId(), clock.instant()));
+    }
+
+    @Override
+    public void publishRequestRejected(RequestDisbursementCommand command, FailureCode code, String reason) {
+        // Keyed by the caller's idempotency key: there is no disbursement id, and its redeliveries share a partition.
+        // Sent now and loud: no transaction holds it, and a rejection nobody hears is the dead letter again (D67). If it
+        // fails, the request that brought it is redelivered and answered again.
+        sendNow(topics.getFailed(), command.sourceEventId(), new DisbursementFailedPayload(
+                null, command.companyId(), command.sourceSystem(),
+                command.sourceType() == null ? null : command.sourceType().name(), command.sourceReference(),
+                command.sourceEventId(), command.metadataOrEmpty(), command.amount(), command.currencyOrDefault(),
+                null, DisbursementStatus.REJECTED.name(), code.name(), reason, code.anotherAttemptMayWork(),
+                attemptOf(command.metadataOrEmpty()), command.correlationId(), clock.instant()));
+    }
+
+    /** Unknown codes (a newer catalog than this reader) are read as rules: asking again needs a reason. */
+    private static boolean anotherAttemptMayWork(String failureCode) {
+        try {
+            return failureCode != null && FailureCode.valueOf(failureCode).anotherAttemptMayWork();
+        } catch (IllegalArgumentException unknown) {
+            return false;
+        }
+    }
+
+    private static int attemptOf(Map<String, String> metadata) {
+        String attempt = metadata == null ? null : metadata.get("attempt");
+        try {
+            return attempt == null ? 1 : Math.max(1, Integer.parseInt(attempt));
+        } catch (NumberFormatException e) {
+            return 1;
+        }
     }
 
     @Override
@@ -81,7 +119,7 @@ public class KafkaDisbursementEventPublisher implements DisbursementEventPublish
                 order.getSourceType(), order.getSourceReference(), order.getSourceEventId(),
                 order.getSourceMetadata(), order.getAmount(), order.getCurrency(),
                 order.getProvider(), order.getExternalRef(), order.getFailureReason(),
-                order.getCorrelationId(), Instant.now()));
+                order.getCorrelationId(), clock.instant()));
     }
 
     /**
@@ -103,6 +141,18 @@ public class KafkaDisbursementEventPublisher implements DisbursementEventPublish
             return;
         }
         doSend(topic, disbursementId, payload);
+    }
+
+    private void sendNow(String topic, String key, Object payload) {
+        try {
+            kafkaTemplate.send(topic, key, payload).get(SEND_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            log.info("{} published key={}", topic, key);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(topic + " interrumpido key=" + key, e);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new IllegalStateException(topic + " no se publicó key=" + key + ": " + e.getMessage(), e);
+        }
     }
 
     private void doSend(String topic, UUID disbursementId, Object payload) {

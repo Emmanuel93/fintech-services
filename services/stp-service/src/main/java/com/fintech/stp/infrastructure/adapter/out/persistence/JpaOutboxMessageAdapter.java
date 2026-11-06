@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Clock;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -30,12 +31,17 @@ public class JpaOutboxMessageAdapter implements OutboxMessageRepository {
     }
 
     @Override
+    public long countDue() {
+        return repository.countDue(clock.instant());
+    }
+
+    @Override
     public OutboxMessage save(OutboxMessage message) {
         return repository.save(message);
     }
 
     @Override
-    public java.util.Optional<OutboxMessage> findById(UUID outboxId) {
+    public Optional<OutboxMessage> findById(UUID outboxId) {
         return repository.findById(outboxId);
     }
 

@@ -53,6 +53,8 @@ public class CommercialPortfolioService {
      * distintas cuando lo que pasaba era que una estaba truncada.
      */
     private static final int PAGINA = 100;
+    /** Obligor ids per portfolio search: 50 × 46 bytes stays far from the 8 KB request-line limit. */
+    private static final int LOTE_OBLIGADOS = 50;
 
     /**
      * Tope de páginas por consulta. No es una optimización sino un seguro: si un servicio informa
@@ -128,13 +130,20 @@ public class CommercialPortfolioService {
         // 4. Las cuentas de esos obligados. Por `search(partyIds)` y no por `batch`: aquélla
         //    busca por id de **cuenta** y aquí lo que se tiene son ids de obligado. Pasarle los
         //    segundos devuelve una lista vacía sin error, que es la peor forma de equivocarse.
-        List<CreditAccountResponse> accounts;
+        List<CreditAccountResponse> accounts = new ArrayList<>();
         try {
-            accounts = allPages(pag -> {
-                var r = creditPortfolioClient.search(null, null, null, null, null,
-                        ejecutivoDeObligado.keySet(), pag, PAGINA, "createdAt,desc");
-                return r == null ? null : r.content();
-            });
+            // The ids travel in the query string (partyIds=…, 46 bytes each): past ~150 obligors the request
+            // line overflows Tomcat's 8 KB header limit and the portfolio answers a bare 400 (2 Nov: a demo of
+            // 158 clients showed the whole commercial tree at zero). Batches keep every request small.
+            List<UUID> obligados = new ArrayList<>(ejecutivoDeObligado.keySet());
+            for (int desde = 0; desde < obligados.size(); desde += LOTE_OBLIGADOS) {
+                List<UUID> lote = obligados.subList(desde, Math.min(desde + LOTE_OBLIGADOS, obligados.size()));
+                accounts.addAll(allPages(pag -> {
+                    var r = creditPortfolioClient.search(null, null, null, null, null,
+                            lote, pag, PAGINA, "createdAt,desc");
+                    return r == null ? null : r.content();
+                }));
+            }
         } catch (Exception ex) {
             log.warn("Sin cartera para el rollup de {}: {}", unitId, ex.getMessage());
             return Rollup.empty(unitId);

@@ -1,5 +1,6 @@
 package com.fintech.stp.domain;
 
+import com.fintech.shared.time.BusinessClock;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -92,7 +93,7 @@ public class SettlementObservation {
         observation.rawPayload = rawPayload;
         observation.observedVia = observedVia.name();
         observation.status = SettlementObservationStatus.APPLIED.name();
-        observation.observedAt = Instant.now();
+        observation.observedAt = BusinessClock.current().now();
         return observation;
     }
 

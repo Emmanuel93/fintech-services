@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Service
 @Transactional
@@ -99,7 +100,7 @@ public class PaymentInstructionService implements CreatePaymentInstructionUseCas
 
     private Instant computeExpiry(PaymentMethod method) {
         return switch (method) {
-            case CODI -> Instant.now().plusSeconds((long) properties.getCodiExpiryMinutes() * 60);
+            case CODI -> BusinessClock.current().now().plusSeconds((long) properties.getCodiExpiryMinutes() * 60);
             case SPEI -> {
                 // IP-04: expires end of current SPEI window
                 ZonedDateTime now = ZonedDateTime.now(ZoneId.of(properties.getSpeiTimeZone()));
@@ -111,7 +112,7 @@ public class PaymentInstructionService implements CreatePaymentInstructionUseCas
                 }
                 yield endOfWindow.toInstant();
             }
-            default -> Instant.now().plusSeconds(86400); // 24h default
+            default -> BusinessClock.current().now().plusSeconds(86400); // 24h default
         };
     }
 }

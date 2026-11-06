@@ -99,6 +99,22 @@ public class NotificationTriggerService {
         dispatchService.dispatch(sourceEventId, EventType.DISBURSEMENT_COMPLETED, obligorPartyId, contact, preference, vars);
     }
 
+    /**
+     * #3b Desembolso fallido — {@code credit-portfolio.disposition-failed} (D63). The borrower hears that the money
+     * could not be deposited and that nothing is owed: an installment credit was cancelled, a line keeps its credit.
+     */
+    public void onDispositionFailed(String sourceEventId, UUID obligorPartyId, BigDecimal amount,
+                                    boolean accountCancelled) {
+        ContactInfo contact = contactResolutionService.resolvePartyContact(obligorPartyId);
+        NotificationPreference preference = preferenceRepository.findById(obligorPartyId).orElse(null);
+
+        Map<String, String> vars = baseVars(contact);
+        vars.put("amount", money(amount));
+        vars.put("outcome", accountCancelled ? "Cancelamos tu crédito sin costo." : "Tu línea sigue disponible.");
+
+        dispatchService.dispatch(sourceEventId, EventType.DISBURSEMENT_FAILED, obligorPartyId, contact, preference, vars);
+    }
+
     /** #4 Recordatorio de pago — {@code collections.pre-due-reminder-triggered}. Actualiza la cuota vigente. */
     public void onPreDueReminderTriggered(String sourceEventId, UUID creditAccountId, UUID obligorPartyId,
                                            LocalDate dueDate, BigDecimal installmentAmount) {

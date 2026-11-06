@@ -13,11 +13,11 @@ interface SpringDataAccountCloseProfileRepository extends JpaRepository<AccountC
     /** Las cuentas vivas. Terminal no devenga, no corta y no entra a ninguna corrida. */
     @Query("""
             SELECT p FROM AccountCloseProfile p
-             WHERE p.status NOT IN ('SETTLED','WRITTEN_OFF','CLOSED')
+             WHERE p.status NOT IN ('SETTLED','WRITTEN_OFF','CLOSED','CANCELLED')
              ORDER BY p.creditAccountId
             """)
     List<AccountCloseProfile> findActive(Pageable pageable);
 
-    @Query("SELECT COUNT(p) FROM AccountCloseProfile p WHERE p.status NOT IN ('SETTLED','WRITTEN_OFF','CLOSED')")
+    @Query("SELECT COUNT(p) FROM AccountCloseProfile p WHERE p.status NOT IN ('SETTLED','WRITTEN_OFF','CLOSED','CANCELLED')")
     long countActive();
 }

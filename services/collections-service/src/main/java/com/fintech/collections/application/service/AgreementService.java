@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /** AG-*: reestructura / quita parcial — bilateral agreements requiring debtor acceptance + internal authorization. */
 @Service
@@ -86,9 +87,10 @@ public class AgreementService implements AgreementUseCase {
             }
         };
 
+        agreement.proposedBy(cmd.proposedBy());
         agreementRepository.save(agreement);
-        log.info("CollectionAgreement proposed agreementId={} caseId={} type={}",
-                agreement.getAgreementId(), cmd.caseId(), cmd.type());
+        log.info("CollectionAgreement proposed agreementId={} caseId={} type={} proposedBy={}",
+                agreement.getAgreementId(), cmd.caseId(), cmd.type(), cmd.proposedBy());
         eventPublisher.publishCollectionAgreementProposed(agreement);
         return agreement;
     }
@@ -133,7 +135,7 @@ public class AgreementService implements AgreementUseCase {
 
     /** AG-05: no response within agreement_response_days -> EXPIRED. */
     public void expireStaleProposals() {
-        Instant cutoff = Instant.now().minusSeconds(properties.getAgreementResponseDays() * 86400L);
+        Instant cutoff = BusinessClock.current().now().minusSeconds(properties.getAgreementResponseDays() * 86400L);
         for (CollectionAgreement agreement : agreementRepository.findProposedBefore(cutoff)) {
             agreement.expire();
             agreementRepository.save(agreement);

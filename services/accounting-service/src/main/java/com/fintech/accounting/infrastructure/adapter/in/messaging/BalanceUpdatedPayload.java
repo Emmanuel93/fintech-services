@@ -38,5 +38,17 @@ public record BalanceUpdatedPayload(
         /** Cuánto movió el hecho en cada componente, con signo. Nulos en productores viejos. */
         BigDecimal principalDelta,
         BigDecimal interestDelta,
-        BigDecimal penaltyDelta
+        BigDecimal penaltyDelta,
+        /** The IVA part of the move (it is also inside penaltyDelta). Null in older producers. */
+        BigDecimal ivaDelta,
+        /** For a reversed or waived charge: the charge's type. Null otherwise. */
+        String chargeType,
+        /**
+         * For a payment: where its money came from. SPEI_CREDIT waits in collections in transit (1103) for the
+         * bank; CREDIT_BALANCE comes from the payer's balance in favor (2102); DIRECT (or null, older producers)
+         * brings its own money to Bancos.
+         */
+        String fundingSource,
+        /** For a share of a received SPEI credit: the credit, the item of collections in transit it moves. */
+        UUID inboundCreditId
 ) {}

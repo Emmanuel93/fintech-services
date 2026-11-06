@@ -5,7 +5,11 @@ import java.time.ZoneId;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 
 /**
  * Publica el {@link BusinessClock} con la zona de {@code fintech.business.zone}.
@@ -24,5 +28,13 @@ public class BusinessTimeAutoConfiguration {
         BusinessClock clock = BusinessClock.of(ZoneId.of(zone));
         BusinessClock.install(clock);
         return clock;
+    }
+
+    /** The shiftable clock, only with test support enabled (see {@link TestSupportClockController}). */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnWebApplication
+    @ConditionalOnProperty(name = "fintech.test-support.enabled", havingValue = "true")
+    @Import(TestSupportClockController.class)
+    static class TestSupportClockConfiguration {
     }
 }

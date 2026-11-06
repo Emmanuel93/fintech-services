@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
-import java.time.Instant;
+import java.time.Clock;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -29,11 +29,13 @@ public class KafkaProviderDispatchAdapter implements ProviderDispatchPort {
 
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final DisbursementTopicProperties topics;
+    private final Clock clock;
 
     public KafkaProviderDispatchAdapter(KafkaTemplate<String, Object> kafkaTemplate,
-                                        DisbursementTopicProperties topics) {
+                                        DisbursementTopicProperties topics, Clock clock) {
         this.kafkaTemplate = kafkaTemplate;
         this.topics = topics;
+        this.clock = clock;
     }
 
     @Override
@@ -55,7 +57,7 @@ public class KafkaProviderDispatchAdapter implements ProviderDispatchPort {
                 // id a resolver: el conector no debe tener catálogo de cuentas propias.
                 route.bankAccountId(), route.orderingClabe(), route.orderingHolderName(), route.orderingTaxId(),
                 route.providerClientRef(),
-                Instant.now());
+                clock.instant());
 
         try {
             kafkaTemplate.send(topic, order.getDisbursementId().toString(), payload)

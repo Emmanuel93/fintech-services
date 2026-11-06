@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Entity
 @Table(name = "prequalification_snapshots", schema = "scoring")
@@ -45,7 +46,7 @@ public class PrequalificationSnapshot {
         s.prospectType = prospectType;
         s.reportId     = reportId;
         s.results      = List.copyOf(results);
-        s.computedAt   = Instant.now();
+        s.computedAt   = BusinessClock.current().now();
         return s;
     }
 
@@ -53,11 +54,11 @@ public class PrequalificationSnapshot {
     public void refresh(UUID reportId, List<PrequalificationItem> results) {
         this.reportId   = reportId;
         this.results    = List.copyOf(results);
-        this.computedAt = Instant.now();
+        this.computedAt = BusinessClock.current().now();
     }
 
     public boolean isFresh(Duration ttl) {
-        return computedAt.isAfter(Instant.now().minus(ttl));
+        return computedAt.isAfter(BusinessClock.current().now().minus(ttl));
     }
 
     public UUID getSnapshotId()                     { return snapshotId; }

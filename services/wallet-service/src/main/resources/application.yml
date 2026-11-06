@@ -56,6 +56,9 @@ springdoc:
     path: /swagger-ui.html
 
 fintech:
+  test-support:
+    # Endpoints /internal/test-support/* — solo para pruebas E2E, deshabilitados por default.
+    enabled: ${TEST_SUPPORT_ENABLED:false}
   wallet:
     stale-threshold-minutes: ${WALLET_STALE_THRESHOLD_MINUTES:30}
     codi-expiry-minutes: ${CODI_EXPIRY_MINUTES:10}

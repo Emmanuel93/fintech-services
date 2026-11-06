@@ -1,8 +1,10 @@
 package com.fintech.closing.application.service;
 
 import com.fintech.closing.application.port.out.AccountCloseProfileRepository;
+import com.fintech.closing.application.port.out.BalanceMovementRepository;
 import com.fintech.closing.application.port.out.CutoffScheduleRepository;
 import com.fintech.closing.domain.AccountCloseProfile;
+import com.fintech.closing.domain.BillingCycle;
 import com.fintech.closing.domain.ClosePolicy;
 import com.fintech.closing.domain.CutoffSchedule;
 import org.slf4j.Logger;
@@ -40,15 +42,18 @@ public class AccountProjectionService {
     private final CutoffScheduleRepository cutoffs;
     private final ClosePolicyResolver policyResolver;
     private final CutoffScheduleDeriver deriver;
+    private final BalanceMovementRepository movements;
 
     public AccountProjectionService(AccountCloseProfileRepository profiles,
                                      CutoffScheduleRepository cutoffs,
                                      ClosePolicyResolver policyResolver,
-                                     CutoffScheduleDeriver deriver) {
+                                     CutoffScheduleDeriver deriver,
+                                     BalanceMovementRepository movements) {
         this.profiles       = profiles;
         this.cutoffs        = cutoffs;
         this.policyResolver = policyResolver;
         this.deriver        = deriver;
+        this.movements      = movements;
     }
 
     /**
@@ -61,6 +66,15 @@ public class AccountProjectionService {
                                     String productBehavior, String orgUnitCode, LocalDate activatedOn,
                                     String paymentFrequency, Integer termPeriods,
                                     BigDecimal nominalRate, BigDecimal principalBalance) {
+        onAccountActivated(creditAccountId, obligorPartyId, productType, productBehavior, orgUnitCode, activatedOn,
+                paymentFrequency, termPeriods, nominalRate, principalBalance, null);
+    }
+
+    /** @param billingCycle the product's cycle pinned to the account; null falls back to the policy of its product type */
+    public void onAccountActivated(UUID creditAccountId, UUID obligorPartyId, String productType,
+                                    String productBehavior, String orgUnitCode, LocalDate activatedOn,
+                                    String paymentFrequency, Integer termPeriods,
+                                    BigDecimal nominalRate, BigDecimal principalBalance, BillingCycle billingCycle) {
 
         if (profiles.findById(creditAccountId).isPresent()) {
             log.debug("Cuenta {} ya proyectada — reentrega ignorada", creditAccountId);
@@ -69,7 +83,7 @@ public class AccountProjectionService {
 
         AccountCloseProfile profile = profiles.save(AccountCloseProfile.fromActivation(
                 creditAccountId, obligorPartyId, productType, productBehavior, orgUnitCode,
-                activatedOn, paymentFrequency, termPeriods, nominalRate, principalBalance));
+                activatedOn, paymentFrequency, termPeriods, nominalRate, principalBalance, billingCycle));
 
         ClosePolicy policy = policyResolver.require(null, productType, activatedOn);
         int cycles = profile.isRevolving() || termPeriods == null
@@ -93,10 +107,31 @@ public class AccountProjectionService {
     @Transactional
     public void onBalanceUpdated(UUID creditAccountId, BigDecimal principal, BigDecimal totalDebt,
                                   String accountStatus, long balanceVersion, String orgUnitCode) {
+        onBalanceUpdated(creditAccountId, principal, totalDebt, accountStatus, balanceVersion, orgUnitCode, null);
+    }
+
+    /**
+     * Saldo nuevo con su fecha valor. Además de la proyección, guarda cuánto movió el hecho: el corte de
+     * D resta lo que tenga fecha posterior y sella el saldo al cierre de D.
+     *
+     * <p>Lo movido se mide contra el saldo anterior de la proyección. Los eventos de una cuenta llegan en
+     * orden (misma llave, misma partición) y la versión impide aplicar uno viejo, así que la diferencia
+     * es la del hecho.
+     */
+    @Transactional
+    public void onBalanceUpdated(UUID creditAccountId, BigDecimal principal, BigDecimal totalDebt,
+                                  String accountStatus, long balanceVersion, String orgUnitCode,
+                                  LocalDate valueDate) {
         profiles.findById(creditAccountId).ifPresentOrElse(profile -> {
             profile.learnOrgUnit(orgUnitCode);
-            if (!profile.applyBalance(principal, totalDebt, accountStatus, balanceVersion)) {
+            BigDecimal capitalAntes = profile.getPrincipalBalance();
+            BigDecimal deudaAntes   = profile.getTotalDebt();
+            if (!profile.applyBalance(principal, totalDebt, accountStatus, balanceVersion, valueDate)) {
                 log.debug("balance-updated viejo cuenta={} v={} — se ignora", creditAccountId, balanceVersion);
+            } else if (valueDate != null) {
+                movements.record(creditAccountId, balanceVersion, valueDate,
+                        profile.getPrincipalBalance().subtract(capitalAntes),
+                        profile.getTotalDebt().subtract(deudaAntes));
             }
             profiles.save(profile);
         }, () -> log.warn("balance-updated de una cuenta no proyectada: {} — se ignora hasta que llegue su alta",

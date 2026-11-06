@@ -96,6 +96,8 @@ class MovementTraceController {
                          String trackingKey, UUID lineId, String voucherRef,
                          BigDecimal amount, LocalDate businessDate, String status,
                          boolean complete, String missingLink,
+                         // Why a FAILED payout ended without the money leaving.
+                         String failureReason,
                          // Cuándo llegó cada tramo. Nulo = ese tramo aún no llega.
                          OffsetDateTime createdAt, OffsetDateTime routedAt,
                          OffsetDateTime dispatchedAt, OffsetDateTime settledAt,
@@ -106,7 +108,7 @@ class MovementTraceController {
                     t.getCreditAccountId(), t.getPayoutId(), t.getBankAccountId(),
                     t.getTrackingKey(), t.getLineId(), t.getVoucherRef(), t.getAmount(),
                     t.getBusinessDate(), t.getStatus(), t.isComplete(), t.missingLink(),
-                    t.getCreatedAt(), t.getRoutedAt(), t.getDispatchedAt(), t.getSettledAt(),
+                    t.getFailureReason(), t.getCreatedAt(), t.getRoutedAt(), t.getDispatchedAt(), t.getSettledAt(),
                     t.getReconciledAt(), t.getPostedAt());
         }
     }

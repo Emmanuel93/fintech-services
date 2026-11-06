@@ -49,11 +49,13 @@ public class CreditAccountActivatedListener {
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("dispositionId", String.valueOf(instruction.dispositionId()));
         metadata.put("creditAccountId", String.valueOf(event.creditAccountId()));
+        // The activation asks for the first attempt; a later one comes as a disposition-authorized with its number.
+        metadata.put("attempt", "1");
         if (instruction.dispositionType() != null) {
             metadata.put("dispositionType", instruction.dispositionType());
         }
 
-        requestDisbursement.request(new RequestDisbursementCommand(
+        requestDisbursement.requestOrReject(new RequestDisbursementCommand(
                 SOURCE_SYSTEM,
                 DisbursementSource.DISPOSITION,
                 String.valueOf(instruction.dispositionId()),

@@ -18,4 +18,5 @@
     <include file="db/changelog/collections/011-queue-indexes.sql"             relativeToChangelogFile="false"/>
     <include file="db/changelog/collections/012-candado-de-crones.sql" relativeToChangelogFile="false"/>
 
+    <include file="db/changelog/collections/013-quien-propone-el-convenio.sql" relativeToChangelogFile="false"/>
 </databaseChangeLog>

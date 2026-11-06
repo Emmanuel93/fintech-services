@@ -1,8 +1,11 @@
 package com.fintech.creditportfolio.domain.event;
 
+import com.fintech.creditportfolio.domain.config.BillingCycle;
+
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Published when a CreditAccount transitions to ACTIVE after the first disbursement.
@@ -56,6 +59,7 @@ public class CreditAccountActivatedEvent {
      */
     private final java.time.LocalDate accrualStartDate;
     private final Integer termPeriods;
+    private final BillingCycle billingCycle;
 
     public CreditAccountActivatedEvent(UUID creditAccountId, UUID contractId, UUID obligorPartyId,
                                         String productType, String productBehavior,
@@ -92,15 +96,36 @@ public class CreditAccountActivatedEvent {
                                         DisbursementInstruction disbursementInstruction,
                                         String paymentFrequency, Integer termPeriods,
                                         java.time.LocalDate accrualStartDate) {
+        this(creditAccountId, contractId, obligorPartyId, productType, productBehavior, nominalRate,
+                moratoriumRate, openingFeeRate, principalBalance, creditLimit, riskTier, activatedAt,
+                promoterCode, originUnitCode, disbursementInstruction, paymentFrequency, termPeriods,
+                accrualStartDate, null);
+    }
+
+    /**
+     * @param billingCycle the product's billing cycle pinned to this account: closing derives its cutoff
+     *                     calendar from it and charges takes its grace period. Null for products that
+     *                     have not declared one; the consumers then fall back to their own defaults.
+     */
+    public CreditAccountActivatedEvent(UUID creditAccountId, UUID contractId, UUID obligorPartyId,
+                                        String productType, String productBehavior,
+                                        BigDecimal nominalRate, BigDecimal moratoriumRate,
+                                        BigDecimal openingFeeRate, BigDecimal principalBalance,
+                                        BigDecimal creditLimit, String riskTier, Instant activatedAt,
+                                        String promoterCode, String originUnitCode,
+                                        DisbursementInstruction disbursementInstruction,
+                                        String paymentFrequency, Integer termPeriods,
+                                        java.time.LocalDate accrualStartDate, BillingCycle billingCycle) {
         this.paymentFrequency = paymentFrequency;
         this.termPeriods      = termPeriods;
         this.accrualStartDate = accrualStartDate;
+        this.billingCycle     = billingCycle;
         this.eventId         = UUID.randomUUID().toString();
         // El hecho ocurrió cuando se activó la cuenta, no cuando se publicó el evento. Contabilidad
         // deriva de aquí el período del alta, así que fijarlo en `now()` ataba la póliza al reloj del
         // productor: un alta procesada tarde caía en el mes equivocado y no había forma de sembrar
         // una cartera con historia.
-        this.occurredOn      = activatedAt != null ? activatedAt : Instant.now();
+        this.occurredOn      = activatedAt != null ? activatedAt : BusinessClock.current().now();
         this.creditAccountId = creditAccountId;
         this.contractId      = contractId;
         this.obligorPartyId  = obligorPartyId;
@@ -166,6 +191,17 @@ public class CreditAccountActivatedEvent {
      */
     public String getPaymentFrequency()     { return paymentFrequency; }
     public Integer getTermPeriods()         { return termPeriods; }
+    public BillingCycle getBillingCycle()   { return billingCycle; }
+
+    /** The loan's payment reference: the SPEI numeric reference that names it. Set once, before publishing. */
+    private Long paymentReference;
+
+    public CreditAccountActivatedEvent withPaymentReference(Long paymentReference) {
+        this.paymentReference = paymentReference;
+        return this;
+    }
+
+    public Long getPaymentReference() { return paymentReference; }
     /**
      * Sin este getter el campo <b>no se serializa</b> y charges devenga desde el día uno. Es
      * exactamente el defecto que una prueba de contrato cazó con `paymentFrequency` (BK-44).

@@ -59,7 +59,7 @@ public class CommunicationHoldService {
      * donde se le da aire antes de volver a insistir.
      */
     public void onPromiseKept(PaymentPromise promise) {
-        Instant hasta = Instant.now().plus(Duration.ofDays(properties.getPromiseKeptQuietDays()));
+        Instant hasta = BusinessClock.current().now().plus(Duration.ofDays(properties.getPromiseKeptQuietDays()));
         openOrExtend(promise.getCaseId(), HoldReason.PROMISE_KEPT, hasta, promise.getPromiseId());
         log.info("Silencio por promesa cumplida caseId={} hasta={}", promise.getCaseId(), hasta);
     }
@@ -71,7 +71,7 @@ public class CommunicationHoldService {
      * la próxima vez no abone nada.
      */
     public void onPartialPayment(UUID caseId) {
-        Instant hasta = Instant.now().plus(Duration.ofDays(properties.getPartialPaymentQuietDays()));
+        Instant hasta = BusinessClock.current().now().plus(Duration.ofDays(properties.getPartialPaymentQuietDays()));
         openOrExtend(caseId, HoldReason.ACTIVE_PROMISE, hasta, null);
     }
 
@@ -82,7 +82,7 @@ public class CommunicationHoldService {
      * «se le acabó el plazo y no cumplió», y eso se lee del freno liberado, no de su fecha.
      */
     public void onPromiseBroken(PaymentPromise promise) {
-        holdRepository.findActive(promise.getCaseId(), HoldReason.ACTIVE_PROMISE, Instant.now())
+        holdRepository.findActive(promise.getCaseId(), HoldReason.ACTIVE_PROMISE, BusinessClock.current().now())
                 .ifPresent(h -> {
                     h.release(null, "Promesa incumplida");
                     holdRepository.save(h);
@@ -92,12 +92,12 @@ public class CommunicationHoldService {
 
     /** Negociar y presionar a la vez no funciona: el convenio calla hasta que se resuelva. */
     public void onAgreementInFlight(UUID caseId, UUID agreementId, int diasDeVigencia) {
-        Instant hasta = Instant.now().plus(Duration.ofDays(diasDeVigencia));
+        Instant hasta = BusinessClock.current().now().plus(Duration.ofDays(diasDeVigencia));
         openOrExtend(caseId, HoldReason.AGREEMENT_IN_FLIGHT, hasta, agreementId);
     }
 
     public void onAgreementResolved(UUID caseId) {
-        holdRepository.findActive(caseId, HoldReason.AGREEMENT_IN_FLIGHT, Instant.now())
+        holdRepository.findActive(caseId, HoldReason.AGREEMENT_IN_FLIGHT, BusinessClock.current().now())
                 .ifPresent(h -> {
                     h.release(null, "Convenio resuelto");
                     holdRepository.save(h);
@@ -113,7 +113,7 @@ public class CommunicationHoldService {
     }
 
     public void release(UUID caseId, HoldReason reason, String by, String note) {
-        holdRepository.findActive(caseId, reason, Instant.now()).ifPresent(h -> {
+        holdRepository.findActive(caseId, reason, BusinessClock.current().now()).ifPresent(h -> {
             h.release(by, note);
             holdRepository.save(h);
         });
@@ -121,7 +121,7 @@ public class CommunicationHoldService {
 
     @Transactional(readOnly = true)
     public List<CommunicationHold> activeHolds(UUID caseId) {
-        return holdRepository.findAllActive(caseId, Instant.now());
+        return holdRepository.findAllActive(caseId, BusinessClock.current().now());
     }
 
     @Transactional(readOnly = true)
@@ -131,11 +131,11 @@ public class CommunicationHoldService {
 
     @Transactional(readOnly = true)
     public boolean isSilenced(UUID caseId) {
-        return !holdRepository.findAllActive(caseId, Instant.now()).isEmpty();
+        return !holdRepository.findAllActive(caseId, BusinessClock.current().now()).isEmpty();
     }
 
     private void openOrExtend(UUID caseId, HoldReason reason, Instant hasta, UUID sourceId) {
-        holdRepository.findActive(caseId, reason, Instant.now())
+        holdRepository.findActive(caseId, reason, BusinessClock.current().now())
                 .ifPresentOrElse(
                         h -> { h.extendTo(hasta); holdRepository.save(h); },
                         () -> holdRepository.save(CommunicationHold.open(caseId, reason, hasta, sourceId)));

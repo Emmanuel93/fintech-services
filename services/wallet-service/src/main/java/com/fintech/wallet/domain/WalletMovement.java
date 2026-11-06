@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Renglón del ledger de movimientos del wallet (vista "Historial" de la app).
@@ -59,7 +60,7 @@ public class WalletMovement {
         this.description     = description;
         this.status          = status;
         this.reference       = reference;
-        this.createdAt       = Instant.now();
+        this.createdAt       = BusinessClock.current().now();
     }
 
     public static WalletMovement disposition(UUID creditAccountId, UUID obligorPartyId,

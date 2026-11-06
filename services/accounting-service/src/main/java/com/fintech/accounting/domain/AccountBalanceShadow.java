@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Sombra local de saldos por cuenta. {@code balance-updated} solo trae saldos nuevos (no el monto
@@ -47,8 +48,16 @@ public class AccountBalanceShadow {
      * sucursal dependa de que ningún emisor se salte el campo nunca es una forma cara de perder la
      * contabilidad de una rama entera sin enterarse.
      */
+    /** The loan's life in months, learned at activation: what its opening fee is deferred over. */
+    @Column(name = "term_months")
+    private Integer termMonths;
+
     @Column(name = "org_unit_code", length = 40)
     private String orgUnitCode;
+
+    /** The loan's product, as its activation published it: what every voucher of the loan is attributed to. */
+    @Column(name = "product_type", length = 40)
+    private String productType;
 
     protected AccountBalanceShadow() {}
 
@@ -61,7 +70,7 @@ public class AccountBalanceShadow {
         s.penaltyBalance   = BigDecimal.ZERO;
         s.totalDebt        = BigDecimal.ZERO;
         s.balanceVersion   = -1L;
-        s.updatedAt        = Instant.now();
+        s.updatedAt        = BusinessClock.current().now();
         return s;
     }
 
@@ -82,7 +91,7 @@ public class AccountBalanceShadow {
         this.penaltyBalance   = newPenalty;
         this.totalDebt        = newTotal;
         this.balanceVersion   = version;
-        this.updatedAt        = Instant.now();
+        this.updatedAt        = BusinessClock.current().now();
         return delta;
     }
 
@@ -116,13 +125,25 @@ public class AccountBalanceShadow {
         this.principalBalance = principal;
         this.totalDebt        = principal;
         this.balanceVersion   = 0L;
-        this.updatedAt        = Instant.now();
+        this.updatedAt        = BusinessClock.current().now();
     }
     public String getOrgUnitCode()    { return orgUnitCode; }
+    public String getProductType()    { return productType; }
+    public Integer getTermMonths()    { return termMonths; }
+
+    /** Remembers the loan's life the first time it is known. */
+    public void learnTerm(Integer months) {
+        if (termMonths == null && months != null && months > 0) this.termMonths = months;
+    }
 
     /** Sella la sucursal la primera vez que se conoce. No la reescribe: mover la cartera de un
      *  ejecutivo a otro no puede cambiar a qué rama se le atribuyó el ingreso de meses pasados. */
     public void learnOrgUnit(String code) {
         if (orgUnitCode == null && code != null && !code.isBlank()) this.orgUnitCode = code;
+    }
+
+    /** Seals the loan's product the first time it is known; a later delivery cannot move past vouchers elsewhere. */
+    public void learnProduct(String product) {
+        if (productType == null && product != null && !product.isBlank()) this.productType = product.trim();
     }
 }

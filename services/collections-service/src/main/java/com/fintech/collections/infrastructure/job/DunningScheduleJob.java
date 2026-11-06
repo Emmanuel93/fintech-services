@@ -32,6 +32,11 @@ public class DunningScheduleJob {
     @SchedulerLock(name = "collections.dunning-schedule", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
     @Scheduled(cron = "0 0 10 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
+        execute();
+    }
+
+    /** The job's work without the scheduler lock: what test support runs once per simulated day. */
+    public void execute() {
         log.info("DunningScheduleJob starting");
         int enviados = dunningService.runDailyCycle();
         log.info("DunningScheduleJob finished requests={}", enviados);

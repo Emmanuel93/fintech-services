@@ -6,6 +6,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import java.time.Instant;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Lo que el catálogo dice del KYC de un producto, guardado de este lado.
@@ -58,7 +59,7 @@ public class ProductKycPolicy {
         this.automationEnabled     = policy.automationEnabled();
         this.provider              = policy.hasProvider() ? policy.provider() : KycPolicy.PROVIDER_NONE;
         this.manualFallbackAllowed = policy.manualFallbackAllowed();
-        this.updatedAt             = Instant.now();
+        this.updatedAt             = BusinessClock.current().now();
     }
 
     public static ProductKycPolicy of(String productCode, int productVersion, KycPolicy policy) {
@@ -73,7 +74,7 @@ public class ProductKycPolicy {
         this.automationEnabled     = policy.automationEnabled();
         this.provider              = policy.hasProvider() ? policy.provider() : KycPolicy.PROVIDER_NONE;
         this.manualFallbackAllowed = policy.manualFallbackAllowed();
-        this.updatedAt             = Instant.now();
+        this.updatedAt             = BusinessClock.current().now();
     }
 
     public KycPolicy toPolicy() {

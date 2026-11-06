@@ -21,7 +21,27 @@ public interface CloseCutoffCycleUseCase {
                         int cycleNumber,
                         LocalDate cutoffDate,
                         LocalDate paymentDueDate,
-                        BigDecimal balanceAtCutoff) {}
+                        BigDecimal balanceAtCutoff,
+                        BigDecimal minimumPayment,
+                        LocalDate periodStart,
+                        BigDecimal principalAtCutoff) {
+
+        public CorteCerrado(UUID creditAccountId, int cycleNumber, LocalDate cutoffDate, LocalDate paymentDueDate,
+                            BigDecimal balanceAtCutoff, BigDecimal minimumPayment, LocalDate periodStart) {
+            this(creditAccountId, cycleNumber, cutoffDate, paymentDueDate, balanceAtCutoff, minimumPayment, periodStart, null);
+        }
+
+        /** Without a minimum payment (a product whose policy sets none): the cycle asks for its purchases. */
+        public CorteCerrado(UUID creditAccountId, int cycleNumber, LocalDate cutoffDate, LocalDate paymentDueDate,
+                            BigDecimal balanceAtCutoff) {
+            this(creditAccountId, cycleNumber, cutoffDate, paymentDueDate, balanceAtCutoff, null, null, null);
+        }
+
+        public CorteCerrado(UUID creditAccountId, int cycleNumber, LocalDate cutoffDate, LocalDate paymentDueDate,
+                            BigDecimal balanceAtCutoff, BigDecimal minimumPayment) {
+            this(creditAccountId, cycleNumber, cutoffDate, paymentDueDate, balanceAtCutoff, minimumPayment, null, null);
+        }
+    }
 
     void onCutoffClosed(CorteCerrado cutoff);
 }

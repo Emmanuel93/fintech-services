@@ -2,3 +2,7 @@ com.fintech.shared.lock.redis.LockAutoConfiguration$RedissonLockConfiguration
 com.fintech.shared.lock.redis.LockAutoConfiguration$RedisTemplateLockConfiguration
 com.fintech.shared.time.BusinessTimeAutoConfiguration
 com.fintech.shared.scheduling.SchedulingLockAutoConfiguration
+com.fintech.shared.scheduling.SchedulingTestSupportAutoConfiguration
+com.fintech.shared.kafka.ConsumerCatchUpAutoConfiguration
+com.fintech.shared.trace.CorrelationAutoConfiguration
+com.fintech.shared.trace.kafka.KafkaCorrelationAutoConfiguration

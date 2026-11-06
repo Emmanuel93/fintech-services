@@ -1,5 +1,7 @@
 package com.fintech.accounting.domain;
 
+import java.util.Collection;
+
 /**
  * El tipo de póliza de la práctica contable mexicana.
  *
@@ -10,13 +12,14 @@ package com.fintech.accounting.domain;
 public enum VoucherType {
     DIARIO, INGRESO, EGRESO;
 
-    /** Deduce el tipo del hecho económico. Un hecho sin efectivo es siempre de diario. */
-    public static VoucherType of(String triggerEvent) {
-        if (triggerEvent == null) return DIARIO;
-        return switch (triggerEvent) {
-            case "PAYMENT_APPLIED", "RECOVERY_PAYMENT" -> INGRESO;
-            case "PAYMENT_RETURNED", "WALLET_WITHDRAWAL" -> EGRESO;
-            default -> triggerEvent.startsWith("DISPOSITION") ? EGRESO : DIARIO;
-        };
+    /**
+     * The type from the money itself: a voucher that debits Bancos (1101) is an income, one that credits it an
+     * expense, and any other a journal voucher. With transit accounts a payment applied on the portfolio's date no
+     * longer moves cash (it waits in 1103 for the bank), so the event's name no longer says it; its accounts do.
+     */
+    public static VoucherType ofCash(Collection<String> debitAccounts, Collection<String> creditAccounts) {
+        if (debitAccounts.contains(AccountCodes.BANCOS)) return INGRESO;
+        if (creditAccounts.contains(AccountCodes.BANCOS)) return EGRESO;
+        return DIARIO;
     }
 }

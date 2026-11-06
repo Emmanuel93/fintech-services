@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Entity
 @Table(name = "dispositions", schema = "credit_portfolio")
@@ -85,6 +86,33 @@ public class Disposition {
     @Column(name = "completed_at")
     private Instant completedAt;
 
+    /** The attempt of its payment in flight, or the last one: each is its own disbursement order (D63). */
+    @Column(nullable = false)
+    private int attempt = 1;
+
+    /** Why the last attempt failed, as disbursement says it; decides whether it is asked again or compensated. */
+    @Column(name = "failure_code", length = 60)
+    private String failureCode;
+
+    @Column(name = "failure_reason", length = 1000)
+    private String failureReason;
+
+    /** To whom the money goes, as it was authorized: every attempt sends this same instruction. */
+    @Column(name = "payee_name")
+    private String payeeName;
+
+    @Column(name = "payee_account", length = 20)
+    private String payeeAccount;
+
+    @Column(name = "payee_account_type", length = 4)
+    private String payeeAccountType;
+
+    @Column(name = "payee_tax_id", length = 18)
+    private String payeeTaxId;
+
+    @Column(name = "payee_concept", length = 40)
+    private String payeeConcept;
+
     protected Disposition() {}
 
     public static Disposition create(UUID creditAccountId, DispositionType type,
@@ -106,7 +134,7 @@ public class Disposition {
         // AMORTIZED por defecto: es lo que era TODA disposición hasta BK-24, y lo que sigue siendo
         // la colocación de un distribuidor. Sólo un producto POST_HOC la marca revolvente.
         d.planMode         = DispositionPlanMode.AMORTIZED;
-        d.createdAt        = Instant.now();
+        d.createdAt        = BusinessClock.current().now();
         return d;
     }
 
@@ -134,7 +162,7 @@ public class Disposition {
                     "La disposición " + dispositionId + " ya tiene plan: no se difiere dos veces");
         }
         this.planMode     = DispositionPlanMode.AMORTIZED;
-        this.deferredAt   = Instant.now();
+        this.deferredAt   = BusinessClock.current().now();
         this.deferredTerm = plazo;
     }
 
@@ -164,11 +192,50 @@ public class Disposition {
     public void complete(String externalRef) {
         this.status      = DispositionStatus.COMPLETED;
         this.externalRef = externalRef;
-        this.completedAt = Instant.now();
+        this.completedAt = BusinessClock.current().now();
     }
 
     public void fail() {
+        fail(null, null);
+    }
+
+    /** Its payment could not happen, for good: the last attempt's failure says why. */
+    public void fail(String failureCode, String failureReason) {
         this.status = DispositionStatus.FAILED;
+        this.failureCode = failureCode;
+        this.failureReason = failureReason;
+    }
+
+    /** The payment it was authorized for, kept so that each attempt sends the same instruction. */
+    public void recordPayee(String name, String account, String accountType, String taxId, String concept) {
+        this.payeeName = name;
+        this.payeeAccount = account;
+        this.payeeAccountType = accountType;
+        this.payeeTaxId = taxId;
+        this.payeeConcept = concept;
+    }
+
+    /** Whether the instruction is known, and a new attempt can send it again (older dispositions did not keep it). */
+    public boolean hasPayee() {
+        return payeeAccount != null && !payeeAccount.isBlank() && payeeName != null && !payeeName.isBlank();
+    }
+
+    /**
+     * The last attempt failed for a reason another may overcome: the next one is asked, and the disposition stays in
+     * flight. The failure stays written until an attempt ends it.
+     */
+    public void retry(String failureCode, String failureReason) {
+        if (status != DispositionStatus.PROCESSING) {
+            throw new IllegalStateException("Only a disposition in flight is retried: " + status);
+        }
+        this.attempt++;
+        this.failureCode = failureCode;
+        this.failureReason = failureReason;
+    }
+
+    /** An outcome of an attempt older than the one in flight: it says nothing about the payment any more. */
+    public boolean isStale(int outcomeAttempt) {
+        return outcomeAttempt < attempt;
     }
 
     /**
@@ -179,7 +246,14 @@ public class Disposition {
      * queda igual en los dos casos, pero el expediente no.
      */
     public void reverse() {
+        reverse(null);
+    }
+
+    /** The beneficiary's bank sent the money back: the reason it gave. */
+    public void reverse(String reason) {
         this.status = DispositionStatus.REVERSED;
+        this.failureCode = "RETURNED_BY_BENEFICIARY_BANK";
+        this.failureReason = reason;
     }
 
     public UUID getDispositionId()      { return dispositionId; }
@@ -196,6 +270,14 @@ public class Disposition {
     public Integer getBilledCycle()     { return billedCycle; }
     public Instant getCreatedAt()       { return createdAt; }
     public Instant getCompletedAt()     { return completedAt; }
+    public int getAttempt()             { return attempt; }
+    public String getFailureCode()      { return failureCode; }
+    public String getFailureReason()    { return failureReason; }
+    public String getPayeeName()        { return payeeName; }
+    public String getPayeeAccount()     { return payeeAccount; }
+    public String getPayeeAccountType() { return payeeAccountType; }
+    public String getPayeeTaxId()       { return payeeTaxId; }
+    public String getPayeeConcept()     { return payeeConcept; }
 
     /**
      * Guarda qué decía el veredicto de listas en el instante de esta disposición.
@@ -208,7 +290,7 @@ public class Disposition {
         this.amlScreeningStatus = screeningStatus;
         this.amlListVersions    = listVersions;
         this.amlVerdictAt       = verdictAt;
-        this.amlCheckedAt       = Instant.now();
+        this.amlCheckedAt       = BusinessClock.current().now();
     }
 
     /**

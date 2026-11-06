@@ -58,6 +58,9 @@ springdoc:
     path: /swagger-ui.html
 
 fintech:
+  test-support:
+    # /internal/test-support/* (scheduling state, rest): only for the E2E, off by default.
+    enabled: ${TEST_SUPPORT_ENABLED:false}
   disbursement:
     # Tesorería decide por dónde sale cada pago (BK-10). Si no responde, la orden
     # espera sin gastar intento: una caída de minutos no debe marcar órdenes como fallidas.
@@ -75,11 +78,12 @@ fintech:
     rails:
       SPEI:
         enabled: true
-        # Ventana envolvente: abre 17:10 y cierra 16:50 del día siguiente. La franja cerrada es el
-        # corte diario de Banxico. Fuera de ventana la orden espera; no se rechaza.
+        # Open around the clock: the cutoff is the connector's. STP holds an order registered around it and dates it
+        # with the next business day (SpeiOperatingDay, `fintech.stp.spei.cutoff`), so the rule lives in one place.
+        # The band this window closed (16:50-17:10) was a second cutoff, an hour off the connector's (D66).
         window:
-          start: "17:10"
-          end: "16:50"
+          start: "00:00"
+          end: "00:00"
           zone: America/Mexico_City
           days: MONDAY,TUESDAY,WEDNESDAY,THURSDAY,FRIDAY,SATURDAY,SUNDAY
       INTERNAL:
@@ -101,6 +105,7 @@ fintech:
         credit-account-activated: ${DISBURSEMENT_TOPIC_CREDIT_ACTIVATED:credit-portfolio.credit-account-activated}
         disposition-authorized: ${DISBURSEMENT_TOPIC_DISPOSITION_AUTHORIZED:credit-portfolio.disposition-authorized}
         wallet-withdrawal-completed: ${DISBURSEMENT_TOPIC_WALLET_WITHDRAWAL:wallet.withdrawal-completed}
+        commission-lot-payout-requested: ${DISBURSEMENT_TOPIC_COMMISSION_LOT:commission.lot-payout-requested}
 
       # Resultados que reportan los conectores.
       provider-outcomes:

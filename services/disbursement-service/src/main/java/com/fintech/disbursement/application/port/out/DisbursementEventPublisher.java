@@ -1,6 +1,8 @@
 package com.fintech.disbursement.application.port.out;
 
+import com.fintech.disbursement.application.RequestDisbursementCommand;
 import com.fintech.disbursement.domain.DisbursementOrder;
+import com.fintech.disbursement.domain.FailureCode;
 
 /**
  * Hechos que publica este servicio. Cuatro, y ninguno es un comando:
@@ -23,6 +25,12 @@ public interface DisbursementEventPublisher {
     void publishCompleted(DisbursementOrder order, boolean beneficiaryNameMatches);
 
     void publishFailed(DisbursementOrder order);
+
+    /**
+     * {@code disbursement.failed} for a request that never became an order: the instruction itself made it impossible
+     * (D67). No disbursement id; the caller's keys and metadata go back so it correlates.
+     */
+    void publishRequestRejected(RequestDisbursementCommand command, FailureCode code, String reason);
 
     void publishReturned(DisbursementOrder order);
 }

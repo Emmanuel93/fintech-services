@@ -6,7 +6,17 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+/**
+ * Asks scoring for a decision once the application is committed, not before.
+ *
+ * <p>scoring answers with scoring-completed carrying the application id, and origination applies the decision by
+ * looking the application up. Sent inside the transaction, a fast answer could arrive before the application was
+ * committed: the lookup found nothing, the decision was logged as «ignored» and the application waited for good.
+ * Same race payments had with its orders (3 Nov). The send leaves only if the transaction committed.
+ */
 @Component
 public class KafkaScoreRequestPublisher implements ScoreRequestPublisher {
 
@@ -22,6 +32,19 @@ public class KafkaScoreRequestPublisher implements ScoreRequestPublisher {
 
     @Override
     public void publish(ScoreRequestedEvent event) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    send(event);
+                }
+            });
+            return;
+        }
+        send(event);
+    }
+
+    private void send(ScoreRequestedEvent event) {
         kafkaTemplate.send(TOPIC, event.getProspectId().toString(), event)
                 .whenComplete((result, ex) -> {
                     if (ex != null) {

@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Service
 @Transactional
@@ -26,15 +27,18 @@ public class PaymentService {
     private final AccountBalanceSnapshotRepository snapshotRepository;
     private final PaymentEventPublisher eventPublisher;
     private final PaymentsProperties properties;
+    private final CustomerBalanceService customerBalances;
 
     public PaymentService(PaymentOrderRepository orderRepository,
                            AccountBalanceSnapshotRepository snapshotRepository,
                            PaymentEventPublisher eventPublisher,
-                           PaymentsProperties properties) {
+                           PaymentsProperties properties,
+                           CustomerBalanceService customerBalances) {
         this.orderRepository    = orderRepository;
         this.snapshotRepository = snapshotRepository;
         this.eventPublisher     = eventPublisher;
         this.properties         = properties;
+        this.customerBalances   = customerBalances;
     }
 
     /**
@@ -65,8 +69,9 @@ public class PaymentService {
                         "No balance snapshot for creditAccountId=" + creditAccountId
                         + ". Account may not be activated yet."));
 
-        // PY-05: account must be in a state that accepts payments
-        if (!snapshot.isAccountActive()) {
+        // PY-05: account must be in a state that accepts payments. A written-off loan does: what its owner pays is
+        // a recovery (collections detects it and accounting books it). Rejecting it lost recoveries entirely.
+        if (!snapshot.isAccountActive() && !snapshot.isWrittenOff()) {
             throw new InvalidPaymentStateException(
                     "Cannot submit payment: account " + creditAccountId
                     + " is in status " + snapshot.getAccountStatus());
@@ -119,11 +124,11 @@ public class PaymentService {
             eventPublisher.publishPaymentApplied(order.getPaymentOrderId().toString(),
                     creditAccountId, totalDebt, snapshotVersion);
 
-            // Publish excess return — keyed with "-excess" suffix for correlation
-            eventPublisher.publishPaymentReversed(order.getPaymentOrderId() + "-excess",
-                    creditAccountId, excess, "OVERPAYMENT_RETURN_TO_PAYER");
-
-            log.info("Overpayment RETURN_TO_PAYER orderId={} applied={} returned={}",
+            // The excess never entered the debt, so it is not a balance fact: it used to go out on
+            // payment-returned and the portfolio booked it as a bounced payment, adding it to the debt
+            // (a distributor paying each statement ended up owing the sum of its own refunds). It stays
+            // on the order (requestedAmount, overpaymentStrategy) for treasury to refund.
+            log.warn("Overpayment RETURN_TO_PAYER orderId={} applied={} excessToRefund={}",
                     order.getPaymentOrderId(), totalDebt, excess);
             return order;
         }
@@ -166,6 +171,8 @@ public class PaymentService {
                 order.reject(reason);
                 orderRepository.save(order);
                 log.warn("PaymentOrder REJECTED orderId={} reason={}", sourceEventId, reason);
+                // The money of a received credit or of the balance in favor is in the bank: it is not lost.
+                customerBalances.onOrderRejected(order, reason);
             }
         });
     }
@@ -192,7 +199,7 @@ public class PaymentService {
         if (order.getConfirmedAt() != null) {
             Instant windowEnd = order.getConfirmedAt()
                     .plus(Duration.ofHours(properties.getReversalWindowHours()));
-            if (Instant.now().isAfter(windowEnd)) {
+            if (BusinessClock.current().now().isAfter(windowEnd)) {
                 throw new InvalidPaymentStateException(
                         "Reversal window expired. Payments can only be reversed within "
                         + properties.getReversalWindowHours() + " hours of confirmation.");

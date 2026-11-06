@@ -16,6 +16,7 @@ public record CollectionAgreementResponse(
         BigDecimal originalDebt,
         BigDecimal forgivenAmount,
         RestructureTerms newTerms,
+        String proposedBy,
         String authorizedBy,
         String authorizationRef,
         Instant proposedAt,
@@ -25,7 +26,7 @@ public record CollectionAgreementResponse(
     public static CollectionAgreementResponse from(CollectionAgreement a) {
         return new CollectionAgreementResponse(a.getAgreementId(), a.getCaseId(), a.getCreditAccountId(),
                 a.getType().name(), a.getStatus().name(), a.getOriginalDebt(), a.getForgivenAmount(),
-                a.getNewTerms(), a.getAuthorizedBy(), a.getAuthorizationRef(),
+                a.getNewTerms(), a.getProposedBy(), a.getAuthorizedBy(), a.getAuthorizationRef(),
                 a.getProposedAt(), a.getRespondedAt(), a.getExecutedAt());
     }
 }

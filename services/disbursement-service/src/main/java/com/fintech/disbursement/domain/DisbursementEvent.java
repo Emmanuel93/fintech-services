@@ -1,5 +1,6 @@
 package com.fintech.disbursement.domain;
 
+import com.fintech.shared.time.BusinessClock;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -63,7 +64,7 @@ public class DisbursementEvent {
         event.reasonCode = reasonCode;
         event.detail = truncate(detail);
         event.actor = actor != null ? actor : "SYSTEM";
-        event.occurredAt = Instant.now();
+        event.occurredAt = BusinessClock.current().now();
         return event;
     }
 

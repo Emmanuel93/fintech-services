@@ -2,6 +2,8 @@ package com.fintech.commission.infrastructure.config;
 
 import com.fintech.commission.infrastructure.adapter.in.messaging.BalanceUpdatedPayload;
 import com.fintech.commission.infrastructure.adapter.in.messaging.CreditAccountActivatedPayload;
+import com.fintech.commission.infrastructure.adapter.in.messaging.FiscalProfileUpdatedListener;
+import com.fintech.commission.infrastructure.adapter.in.messaging.LotPayoutOutcomeListener;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
@@ -33,6 +35,22 @@ public class KafkaConfig {
     balanceUpdatedListenerContainerFactory(KafkaProperties properties) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, BalanceUpdatedPayload>();
         factory.setConsumerFactory(jsonConsumerFactory(properties, BalanceUpdatedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, FiscalProfileUpdatedListener.FiscalProfileUpdatedPayload>
+    fiscalProfileUpdatedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, FiscalProfileUpdatedListener.FiscalProfileUpdatedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, FiscalProfileUpdatedListener.FiscalProfileUpdatedPayload.class));
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, LotPayoutOutcomeListener.DisbursementOutcomePayload>
+    disbursementOutcomeListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, LotPayoutOutcomeListener.DisbursementOutcomePayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, LotPayoutOutcomeListener.DisbursementOutcomePayload.class));
         return factory;
     }
 

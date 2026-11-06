@@ -39,10 +39,18 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health", "/actuator/info", "/actuator/metrics",
                                 "/actuator/prometheus").permitAll()
                         .requestMatchers("/error").permitAll()
+                        // Test support (clock shift): only exists with fintech.test-support.enabled=true; the gateway never routes /internal/*.
+                        .requestMatchers("/internal/test-support/**").permitAll()
                         .requestMatchers("/v3/api-docs", "/v3/api-docs.yaml", "/v3/api-docs/**",
                                 "/swagger-ui.html", "/swagger-ui/**").permitAll()
                         // Administración del catálogo multi-empresa y del material criptográfico
                         .requestMatchers("/api/v1/stp/companies/**").hasRole("ADMIN")
+                        // STP's webhook for credits received on our CLABEs: no JWT, it carries the shared secret
+                        // the controller checks (X-Webhook-Token) and the gateway restricts it to STP's addresses.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/stp/abonos").permitAll()
+                        // Blocking or reactivating a collection CLABE changes where money is accepted: operations.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/stp/collection-accounts/**")
+                                .hasAnyRole("ADMIN", "OPS_SUPERVISOR")
                         // Disparo manual del poller: operación, no consulta
                         .requestMatchers(HttpMethod.POST, "/api/v1/stp/poll")
                                 .hasAnyRole("ADMIN", "OPS_SUPERVISOR")

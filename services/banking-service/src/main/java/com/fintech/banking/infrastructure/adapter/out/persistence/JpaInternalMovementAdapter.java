@@ -1,6 +1,7 @@
 package com.fintech.banking.infrastructure.adapter.out.persistence;
 
 import com.fintech.banking.application.port.out.InternalMovementLookupPort;
+import com.fintech.banking.application.port.out.InternalMovementStore;
 import com.fintech.banking.domain.InternalMovement;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
@@ -14,12 +15,11 @@ import java.util.UUID;
 interface SpringDataInternalMovementRepository extends JpaRepository<InternalMovement, UUID> {
     Optional<InternalMovement> findByTrackingKey(String trackingKey);
     List<InternalMovement> findByBusinessDateAndAmount(LocalDate businessDate, BigDecimal amount);
-    boolean existsBySourceEventId(String sourceEventId);
+    Optional<InternalMovement> findFirstBySourceEventId(String sourceEventId);
 }
 
 @Repository
-class JpaInternalMovementAdapter implements InternalMovementLookupPort,
-        com.fintech.banking.application.service.InternalMovementProjector {
+class JpaInternalMovementAdapter implements InternalMovementLookupPort, InternalMovementStore {
 
     private final SpringDataInternalMovementRepository jpa;
 
@@ -39,16 +39,18 @@ class JpaInternalMovementAdapter implements InternalMovementLookupPort,
 
     /** Proyecta un hecho interno. Idempotente por el id del evento que lo trajo. */
     @Override
-    public void project(InternalMovement m) {
-        if (jpa.existsBySourceEventId(m.getSourceEventId())) {
-            // Un reintento de Kafka volvería ambiguo un cruce que era determinista.
-            return;
-        }
-        jpa.save(m);
+    public InternalMovement save(InternalMovement m) {
+        // Un reintento de Kafka volvería ambiguo un cruce que era determinista: el hecho ya visto devuelve el suyo.
+        return jpa.findFirstBySourceEventId(m.getSourceEventId()).orElseGet(() -> jpa.save(m));
+    }
+
+    @Override
+    public boolean contains(String sourceEventId) {
+        return jpa.findFirstBySourceEventId(sourceEventId).isPresent();
     }
 
     private static MovimientoInterno translate(InternalMovement m) {
         return new MovimientoInterno(m.getMovementType(), m.getReference(), m.getAmount(),
-                m.getBusinessDate(), m.getTrackingKey());
+                m.getBusinessDate(), m.getTrackingKey(), m.getDirection());
     }
 }

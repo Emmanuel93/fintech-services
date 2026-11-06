@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Barrido horario del TTL de documentos (E6): las solicitudes en PENDING_DOCUMENTS cuyo plazo venció
@@ -33,7 +34,7 @@ public class DocumentsExpirationJob {
     @SchedulerLock(name = "origination.documents-expiration", lockAtMostFor = "PT30M", lockAtLeastFor = "PT30S")
     @Scheduled(cron = "0 30 * * * *", zone = "${fintech.business.zone:America/Mexico_City}")   // a la media de cada hora (desfasado de OfferExpirationJob)
     public void expireStaleDocumentRequests() {
-        Instant now = Instant.now();
+        Instant now = BusinessClock.current().now();
         List<CreditApplication> expired = applicationRepository.findPendingDocumentsPastDeadline(now);
         if (expired.isEmpty()) {
             return;

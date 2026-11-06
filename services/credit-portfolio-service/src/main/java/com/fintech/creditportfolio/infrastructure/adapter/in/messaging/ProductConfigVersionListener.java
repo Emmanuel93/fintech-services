@@ -46,7 +46,10 @@ public class ProductConfigVersionListener {
                 payload.amountStep(),
                 payload.nominalRateAnnual(),
                 payload.moratoriumRateAnnual(),
-                payload.openingFeeRate());
+                payload.openingFeeRate(),
+                payload.billingCycle(),
+                payload.distributorCommission(),
+                payload.minAmount(), payload.maxAmount(), payload.minTerm(), payload.maxTerm(), payload.termStep());
     }
 
     @KafkaListener(

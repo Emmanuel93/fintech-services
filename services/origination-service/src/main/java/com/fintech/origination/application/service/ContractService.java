@@ -105,6 +105,16 @@ public class ContractService implements GenerateContractUseCase, SignContractUse
         });
     }
 
+    @Override
+    public void applyDisbursementFailed(UUID applicationId) {
+        applicationRepository.findById(applicationId).ifPresentOrElse(app -> {
+            if (app.markDisbursementFailed()) {
+                applicationRepository.save(app);
+                log.info("Application marked DISBURSEMENT_FAILED applicationId={}", applicationId);
+            }
+        }, () -> log.warn("credit-account-cancelled de una solicitud desconocida applicationId={}", applicationId));
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private CreditApplication loadOrThrow(UUID id) {
@@ -153,7 +163,8 @@ public class ContractService implements GenerateContractUseCase, SignContractUse
                 app.getPromoterCode(),
                 obligorName,
                 obligorTaxId,
-                app.getContract().getBnplDeferralDays());
+                app.getContract().getBnplDeferralDays(),
+                offer.getCat());
     }
 
     private static String fullName(Prospect p) {

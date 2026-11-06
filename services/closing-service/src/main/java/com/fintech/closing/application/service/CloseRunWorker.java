@@ -69,32 +69,11 @@ public class CloseRunWorker {
         int tomadas = 0, hechas = 0, fallidas = 0, omitidas = 0, colisiones = 0;
 
         for (CloseUnit candidata : candidatas) {
-            LockKey key = LockKey.of("closing", "unit", runId, candidata.getUnitKey());
-            Optional<LockHandle> handle = lock.tryAcquire(key, properties.getLease());
-            if (handle.isEmpty()) {
-                colisiones++;
-                continue;                       // otro pod la tiene: no se espera
-            }
-
-            LockHandle h = handle.get();
-            try {
-                // CAS optimista. Cero filas = otro pod ganó la carrera entre el SELECT y aquí.
-                Instant expira = Instant.now().plus(properties.getLease());
-                int tomada = units.claim(candidata.getUnitId(), properties.getNodeId(),
-                        h.fencingToken(), expira);
-                if (tomada == 0) {
-                    colisiones++;
-                    continue;
-                }
-                tomadas++;
-
-                switch (processUnit(candidata.getUnitId(), businessDate, processor, h.fencingToken())) {
-                    case DONE    -> hechas++;
-                    case SKIPPED -> omitidas++;
-                    case FAILED  -> fallidas++;
-                }
-            } finally {
-                lock.release(h);
+            switch (workUnit(candidata, businessDate, processor)) {
+                case TAKEN_BY_OTHER -> colisiones++;
+                case DONE    -> { tomadas++; hechas++; }
+                case SKIPPED -> { tomadas++; omitidas++; }
+                case FAILED  -> { tomadas++; fallidas++; }
             }
         }
 
@@ -103,7 +82,37 @@ public class CloseRunWorker {
         return new Resultado(tomadas, hechas, fallidas, omitidas, colisiones);
     }
 
-    private enum Desenlace { DONE, FAILED, SKIPPED }
+    /** Lo que pasó con una unidad que se intentó trabajar. */
+    public enum UnitOutcome { DONE, FAILED, SKIPPED, TAKEN_BY_OTHER }
+
+    /**
+     * Una unidad: ganar su candado, tomarla con el CAS y procesarla.
+     *
+     * <p>Es la misma secuencia la llame el lote ({@link #workBatch}) o el consumidor del tópico de
+     * corte: el mensaje dice qué unidad toca, pero quien decide si de verdad le toca a este pod es el
+     * CAS. Kafka entrega al menos una vez y un rebalanceo puede repartir el mismo mensaje dos veces;
+     * el segundo encuentra la unidad ya tomada y sigue de largo.
+     */
+    public UnitOutcome workUnit(CloseUnit candidata, LocalDate businessDate, CloseUnitProcessor processor) {
+        LockKey key = LockKey.of("closing", "unit", candidata.getRunId(), candidata.getUnitKey());
+        Optional<LockHandle> handle = lock.tryAcquire(key, properties.getLease());
+        if (handle.isEmpty()) {
+            return UnitOutcome.TAKEN_BY_OTHER;  // otro pod la tiene: no se espera
+        }
+
+        LockHandle h = handle.get();
+        try {
+            // CAS optimista. Cero filas = otro pod ganó la carrera entre el SELECT y aquí.
+            Instant expira = Instant.now().plus(properties.getLease());
+            int tomada = units.claim(candidata.getUnitId(), properties.getNodeId(), h.fencingToken(), expira);
+            if (tomada == 0) {
+                return UnitOutcome.TAKEN_BY_OTHER;
+            }
+            return processUnit(candidata.getUnitId(), businessDate, processor, h.fencingToken());
+        } finally {
+            lock.release(h);
+        }
+    }
 
     /**
      * Una unidad, una transacción propia.
@@ -118,29 +127,29 @@ public class CloseRunWorker {
      * falla; la segunda graba la marca de {@code FAILED}. Si la marca fuera en la misma, el
      * rollback se la llevaría y la unidad volvería a aparecer como {@code CLAIMED} sin causa.
      */
-    private Desenlace processUnit(UUID unitId, LocalDate businessDate,
+    private UnitOutcome processUnit(UUID unitId, LocalDate businessDate,
                                       CloseUnitProcessor processor, long fencingToken) {
         var causa = new java.util.concurrent.atomic.AtomicReference<String>();
 
-        Desenlace desenlace = tx.execute(status -> {
+        UnitOutcome desenlace = tx.execute(status -> {
             CloseUnit unit = units.findById(unitId).orElseThrow();
             try {
                 processor.process(unit, businessDate);
                 unit.markDone(fencingToken);
                 units.save(unit);
-                return Desenlace.DONE;
+                return UnitOutcome.DONE;
             } catch (UnitSkipped skip) {
                 unit.markSkipped(skip.getMessage());
                 units.save(unit);
-                return Desenlace.SKIPPED;
+                return UnitOutcome.SKIPPED;
             } catch (Exception ex) {
                 causa.set(ex.getClass().getSimpleName() + ": " + ex.getMessage());
                 status.setRollbackOnly();
-                return Desenlace.FAILED;
+                return UnitOutcome.FAILED;
             }
         });
 
-        if (desenlace == Desenlace.FAILED) {
+        if (desenlace == UnitOutcome.FAILED) {
             tx.executeWithoutResult(status -> {
                 CloseUnit unit = units.findById(unitId).orElseThrow();
                 unit.markFailed(fencingToken, causa.get());

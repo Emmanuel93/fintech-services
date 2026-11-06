@@ -22,5 +22,9 @@ public record DisbursementFailedPayload(
         String status,
         String failureCode,
         String failureReason,
+        /* Whether another attempt may succeed (D63); absent in older messages, read as a rule. */
+        Boolean retryable,
+        /* Which attempt of the disposition's payment; absent in older messages, read from the metadata. */
+        Integer attempt,
         Instant occurredOn
 ) {}

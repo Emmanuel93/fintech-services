@@ -6,6 +6,6 @@ import jakarta.validation.constraints.NotNull;
 
 public record ApproveWriteOffRequest(
         @NotNull WriteOffReason reason,
-        @NotBlank String authorizedBy,
+        String authorizedBy,           // ignored: the authorizer is the session
         @NotBlank String authorizationRef
 ) {}

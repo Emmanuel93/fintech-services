@@ -22,6 +22,11 @@ public class BureauReportingJob {
     @SchedulerLock(name = "collections.bureau-reporting", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
     @Scheduled(cron = "0 0 2 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
+        execute();
+    }
+
+    /** The job's work without the scheduler lock: what test support runs once per simulated day. */
+    public void execute() {
         log.info("BureauReportingJob starting");
         bureauReportingService.submitPending();
         log.info("BureauReportingJob finished");

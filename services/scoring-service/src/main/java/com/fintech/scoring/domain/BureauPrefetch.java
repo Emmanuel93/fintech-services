@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Entity
 @Table(name = "bureau_prefetches", schema = "scoring")
@@ -60,7 +61,7 @@ public class BureauPrefetch {
         p.prospectType      = prospectType;
         p.productTypeIntent = productTypeIntent;
         p.status            = BureauPrefetchStatus.PENDING;
-        p.requestedAt       = Instant.now();
+        p.requestedAt       = BusinessClock.current().now();
         return p;
     }
 
@@ -70,14 +71,14 @@ public class BureauPrefetch {
 
     public void markCompleted() {
         this.status      = BureauPrefetchStatus.COMPLETED;
-        this.completedAt = Instant.now();
+        this.completedAt = BusinessClock.current().now();
     }
 
     public void markFailed(String reason) {
         this.status        = BureauPrefetchStatus.FAILED;
         // La columna es de 500: un mensaje de excepción más largo no debe tumbar el registro del fallo.
         this.failureReason = reason != null && reason.length() > 500 ? reason.substring(0, 500) : reason;
-        this.completedAt   = Instant.now();
+        this.completedAt   = BusinessClock.current().now();
     }
 
     /** Una llamada más al buró: el primer intento o un reintento. */

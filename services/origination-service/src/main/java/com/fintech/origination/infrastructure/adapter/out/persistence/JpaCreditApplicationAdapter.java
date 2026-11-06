@@ -30,7 +30,8 @@ class JpaCreditApplicationAdapter implements CreditApplicationRepository {
             ApplicationStatus.CANCELLED,
             ApplicationStatus.OFFER_REJECTED,
             ApplicationStatus.OFFER_EXPIRED,
-            ApplicationStatus.DISBURSED);
+            ApplicationStatus.DISBURSED,
+            ApplicationStatus.DISBURSEMENT_FAILED);
 
     private final SpringDataCreditApplicationRepository jpa;
 

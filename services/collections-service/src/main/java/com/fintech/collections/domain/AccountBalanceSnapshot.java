@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Local read-model of credit-portfolio's account, synced from credit-account-activated +
@@ -56,7 +57,7 @@ public class AccountBalanceSnapshot {
         s.penaltyBalance         = BigDecimal.ZERO;
         s.totalDebt              = BigDecimal.ZERO;
         s.balanceVersion         = -1L;
-        s.updatedAt              = Instant.now();
+        s.updatedAt              = BusinessClock.current().now();
         return s;
     }
 
@@ -68,7 +69,7 @@ public class AccountBalanceSnapshot {
         this.penaltyBalance         = penaltyBalance;
         this.totalDebt              = totalDebt;
         this.balanceVersion         = balanceVersion;
-        this.updatedAt              = Instant.now();
+        this.updatedAt              = BusinessClock.current().now();
     }
 
     public UUID getCreditAccountId()              { return creditAccountId; }

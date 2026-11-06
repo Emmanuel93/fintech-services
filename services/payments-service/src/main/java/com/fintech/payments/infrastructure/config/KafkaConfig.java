@@ -1,7 +1,10 @@
 package com.fintech.payments.infrastructure.config;
 
 import com.fintech.payments.infrastructure.adapter.in.messaging.BalanceUpdatedPayload;
+import com.fintech.payments.infrastructure.adapter.in.messaging.CollectionAccountAssignedListener;
 import com.fintech.payments.infrastructure.adapter.in.messaging.CreditAccountActivatedPayload;
+import com.fintech.payments.infrastructure.adapter.in.messaging.CreditReceivedListener;
+import com.fintech.payments.infrastructure.adapter.in.messaging.InstallmentDueListener;
 import com.fintech.payments.infrastructure.adapter.in.messaging.PaymentRejectedPayload;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -42,6 +45,30 @@ public class KafkaConfig {
     creditAccountActivatedListenerContainerFactory(KafkaProperties properties) {
         var f = new ConcurrentKafkaListenerContainerFactory<String, CreditAccountActivatedPayload>();
         f.setConsumerFactory(jsonConsumerFactory(properties, CreditAccountActivatedPayload.class));
+        return f;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, CreditReceivedListener.CreditReceivedPayload>
+    creditReceivedListenerContainerFactory(KafkaProperties properties) {
+        var f = new ConcurrentKafkaListenerContainerFactory<String, CreditReceivedListener.CreditReceivedPayload>();
+        f.setConsumerFactory(jsonConsumerFactory(properties, CreditReceivedListener.CreditReceivedPayload.class));
+        return f;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, CollectionAccountAssignedListener.CollectionAccountAssignedPayload>
+    collectionAccountAssignedListenerContainerFactory(KafkaProperties properties) {
+        var f = new ConcurrentKafkaListenerContainerFactory<String, CollectionAccountAssignedListener.CollectionAccountAssignedPayload>();
+        f.setConsumerFactory(jsonConsumerFactory(properties, CollectionAccountAssignedListener.CollectionAccountAssignedPayload.class));
+        return f;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, InstallmentDueListener.InstallmentDuePayload>
+    installmentDueListenerContainerFactory(KafkaProperties properties) {
+        var f = new ConcurrentKafkaListenerContainerFactory<String, InstallmentDueListener.InstallmentDuePayload>();
+        f.setConsumerFactory(jsonConsumerFactory(properties, InstallmentDueListener.InstallmentDuePayload.class));
         return f;
     }
 

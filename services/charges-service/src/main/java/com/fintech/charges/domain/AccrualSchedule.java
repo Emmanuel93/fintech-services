@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Entity
 @Table(schema = "charges", name = "accrual_schedules")
@@ -84,6 +85,13 @@ public class AccrualSchedule {
     @Column(name = "oldest_due_date")
     private LocalDate oldestDueDate;
 
+    /** DAILY: rate / 360 on each day's principal. PER_PERIOD: each plan's interest, the day its period falls due. */
+    @Column(name = "interest_accrual", nullable = false, length = 12)
+    private String interestAccrual = DAILY;
+
+    public static final String DAILY = "DAILY";
+    public static final String PER_PERIOD = "PER_PERIOD";
+
     @Column(name = "approved_amount", nullable = false, precision = 20, scale = 4)
     private BigDecimal approvedAmount;
 
@@ -115,10 +123,18 @@ public class AccrualSchedule {
         s.lastAccrualDate  = null;
         s.principalBalance = principalBalance;
         s.approvedAmount   = approvedAmount;
-        s.createdAt        = Instant.now();
+        s.createdAt        = BusinessClock.current().now();
         s.updatedAt        = s.createdAt;
         return s;
     }
+
+    /** The product's interest mode, pinned at activation; anything but PER_PERIOD accrues daily. */
+    public void accrueInterest(String mode) {
+        this.interestAccrual = PER_PERIOD.equals(mode) ? PER_PERIOD : DAILY;
+    }
+
+    public boolean accruesPerPeriod() { return PER_PERIOD.equals(interestAccrual); }
+    public String getInterestAccrual() { return interestAccrual; }
 
     public void activateMoratorium(LocalDate startDate) {
         if (AccrualScheduleStatus.CLOSED.name().equals(status)) {
@@ -126,7 +142,7 @@ public class AccrualSchedule {
         }
         this.moratoriumActive    = true;
         this.moratoriumStartDate = startDate;
-        this.updatedAt           = Instant.now();
+        this.updatedAt           = BusinessClock.current().now();
     }
 
     /**
@@ -144,7 +160,7 @@ public class AccrualSchedule {
                                LocalDate hoy, int graciaEfectiva) {
         this.overduePrincipal = overduePrincipal != null ? overduePrincipal : BigDecimal.ZERO;
         this.oldestDueDate    = vencimientoMasAntiguo;
-        this.updatedAt        = Instant.now();
+        this.updatedAt        = BusinessClock.current().now();
 
         // `this.` a propósito: el campo ya quedó normalizado arriba, el parámetro puede venir nulo.
         boolean hayVencido = this.overduePrincipal.compareTo(BigDecimal.ZERO) > 0
@@ -163,26 +179,34 @@ public class AccrualSchedule {
         activateMoratorium(arranque);
     }
 
+    /** A restructure agreed a new rate: the accrual from its effective date on uses it. */
+    public void changeNominalRate(BigDecimal newRate) {
+        if (newRate == null || newRate.signum() <= 0) {
+            throw new IllegalArgumentException("Tasa de reestructura inválida: " + newRate);
+        }
+        this.nominalRate = newRate;
+    }
+
     public void clearMoratorium() {
         this.moratoriumActive = false;
-        this.updatedAt        = Instant.now();
+        this.updatedAt        = BusinessClock.current().now();
     }
 
     public void updateBalance(BigDecimal newPrincipalBalance) {
         this.principalBalance = newPrincipalBalance;
-        this.updatedAt        = Instant.now();
+        this.updatedAt        = BusinessClock.current().now();
     }
 
     public void close() {
         this.status           = AccrualScheduleStatus.CLOSED.name();
         this.moratoriumActive = false;
-        this.updatedAt        = Instant.now();
+        this.updatedAt        = BusinessClock.current().now();
     }
 
     public void markAccruedFor(LocalDate date) {
         if (lastAccrualDate != null && !date.isAfter(lastAccrualDate)) return;
         this.lastAccrualDate = date;
-        this.updatedAt       = Instant.now();
+        this.updatedAt       = BusinessClock.current().now();
     }
 
     /** Idempotencia del devengo moratorio: uno por día, con su propio reloj. */
@@ -195,7 +219,7 @@ public class AccrualSchedule {
     public void markMoratoriumAccruedFor(LocalDate date) {
         if (lastMoratoriumAccrualDate != null && !date.isAfter(lastMoratoriumAccrualDate)) return;
         this.lastMoratoriumAccrualDate = date;
-        this.updatedAt = Instant.now();
+        this.updatedAt = BusinessClock.current().now();
     }
 
     public boolean needsAccrual(LocalDate today) {
@@ -224,7 +248,7 @@ public class AccrualSchedule {
      */
     public void startAccrualOn(LocalDate date) {
         this.accrualStartDate = date;
-        this.updatedAt        = Instant.now();
+        this.updatedAt        = BusinessClock.current().now();
     }
 
     /**
@@ -239,7 +263,7 @@ public class AccrualSchedule {
         // Los dos relojes se retroceden juntos: sembrar historia con uno adelantado dejaría
         // meses sin moratorios o sin interés, según cuál quedara atrás.
         this.lastMoratoriumAccrualDate = date;
-        this.updatedAt       = Instant.now();
+        this.updatedAt       = BusinessClock.current().now();
     }
 
     public boolean isActive() { return AccrualScheduleStatus.ACTIVE.name().equals(status); }

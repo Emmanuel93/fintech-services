@@ -28,5 +28,7 @@ public record CreditProductCreationRequestedPayload(
         String obligorName,
         String obligorTaxId,
         /** Días de BNPL que el cliente pidió al firmar; nulo si no pidió ninguno. */
-        Integer bnplDeferralDays
+        Integer bnplDeferralDays,
+        /** The CAT of the offer the client signed (annual, %, without IVA); null from older producers. */
+        BigDecimal cat
 ) {}

@@ -179,7 +179,17 @@ public class CreditPortfolioClient {
             Integer    totalInstallments,
             LocalDate  paymentDueDate,
             BigDecimal minimumPayment,
-            BigDecimal overdueAmount) {}
+            BigDecimal overdueAmount,
+            /** A distributor line: whether it may place today, and why not; null on every other product. */
+            Boolean    placementBlocked,
+            String     placementBlockReason,
+            BigDecimal overdueStatementsAmount,
+            /** Her share of what her clients pay (0.18) and how it is settled (NETTED); null on every other product. */
+            BigDecimal distributorCommissionRate,
+            String     distributorCommissionSettlement) {
+
+        public boolean blockedForPlacements() { return Boolean.TRUE.equals(placementBlocked); }
+    }
 
     public record DispositionSchedule(
             UUID       dispositionId,

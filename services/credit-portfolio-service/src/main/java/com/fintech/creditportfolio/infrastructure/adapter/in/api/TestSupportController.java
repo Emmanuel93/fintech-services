@@ -2,8 +2,10 @@ package com.fintech.creditportfolio.infrastructure.adapter.in.api;
 
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
+import com.fintech.creditportfolio.application.service.BalanceReconciliationService;
 import com.fintech.creditportfolio.domain.CreditAccountStatus;
 import com.fintech.creditportfolio.infrastructure.config.CreditPortfolioProperties;
+import com.fintech.creditportfolio.infrastructure.job.DayCloseRunner;
 import com.fintech.creditportfolio.infrastructure.job.DelinquencyCalculationJob;
 import com.fintech.creditportfolio.infrastructure.job.InstallmentDueJob;
 import com.fintech.creditportfolio.infrastructure.job.UpcomingInstallmentJob;
@@ -18,6 +20,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
@@ -41,19 +44,61 @@ class TestSupportController {
     private final UpcomingInstallmentJob upcomingInstallmentJob;
     private final InstallmentDueJob installmentDueJob;
     private final DelinquencyCalculationJob delinquencyCalculationJob;
+    private final DayCloseRunner dayCloseRunner;
+    private final BalanceReconciliationService reconciliation;
 
     TestSupportController(InstallmentRepository installmentRepository,
                           CreditAccountRepository creditAccountRepository,
                           CreditPortfolioProperties properties,
                           UpcomingInstallmentJob upcomingInstallmentJob,
                           InstallmentDueJob installmentDueJob,
-                          DelinquencyCalculationJob delinquencyCalculationJob) {
+                          DelinquencyCalculationJob delinquencyCalculationJob,
+                          DayCloseRunner dayCloseRunner,
+                          BalanceReconciliationService reconciliation) {
+        this.dayCloseRunner = dayCloseRunner;
+        this.reconciliation = reconciliation;
         this.installmentRepository = installmentRepository;
         this.creditAccountRepository = creditAccountRepository;
         this.properties = properties;
         this.upcomingInstallmentJob = upcomingInstallmentJob;
         this.installmentDueJob = installmentDueJob;
         this.delinquencyCalculationJob = delinquencyCalculationJob;
+    }
+
+    /**
+     * Applies a payment as if payments-service had published it, so a lab can pay accounts on a shifted
+     * business date without the whole payments chain. Same code path as the Kafka listener.
+     */
+    @PostMapping("/accounts/{creditAccountId}/payments")
+    ResponseEntity<Map<String, Object>> applyPayment(@PathVariable UUID creditAccountId,
+                                                     @RequestParam BigDecimal amount,
+                                                     @RequestParam(required = false) String reference) {
+        String sourceEventId = reference != null ? reference : "test-support:" + UUID.randomUUID();
+        log.info("[test-support] Pago de {} a la cuenta {} ({})", amount, creditAccountId, sourceEventId);
+        reconciliation.onPaymentApplied(sourceEventId, creditAccountId, amount);
+        var account = creditAccountRepository.findById(creditAccountId).orElseThrow();
+        return ResponseEntity.ok(Map.of("creditAccountId", creditAccountId.toString(), "sourceEventId", sourceEventId,
+                "principalBalance", account.getPrincipalBalance(), "totalDebt", account.getTotalDebt(),
+                "valueDate", BusinessClock.current().today().toString()));
+    }
+
+    /**
+     * La parte de cartera en el cierre de un día, por las mismas compuertas que el aviso de cargos: si
+     * cargos no avisó el día, si falta el anterior o si los intereses no cuadran, responde
+     * {@code WAITING} con el motivo. Un día ya cerrado sólo vuelve a avisar.
+     *
+     * @param date el día que se cierra; por omisión, ayer.
+     */
+    @PostMapping("/run-day-close")
+    ResponseEntity<Map<String, Object>> runDayClose(
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(
+                    iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) LocalDate date) {
+        LocalDate target = date != null ? date : BusinessClock.current().today().minusDays(1);
+        log.info("[test-support] Cerrando el día {} en cartera", target);
+        var r = dayCloseRunner.close(target, "test-support");
+        return ResponseEntity.ok(Map.of("businessDate", target.toString(),
+                "delinquencyAsOf", target.plusDays(1).toString(), "outcome", r.outcome().name(),
+                "detail", r.detail()));
     }
 
     @PostMapping("/run-upcoming-installment-job")

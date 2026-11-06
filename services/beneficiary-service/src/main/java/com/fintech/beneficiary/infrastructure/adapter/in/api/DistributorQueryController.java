@@ -52,7 +52,8 @@ class DistributorQueryController {
         var s = orchestrator.lineSummary(currentPartyId());
         return ResponseEntity.ok(new LineSummaryResponse(
                 s.authorized(), s.placed(), s.available(), s.toCollect(),
-                s.dueToKredius(), s.commissionAccrued(), s.nextDueDate(), s.daysPastDue()));
+                s.dueToKredius(), s.commissionAccrued(), s.nextDueDate(), s.daysPastDue(),
+                s.blocked(), s.blockReason(), s.overdueAmount(), s.commissionRate()));
     }
 
     @Operation(summary = "Mis beneficiarios",
@@ -163,10 +164,17 @@ class DistributorQueryController {
         return UUID.fromString(SecurityContextHolder.getContext().getAuthentication().getName());
     }
 
+    /**
+     * @param blocked        the line does not place today: a statement is unpaid past its due date
+     * @param blockReason    why, as the portfolio says it; null when it is not blocked
+     * @param overdueAmount  what she must pay to place again
+     * @param commissionRate her share of what her clients pay (0.18), deducted from what she delivers on time
+     */
     record LineSummaryResponse(
             BigDecimal authorized, BigDecimal placed, BigDecimal available,
             BigDecimal toCollect, BigDecimal dueToKredius, BigDecimal commissionAccrued,
-            LocalDate nextDueDate, int daysPastDue) {}
+            LocalDate nextDueDate, int daysPastDue,
+            boolean blocked, String blockReason, BigDecimal overdueAmount, BigDecimal commissionRate) {}
 
     record BeneficiaryListResponse(List<BeneficiaryResponse> beneficiaries) {}
 

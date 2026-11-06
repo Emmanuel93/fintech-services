@@ -37,6 +37,7 @@ class WebClientConfig {
     @Bean WebClient auditWebClient(ChannelBackofficeProperties p)           { return client(p.getAuditServiceUrl()); }
     @Bean WebClient salesOrgWebClient(ChannelBackofficeProperties p)        { return client(p.getSalesOrgServiceUrl()); }
     @Bean WebClient beneficiaryWebClient(ChannelBackofficeProperties p)     { return client(p.getBeneficiaryServiceUrl()); }
+    @Bean WebClient statementWebClient(ChannelBackofficeProperties p)       { return client(p.getStatementServiceUrl()); }
     @Bean WebClient complianceWebClient(ChannelBackofficeProperties p)      { return client(p.getComplianceServiceUrl()); }
     @Bean WebClient bankingWebClient(ChannelBackofficeProperties p)         { return client(p.getBankingServiceUrl()); }
     @Bean WebClient disbursementWebClient(ChannelBackofficeProperties p)    { return client(p.getDisbursementServiceUrl()); }

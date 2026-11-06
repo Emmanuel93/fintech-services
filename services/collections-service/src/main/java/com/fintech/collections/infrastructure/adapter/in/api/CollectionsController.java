@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @RestController
 @RequestMapping("/api/v1/collections")
@@ -91,7 +92,7 @@ class CollectionsController {
     @Operation(summary = "Communication holds — why automated dunning is silent on this case")
     @GetMapping("/cases/{caseId}/communication-holds")
     List<CommunicationHoldResponse> listHolds(@PathVariable UUID caseId) {
-        Instant ahora = Instant.now();
+        Instant ahora = BusinessClock.current().now();
         return holdService.history(caseId).stream()
                 .map(h -> CommunicationHoldResponse.from(h, ahora))
                 .toList();
@@ -167,8 +168,9 @@ class CollectionsController {
     @PostMapping("/cases/{caseId}/agreements")
     @ResponseStatus(HttpStatus.CREATED)
     CollectionAgreementResponse proposeAgreement(@PathVariable UUID caseId,
-                                                  @Valid @RequestBody ProposeAgreementRequest req) {
-        var cmd = new ProposeAgreementCommand(caseId, req.type(), req.forgivenAmount(), req.newTerms());
+                                                  @Valid @RequestBody ProposeAgreementRequest req,
+                                                  Authentication auth) {
+        var cmd = new ProposeAgreementCommand(caseId, req.type(), req.forgivenAmount(), req.newTerms(), auth.getName());
         return CollectionAgreementResponse.from(agreementUseCase.propose(cmd));
     }
 
@@ -187,9 +189,11 @@ class CollectionsController {
     @Operation(summary = "Authorize (and execute) an accepted agreement — AG-02")
     @PutMapping("/agreements/{agreementId}/authorize")
     CollectionAgreementResponse authorizeAgreement(@PathVariable UUID agreementId,
-                                                    @Valid @RequestBody AuthorizeAgreementRequest req) {
+                                                    @Valid @RequestBody AuthorizeAgreementRequest req,
+                                                    Authentication auth) {
+        // Who authorizes is the session, not what the request says: a name in the body is whatever the caller typed.
         return CollectionAgreementResponse.from(
-                agreementUseCase.authorize(agreementId, req.authorizedBy(), req.authorizationRef()));
+                agreementUseCase.authorize(agreementId, auth.getName(), req.authorizationRef()));
     }
 
     @Operation(summary = "Request a write-off (quita total) — intent only, WO-01")
@@ -205,8 +209,9 @@ class CollectionsController {
     @PostMapping("/cases/{caseId}/write-offs")
     @ResponseStatus(HttpStatus.CREATED)
     WriteOffRecordResponse approveWriteOff(@PathVariable UUID caseId,
-                                            @Valid @RequestBody ApproveWriteOffRequest req) {
-        var cmd = new ApproveWriteOffCommand(caseId, req.reason(), req.authorizedBy(), req.authorizationRef());
+                                            @Valid @RequestBody ApproveWriteOffRequest req,
+                                            Authentication auth) {
+        var cmd = new ApproveWriteOffCommand(caseId, req.reason(), auth.getName(), req.authorizationRef());
         return WriteOffRecordResponse.from(writeOffUseCase.approve(cmd));
     }
 

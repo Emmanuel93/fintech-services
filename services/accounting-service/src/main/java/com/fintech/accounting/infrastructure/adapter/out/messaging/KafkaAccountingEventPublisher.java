@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Component
 public class KafkaAccountingEventPublisher implements AccountingEventPublisher {
@@ -45,7 +46,7 @@ public class KafkaAccountingEventPublisher implements AccountingEventPublisher {
     public void publishReconciliationAlert(String checkType, UUID creditAccountId, BigDecimal operational,
                                            BigDecimal accounting, BigDecimal delta, String period) {
         var payload = new ReconciliationAlertPayload(checkType, creditAccountId, operational, accounting,
-                delta, period, Instant.now());
+                delta, period, BusinessClock.current().now());
         kafkaTemplate.send(TOPIC_RECON_ALERT, checkType + ":" + (creditAccountId != null ? creditAccountId : period), payload);
     }
 }

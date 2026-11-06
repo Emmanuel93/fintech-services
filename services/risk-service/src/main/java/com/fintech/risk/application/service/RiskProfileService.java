@@ -8,6 +8,7 @@ import com.fintech.risk.domain.Ifrs9Stage;
 import com.fintech.risk.domain.RiskProfile;
 import com.fintech.risk.domain.RiskProfileNotFoundException;
 import com.fintech.risk.domain.RiskProfileStatus;
+import com.fintech.risk.application.port.out.RiskEventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Keeps each {@link RiskProfile} in sync with credit-portfolio's activation/balance/delinquency
@@ -36,9 +38,11 @@ public class RiskProfileService implements GetRiskProfileUseCase, GetProvisionSu
     private static final Logger log = LoggerFactory.getLogger(RiskProfileService.class);
 
     private final RiskProfileRepository repository;
+    private final RiskEventPublisher eventPublisher;
 
-    public RiskProfileService(RiskProfileRepository repository) {
+    public RiskProfileService(RiskProfileRepository repository, RiskEventPublisher eventPublisher) {
         this.repository = repository;
+        this.eventPublisher = eventPublisher;
     }
 
     @Override
@@ -85,12 +89,41 @@ public class RiskProfileService implements GetRiskProfileUseCase, GetProvisionSu
      * derived from BalanceUpdated.accountStatus.
      */
     public void onBalanceUpdated(UUID creditAccountId, BigDecimal totalDebt, String accountStatus) {
+        onBalanceUpdated(creditAccountId, totalDebt, null, accountStatus);
+    }
+
+    /**
+     * A settled loan's reserve goes to zero and the change is published, so accounting releases it. A written-off
+     * one only closes: accounting consumes the reserve with the write-off itself and releases what is left in the
+     * same voucher (publishing a zero here could reach accounting before the write-off and send the whole loss to
+     * expense instead of the reserve).
+     */
+    public void onBalanceUpdated(UUID creditAccountId, BigDecimal totalDebt, BigDecimal availableCredit,
+                                 String accountStatus) {
         repository.findByCreditAccountId(creditAccountId).ifPresentOrElse(profile -> {
-            if ("SETTLED".equals(accountStatus) || "WRITTEN_OFF".equals(accountStatus)) {
-                profile.close();
-                log.info("RiskProfile CLOSED creditAccountId={} (accountStatus={})", creditAccountId, accountStatus);
+            // A credit cancelled because its disbursement never happened (D63) closes like a settled one: it never
+            // lent anything, so it keeps no reserve, and accounting releases what it had provisioned.
+            // A line closed after a quita (the holder settled what was left) ends like a settled loan: nothing exposed.
+            if ("SETTLED".equals(accountStatus) || "CANCELLED".equals(accountStatus) || "CLOSED".equals(accountStatus)) {
+                if (profile.getStatus().isClosed()) return;
+                boolean teniaReserva = profile.getProvisionAmount().signum() != 0;
+                profile.settle(BusinessClock.current().now());
+                repository.save(profile);
+                if (teniaReserva) {
+                    eventPublisher.publishRiskAssessmentUpdated(profile, false);
+                }
+                log.info("RiskProfile CLOSED ({}, reserva a cero) creditAccountId={}",
+                        "CANCELLED".equals(accountStatus) ? "cancelado" : "CLOSED".equals(accountStatus) ? "línea cerrada" : "liquidado",
+                        creditAccountId);
+                return;
+            }
+            if ("WRITTEN_OFF".equals(accountStatus)) {
+                // Closed with no reserve left: the write-off consumed it in accounting. Kept at its last figure, the
+                // closed profile disagreed with accounting by the whole reserve of every written-off loan.
+                profile.writeOff(BusinessClock.current().now());
+                log.info("RiskProfile CLOSED (quebranto, reserva consumida) creditAccountId={}", creditAccountId);
             } else {
-                profile.syncEad(totalDebt);
+                profile.syncExposure(totalDebt, availableCredit);
             }
             repository.save(profile);
         }, () -> log.debug("BalanceUpdated for unknown creditAccountId={} — no profile yet, skipping", creditAccountId));
@@ -107,7 +140,7 @@ public class RiskProfileService implements GetRiskProfileUseCase, GetProvisionSu
     /** CollectionAgreementExecuted(RESTRUCTURE) → mark forborne, restart cure clock (RC-04). */
     public void onRestructureExecuted(UUID creditAccountId) {
         repository.findByCreditAccountId(creditAccountId).ifPresentOrElse(profile -> {
-            profile.markForborne(Instant.now());
+            profile.markForborne(BusinessClock.current().now());
             repository.save(profile);
             log.info("RiskProfile marked forborne creditAccountId={}", creditAccountId);
         }, () -> log.debug("Restructure for unknown creditAccountId={} — skipping", creditAccountId));

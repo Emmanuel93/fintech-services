@@ -6,6 +6,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 
 import java.time.Instant;
+import com.fintech.shared.time.BusinessClock;
 
 @Embeddable
 public class ProspectDocument {
@@ -35,7 +36,7 @@ public class ProspectDocument {
         this.documentType    = documentType;
         this.documentRef     = documentRef;
         this.incomeProofType = incomeProofType;
-        this.uploadedAt      = Instant.now();
+        this.uploadedAt      = BusinessClock.current().now();
     }
 
     public ProspectDocumentType getDocumentType()  { return documentType; }

@@ -19,4 +19,6 @@ public interface JpaInvoiceableItemRepository
 
     @Override
     List<InvoiceableItem> findByObligorPartyIdAndPeriodAndStatus(UUID obligorPartyId, String period, InvoiceableItemStatus status);
+    @Override
+    List<InvoiceableItem> findByCreditAccountIdAndStatus(UUID creditAccountId, InvoiceableItemStatus status);
 }

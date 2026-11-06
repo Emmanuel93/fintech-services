@@ -18,8 +18,11 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.YearMonth;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * El único sitio por donde se asienta.
@@ -53,17 +56,20 @@ public class VoucherPostingService {
     private final AccountingPeriodRepository periodRepository;
     private final AccountingEventPublisher eventPublisher;
     private final AccountingProperties properties;
+    private final ProductDimension products;
 
     public VoucherPostingService(VoucherRepository voucherRepository,
                                   JournalEntryRepository journalRepository,
                                   AccountingPeriodRepository periodRepository,
                                   AccountingEventPublisher eventPublisher,
-                                  AccountingProperties properties) {
+                                  AccountingProperties properties,
+                                  ProductDimension products) {
         this.voucherRepository = voucherRepository;
         this.journalRepository = journalRepository;
         this.periodRepository  = periodRepository;
         this.eventPublisher    = eventPublisher;
         this.properties        = properties;
+        this.products          = products;
     }
 
     /**
@@ -91,7 +97,7 @@ public class VoucherPostingService {
      * moratorios. El síntoma no era un error visible, era una cifra que faltaba.
      */
     private static List<Pair> merge(List<Pair> pairs) {
-        java.util.Map<String, Pair> byAccount = new java.util.LinkedHashMap<>();
+        Map<String, Pair> byAccount = new LinkedHashMap<>();
         for (Pair p : pairs) {
             byAccount.merge(p.debitAccount() + "|" + p.creditAccount(), p,
                     (a, b) -> new Pair(a.debitAccount(), a.creditAccount(),
@@ -100,7 +106,15 @@ public class VoucherPostingService {
         return List.copyOf(byAccount.values());
     }
 
-    /** Todo lo que define una póliza salvo sus pares. */
+    /**
+     * Everything that defines a voucher but its pairs.
+     *
+     * @param clearingRef for a voucher that moves a clearing account (collections in transit 1103, SPEI to settle
+     *                    2103), the item it moves: the received credit, the order. It is how a month end's balance
+     *                    of those accounts is a list of items rather than a figure.
+     * @param productType the product the fact names, when it names one (a commission, its lot); otherwise
+     *                    {@link ProductDimension} attributes it from the loan or the item.
+     */
     public record VoucherRequest(
             String sourceEventId,
             String triggerEvent,
@@ -108,8 +122,34 @@ public class VoucherPostingService {
             UUID creditAccountId,
             UUID obligorPartyId,
             String orgUnitCode,
-            String concept
-    ) {}
+            String concept,
+            String clearingRef,
+            String productType
+    ) {
+        /** A voucher that moves no clearing item. */
+        public VoucherRequest(String sourceEventId, String triggerEvent, Instant occurredAt, UUID creditAccountId,
+                              UUID obligorPartyId, String orgUnitCode, String concept) {
+            this(sourceEventId, triggerEvent, occurredAt, creditAccountId, obligorPartyId, orgUnitCode, concept, null);
+        }
+
+        /** A voucher whose product comes from its loan or its item. */
+        public VoucherRequest(String sourceEventId, String triggerEvent, Instant occurredAt, UUID creditAccountId,
+                              UUID obligorPartyId, String orgUnitCode, String concept, String clearingRef) {
+            this(sourceEventId, triggerEvent, occurredAt, creditAccountId, obligorPartyId, orgUnitCode, concept,
+                    clearingRef, null);
+        }
+
+        /** The same voucher, attributed to the product its fact names. */
+        public VoucherRequest withProduct(String product) {
+            return new VoucherRequest(sourceEventId, triggerEvent, occurredAt, creditAccountId, obligorPartyId,
+                    orgUnitCode, concept, clearingRef, product);
+        }
+    }
+
+    /** Whether a fact already has its voucher: what a side effect booked with it checks to stay idempotent. */
+    public boolean isPosted(String sourceEventId) {
+        return voucherRepository.findBySourceEventId(sourceEventId).isPresent();
+    }
 
     /**
      * Asienta una póliza. Idempotente por {@code sourceEventId}: el mismo hecho reprocesado devuelve
@@ -129,18 +169,39 @@ public class VoucherPostingService {
             return existing.get();
         }
 
-        Instant occurredAt = req.occurredAt() != null ? req.occurredAt() : Instant.now();
+        Instant occurredAt = req.occurredAt() != null ? req.occurredAt() : BusinessClock.current().now();
         String factPeriod  = periodOf(occurredAt);
         String postPeriod  = resolvePostingPeriod(factPeriod);
+        return book(req, real, occurredAt, postPeriod, factPeriod);
+    }
 
+    /**
+     * Books a voucher in a period that is not a calendar month: the year-end close's period 13 ({@code YYYY13}), which
+     * no fact belongs to and no late posting can land in. Idempotent by {@code sourceEventId}, like {@link #post}.
+     */
+    public Voucher postInPeriod(VoucherRequest req, List<Pair> pairs, String period) {
+        List<Pair> real = merge(pairs.stream()
+                .filter(p -> p.amount() != null && p.amount().signum() > 0)
+                .toList());
+        if (real.isEmpty()) return null;
+        var existing = voucherRepository.findBySourceEventId(req.sourceEventId());
+        if (existing.isPresent()) return existing.get();
+        Instant occurredAt = req.occurredAt() != null ? req.occurredAt() : BusinessClock.current().now();
+        return book(req, real, occurredAt, period, period);
+    }
+
+    private Voucher book(VoucherRequest req, List<Pair> real, Instant occurredAt, String postPeriod, String factPeriod) {
         BigDecimal total = real.stream().map(Pair::amount).reduce(BigDecimal.ZERO, BigDecimal::add);
-        VoucherType type = VoucherType.of(req.triggerEvent());
+        VoucherType type = VoucherType.ofCash(real.stream().map(Pair::debitAccount).toList(),
+                real.stream().map(Pair::creditAccount).toList());
+        String product = products.of(req);
 
         Voucher voucher = voucherRepository.save(Voucher.open(
                 type, req.orgUnitCode(), postPeriod,
                 voucherRepository.nextFolio(type, req.orgUnitCode(), postPeriod),
                 occurredAt, req.concept(), req.sourceEventId(), req.triggerEvent(),
-                req.creditAccountId(), req.obligorPartyId(), total, factPeriod));
+                req.creditAccountId(), req.obligorPartyId(), total, factPeriod)
+                .forClearingItem(req.clearingRef()).forProduct(product));
 
         List<JournalEntry> entries = new ArrayList<>();
         short lineNo = 1;
@@ -149,7 +210,7 @@ public class VoucherPostingService {
                     req.sourceEventId(), req.triggerEvent(), req.creditAccountId(), req.obligorPartyId(),
                     p.debitAccount(), p.creditAccount(), p.amount(), properties.getCurrency(),
                     p.description() != null ? p.description() : req.concept(),
-                    voucher.getVoucherId(), req.orgUnitCode(), postPeriod, occurredAt, lineNo++);
+                    voucher.getVoucherId(), req.orgUnitCode(), postPeriod, occurredAt, lineNo++).forProduct(product);
             entries.add(journalRepository.save(e));
         }
 
@@ -157,8 +218,9 @@ public class VoucherPostingService {
         // cambiarlo aquí los rompería sin avisar. Añadir un `voucher-posted` es trabajo aparte.
         entries.forEach(eventPublisher::publishJournalEntryCreated);
 
-        log.debug("Póliza {} {}-{} unidad={} período={} total={} ({} pares)",
-                type, type.name().charAt(0), voucher.getFolio(), req.orgUnitCode(), postPeriod, total, real.size());
+        log.debug("Póliza {} {}-{} unidad={} producto={} período={} total={} ({} pares)",
+                type, type.name().charAt(0), voucher.getFolio(), req.orgUnitCode(), product, postPeriod, total,
+                real.size());
         return voucher;
     }
 
@@ -179,7 +241,7 @@ public class VoucherPostingService {
                 .orElseGet(() -> {
                     // Todos cerrados hasta hoy: se abre el mes corriente. No hay adónde más mandarlo,
                     // y devolverlo al cerrado invalidaría los estados ya publicados de ese mes.
-                    String now = periodOf(Instant.now());
+                    String now = periodOf(BusinessClock.current().now());
                     return periodRepository.findById(now)
                             .orElseGet(() -> periodRepository.save(AccountingPeriod.open(now)))
                             .getPeriod();

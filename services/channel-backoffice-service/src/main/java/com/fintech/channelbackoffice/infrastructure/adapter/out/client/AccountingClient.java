@@ -7,6 +7,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Mono;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -121,16 +122,55 @@ public class AccountingClient {
     }
 
     public List<TrialBalanceRowResponse> trialBalance(String period, List<String> unitCodes) {
+        return trialBalance(period, unitCodes, List.of());
+    }
+
+    /** The trial balance of the branches and products asked for ({@code INSTITUCION}: what belongs to no product). */
+    public List<TrialBalanceRowResponse> trialBalance(String period, List<String> unitCodes, List<String> productTypes) {
         return webClient.get()
                 .uri(uri -> {
                     var b = uri.path("/api/v1/accounting/trial-balance").queryParam("period", period);
                     if (unitCodes != null && !unitCodes.isEmpty()) b.queryParam("unitCodes", unitCodes.toArray());
+                    if (productTypes != null && !productTypes.isEmpty()) {
+                        b.queryParam("productTypes", productTypes.toArray());
+                    }
                     return b.build();
                 })
                 .headers(DomainClientSupport.staffIdentity())
                 .retrieve()
                 .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("accounting-service", r))
                 .bodyToMono(new ParameterizedTypeReference<List<TrialBalanceRowResponse>>() {})
+                .block();
+    }
+
+    /** The movement of each product in the period, within the branches asked for. */
+    public List<ProductMovementResponse> products(String period, List<String> unitCodes) {
+        return webClient.get()
+                .uri(uri -> {
+                    var b = uri.path("/api/v1/accounting/products").queryParam("period", period);
+                    if (unitCodes != null && !unitCodes.isEmpty()) b.queryParam("unitCodes", unitCodes.toArray());
+                    return b.build();
+                })
+                .headers(DomainClientSupport.staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("accounting-service", r))
+                .bodyToMono(new ParameterizedTypeReference<List<ProductMovementResponse>>() {})
+                .block();
+    }
+
+    /** A product's accounting scheme, as the ledger booked it, between two periods (either may be open). */
+    public Map<String, Object> productScheme(String productType, String from, String to) {
+        return webClient.get()
+                .uri(uri -> {
+                    var b = uri.path("/api/v1/accounting/products/{productType}/scheme");
+                    if (from != null && !from.isBlank()) b.queryParam("from", from);
+                    if (to != null && !to.isBlank()) b.queryParam("to", to);
+                    return b.build(productType);
+                })
+                .headers(DomainClientSupport.staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("accounting-service", r))
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .block();
     }
 
@@ -149,9 +189,32 @@ public class AccountingClient {
                 .block();
     }
 
-    public Map<String, Object> closePeriod(String period) {
-        return post("/api/v1/accounting/periods/" + period + "/close");
+    /**
+     * The close's answer as accounting gave it: 200 with the reconciliation when the month closed, 409 with the same
+     * report when it does not reconcile (the month stays open). The 409 is not an error of the BFF: the screen shows
+     * the checks that are off, so it travels as it came.
+     */
+    public CloseOutcome closePeriod(String period) {
+        return webClient.post().uri("/api/v1/accounting/periods/" + period + "/close")
+                .headers(DomainClientSupport.staffIdentity())
+                .exchangeToMono(r -> r.statusCode().value() == 409 || r.statusCode().is2xxSuccessful()
+                        ? r.bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                                .map(body -> new CloseOutcome(r.statusCode().value(), body))
+                        : DomainClientSupport.propagate("accounting-service", r).flatMap(Mono::error))
+                .block();
     }
+
+    /** The reconciliation of a month: the one its close ran or, while it is open, a dry run. */
+    public Map<String, Object> reconciliation(String period) {
+        return webClient.get().uri("/api/v1/accounting/periods/" + period + "/reconciliation")
+                .headers(DomainClientSupport.staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("accounting-service", r))
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
+    }
+
+    public record CloseOutcome(int status, Map<String, Object> body) {}
 
     public Map<String, Object> reopenPeriod(String period) {
         return post("/api/v1/accounting/periods/" + period + "/reopen");
@@ -229,12 +292,24 @@ public class AccountingClient {
     public record VoucherPage(
             List<VoucherResponse> content, int page, int size, long totalElements, int totalPages) {}
 
+    /**
+     * A trial balance row: opening balance, the period's debits and credits, and the closing balance. {@code balance}
+     * is the period's net movement, not the account's balance.
+     */
     public record TrialBalanceRowResponse(
             String accountCode, String accountName, String accountType,
-            BigDecimal totalDebit, BigDecimal totalCredit, BigDecimal balance) {}
+            BigDecimal totalDebit, BigDecimal totalCredit, BigDecimal balance,
+            BigDecimal openingBalance, BigDecimal closingBalance) {}
 
     public record UnitMovementResponse(
             String orgUnitCode, long vouchers, long loans,
+            BigDecimal totalDebit, BigDecimal totalCredit,
+            BigDecimal accruedInterest, BigDecimal moratoriumInterest,
+            BigDecimal fees, BigDecimal provision) {}
+
+    /** A product's movement in the period; {@code INSTITUCION} is what belongs to no product. */
+    public record ProductMovementResponse(
+            String productType, long vouchers, long loans,
             BigDecimal totalDebit, BigDecimal totalCredit,
             BigDecimal accruedInterest, BigDecimal moratoriumInterest,
             BigDecimal fees, BigDecimal provision) {}
@@ -247,7 +322,14 @@ public class AccountingClient {
             BigDecimal ivaAccrued,
             BigDecimal provision, BigDecimal writeOff, BigDecimal recovery,
             long loansRegistered,
-            List<UnitMovementResponse> byUnit) {}
+            List<UnitMovementResponse> byUnit,
+            BillingBridgeResponse billing) {}
+
+    /** From recognized revenue (IFRS) to what was charged and has to be invoiced (the fiscal base). */
+    public record BillingBridgeResponse(BigDecimal charged, BigDecimal revenue, BigDecimal iva,
+                                        BigDecimal stage3NotRecognized, BigDecimal deferredFeesCharged,
+                                        BigDecimal deferredFeesRecognized, BigDecimal originationCostsAmortized,
+                                        BigDecimal unexplained) {}
 
     public record LedgerBalanceResponse(
             String accountCode, String accountName, String accountType,

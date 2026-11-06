@@ -40,7 +40,10 @@ public class PortfolioAssignedListener {
     public void onMessage(PortfolioAssignedPayload p) {
         if (p.creditAccountId() == null || p.unitCode() == null || p.unitCode().isBlank()) return;
         try {
-            CreditAccount account = findUseCase.getById(p.creditAccountId());
+            // Locked and read after the lock: saving a copy read before a charge was applied would put back the
+            // balances it read.
+            CreditAccount account = accountRepository.lockAndLoad(p.creditAccountId())
+                    .orElseGet(() -> findUseCase.getById(p.creditAccountId()));
             account.sealOriginUnit(p.unitCode());
             accountRepository.save(account);
             log.info("Sucursal sellada creditAccountId={} unidad={}", p.creditAccountId(), p.unitCode());

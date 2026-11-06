@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Read model: local projection of credit-portfolio balance state for charges pre-validation.
@@ -66,7 +67,7 @@ public class AccountBalanceSnapshot {
         s.creditLimit            = creditLimit;
         s.balanceVersion         = 0;
         s.accountStatus          = "PENDING_ACTIVATION";
-        s.snapshotAt             = Instant.now();
+        s.snapshotAt             = BusinessClock.current().now();
         return s;
     }
 
@@ -80,14 +81,16 @@ public class AccountBalanceSnapshot {
         this.totalDebt              = totalDebt;
         this.balanceVersion         = balanceVersion;
         this.accountStatus          = accountStatus;
-        this.snapshotAt             = Instant.now();
+        this.snapshotAt             = BusinessClock.current().now();
     }
 
     /** Returns true if the account can receive new charges (not terminal). */
     public boolean isChargeable() {
         return !"WRITTEN_OFF".equalsIgnoreCase(accountStatus)
                 && !"CLOSED".equalsIgnoreCase(accountStatus)
-                && !"SETTLED".equalsIgnoreCase(accountStatus);
+                && !"SETTLED".equalsIgnoreCase(accountStatus)
+                // A credit cancelled because its disbursement failed (D63): it never lent anything.
+                && !"CANCELLED".equalsIgnoreCase(accountStatus);
     }
 
     public UUID getCreditAccountId()          { return creditAccountId; }

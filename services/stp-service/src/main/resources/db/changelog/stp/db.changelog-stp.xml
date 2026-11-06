@@ -21,5 +21,9 @@
     <include file="db/changelog/stp/013-drop-ordering-accounts.sql" relativeToChangelogFile="false"/>
 
     <include file="db/changelog/stp/014-seed-company.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/015-calendario-bancario.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/016-cobro-por-clabe.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/017-dias-inhabiles-2025.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/stp/018-montos-de-escenario-del-stub.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

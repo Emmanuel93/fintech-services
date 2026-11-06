@@ -2,7 +2,11 @@ package com.fintech.creditportfolio.infrastructure.adapter.in.api;
 
 import com.fintech.creditportfolio.application.port.in.DeferDispositionUseCase;
 import com.fintech.creditportfolio.application.port.in.FindCreditAccountUseCase;
+import com.fintech.creditportfolio.application.service.PlacementGateService;
+import com.fintech.creditportfolio.domain.config.DistributorCommission;
+import org.springframework.lang.Nullable;
 import com.fintech.creditportfolio.application.port.in.SkipPaymentUseCase;
+import com.fintech.creditportfolio.application.port.out.CollectionAccountProjection;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.OriginUnitStat;
 import com.fintech.creditportfolio.application.port.out.PortfolioStat;
@@ -21,9 +25,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -49,19 +55,27 @@ class CreditAccountController {
     private final CreditAccountRepository creditAccountRepository;
     private final DispositionRepository dispositionRepository;
     private final InstallmentRepository installmentRepository;
+    private final CollectionAccountProjection collectionAccounts;
+
+    /** The distributor line's placement gate and commission terms; null means no account carries them. */
+    private final PlacementGateService gates;
 
     CreditAccountController(FindCreditAccountUseCase findUseCase,
                              DeferDispositionUseCase deferUseCase,
                              SkipPaymentUseCase skipUseCase,
                              CreditAccountRepository creditAccountRepository,
                              DispositionRepository dispositionRepository,
-                             InstallmentRepository installmentRepository) {
+                             InstallmentRepository installmentRepository,
+                             CollectionAccountProjection collectionAccounts,
+                             @Nullable PlacementGateService gates) {
+        this.gates                    = gates;
         this.deferUseCase             = deferUseCase;
         this.skipUseCase              = skipUseCase;
         this.findUseCase              = findUseCase;
         this.creditAccountRepository  = creditAccountRepository;
         this.dispositionRepository    = dispositionRepository;
         this.installmentRepository    = installmentRepository;
+        this.collectionAccounts       = collectionAccounts;
     }
 
     /**
@@ -78,9 +92,12 @@ class CreditAccountController {
      */
     @PutMapping("/{creditAccountId}/origin-unit")
     @Operation(summary = "Sella la sucursal de origen (reconciliación; no sobrescribe la ya sellada)")
+    @Transactional
     ResponseEntity<CreditAccountResponse> sealOriginUnit(@PathVariable UUID creditAccountId,
                                                           @RequestBody SealOriginUnitRequest request) {
-        CreditAccount account = findUseCase.getById(creditAccountId);
+        // Locked and read after the lock, like every writer of an account (see BalanceReconciliationService).
+        CreditAccount account = creditAccountRepository.lockAndLoad(creditAccountId)
+                .orElseGet(() -> findUseCase.getById(creditAccountId));
         account.sealOriginUnit(request.originUnitCode());
         creditAccountRepository.save(account);
         return ResponseEntity.ok(withPlan(account));
@@ -168,15 +185,28 @@ class CreditAccountController {
         return plans;
     }
 
+    /** The collection CLABE of every obligor of {@code accounts}, in one query. */
+    private Map<UUID, String> clabesOf(List<CreditAccount> accounts) {
+        return collectionAccounts.activeClabes(accounts.stream().map(CreditAccount::getObligorPartyId).distinct().toList());
+    }
+
     private CreditAccountResponse withPlan(CreditAccount account) {
         // Un amortizable comparte scheduleId con la cuenta, por convención. Una revolvente no tiene
         // un calendario sino uno por disposición, así que el avance del plan es el de todas juntas:
         // «va 7 de 36» sobre una línea significa siete cuotas cubiertas de las que debe en total,
         // sumando sus colocaciones. Leer sólo el calendario de la cuenta devolvía vacío y la ficha
         // de una línea salía sin plan de pagos.
+        //
+        // Una línea de distribuidora trae además si hoy puede colocar (ningún estado vencido sin pagar) y su parte
+        // de lo que cobran sus clientes: la app lo muestra antes de que intente colocar.
+        var terms = gates == null ? Optional.<DistributorCommission>empty()
+                : gates.commissionTerms(account);
         return CreditAccountResponse.from(account,
                 plansOf(List.of(account)).getOrDefault(
-                        account.getCreditAccountId(), PaymentPlanSummary.empty()));
+                        account.getCreditAccountId(), PaymentPlanSummary.empty()),
+                clabesOf(List.of(account)).get(account.getObligorPartyId()),
+                terms.isPresent() ? gates.evaluate(account) : null,
+                terms.orElse(null));
     }
 
     @GetMapping("/search")
@@ -201,9 +231,11 @@ class CreditAccountController {
         // El avance del plan de toda la página en **una** consulta: pedirlo
         // cuenta por cuenta convertiría una página de 25 en 26 viajes a la base.
         var plans = plansOf(accounts.getContent());
+        var clabes = clabesOf(accounts.getContent());
 
         return accounts.map(a -> CreditAccountResponse.from(a,
-                plans.getOrDefault(a.getCreditAccountId(), PaymentPlanSummary.empty())));
+                plans.getOrDefault(a.getCreditAccountId(), PaymentPlanSummary.empty()),
+                clabes.get(a.getObligorPartyId())));
     }
 
     @GetMapping("/batch")
@@ -217,9 +249,11 @@ class CreditAccountController {
         }
         var accounts = creditAccountRepository.findByCreditAccountIdIn(ids);
         var plans = plansOf(accounts);
+        var clabes = clabesOf(accounts);
         return accounts.stream()
                 .map(a -> CreditAccountResponse.from(a,
-                        plans.getOrDefault(a.getCreditAccountId(), PaymentPlanSummary.empty())))
+                        plans.getOrDefault(a.getCreditAccountId(), PaymentPlanSummary.empty()),
+                        clabes.get(a.getObligorPartyId())))
                 .toList();
     }
 

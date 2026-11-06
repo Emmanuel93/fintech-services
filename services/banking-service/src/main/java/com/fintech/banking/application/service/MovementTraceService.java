@@ -69,6 +69,18 @@ public class MovementTraceService {
         trace(payoutId).ifPresent(t -> { t.settled(settledAt, eventId); repo.save(t); });
     }
 
+    /** The payout ended without the money leaving (disbursement.failed): terminal, with its reason. */
+    @Transactional
+    public void onFail(UUID payoutId, String reason, String eventId) {
+        trace(payoutId).ifPresent(t -> { t.failed(reason, eventId); repo.save(t); });
+    }
+
+    /** The receiving bank returned the money (disbursement.returned). */
+    @Transactional
+    public void onReturn(UUID payoutId, String eventId) {
+        trace(payoutId).ifPresent(t -> { t.returned(eventId); repo.save(t); });
+    }
+
     /**
      * El banco reportó el movimiento. Se busca por clave de rastreo porque a esta altura del camino
      * el {@code payoutId} ya no viaja: el estado de cuenta sólo trae lo que la red bancaria conoce.

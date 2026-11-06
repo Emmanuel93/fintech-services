@@ -86,6 +86,29 @@ fintech:
       table: credit_portfolio.shedlock
   credit-portfolio:
     reminder-lead-days: ${CREDIT_PORTFOLIO_REMINDER_LEAD_DAYS:3}
+  # El cierre del día D lo dispara charges.day-accrued (pasadas las 00:05 de D+1): mora al D+1, cuotas
+  # y el aviso credit-portfolio.day-closed. Sólo si sus compuertas abren (ver DayCloseRunner); si no,
+  # la reanudación lo vuelve a intentar cada 15 minutos. Nunca cierra un día que cargos no avisó.
+  day-close:
+    retry-cron: ${CREDIT_PORTFOLIO_DAY_CLOSE_RETRY_CRON:0 10/15 * * * *}
+    # A RUNNING close older than this was interrupted (a restart): the retry job takes it over.
+    stale-after: ${CREDIT_PORTFOLIO_DAY_CLOSE_STALE_AFTER:PT2H}
+    # Cuánto espera en línea a que cartera consuma los cargos del día antes de dejarlo para la reanudación.
+    gate-wait: PT10M
+    gate-poll: PT2S
+    # Sólo en pruebas: deja tomar la foto y cerrar un día que no ha terminado.
+    allow-future-dates: ${TEST_SUPPORT_ENABLED:false}
   test-support:
     # Endpoints /internal/test-support/* — solo para pruebas E2E, deshabilitados por default.
     enabled: ${TEST_SUPPORT_ENABLED:false}
+
+credit-portfolio:
+  disbursement:
+    retry:
+      # D63 · a disbursement that fails for a technical or configuration reason (the link, an order STP never
+      # registered, a route or a company missing) is asked again: this many attempts in all, each a new order with the
+      # same instruction, the second after the first wait, the third after the second. A rule of the bank, an impossible
+      # instruction or the attempts used up compensate at once. An hour, then six: the borrower knows the same day
+      # whether the money arrives. A whole day fell on the same moment of the next one, the E2E's night move included.
+      max-attempts: ${PORTFOLIO_DISBURSEMENT_MAX_ATTEMPTS:3}
+      waits: ${PORTFOLIO_DISBURSEMENT_RETRY_WAITS:PT1H,PT6H}

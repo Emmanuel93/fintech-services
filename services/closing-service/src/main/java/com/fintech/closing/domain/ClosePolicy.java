@@ -62,6 +62,14 @@ public class ClosePolicy {
     @Column(name = "cutoff_day")
     private Short cutoffDay;
 
+    /** {@code SEMI_MONTHLY}: the two cutoff days of the month, "6,21"; null for the calendar fortnight. */
+    @Column(name = "cutoff_days", length = 16)
+    private String cutoffDays;
+
+    /** {@code SEMI_MONTHLY}: the day each cutoff's statement is paid by, "18,3"; null to pay the offset after it. */
+    @Column(name = "payment_due_days", length = 16)
+    private String paymentDueDays;
+
     /**
      * Fracción del saldo al corte exigida como pago mínimo en un revolvente.
      *
@@ -141,6 +149,14 @@ public class ClosePolicy {
     public String getCalendarCode()      { return calendarCode; }
     public Short getCutoffDay()          { return cutoffDay; }
     public short getPaymentDueOffsetDays() { return paymentDueOffsetDays; }
+    public List<Integer> cutoffDays()    { return days(cutoffDays); }
+    public List<Integer> paymentDueDays() { return days(paymentDueDays); }
+
+    /** "6,21" as its two days; null when the column is empty. */
+    static List<Integer> days(String csv) {
+        if (csv == null || csv.isBlank()) return null;
+        return Arrays.stream(csv.split(",")).map(String::trim).filter(d -> !d.isEmpty()).map(Integer::valueOf).toList();
+    }
 
     /**
      * El porcentaje de pago mínimo, o vacío si el producto no exige ninguno.

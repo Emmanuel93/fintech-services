@@ -1,6 +1,7 @@
 package com.fintech.creditportfolio.domain.event;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.UUID;
 
 /**
@@ -26,6 +27,10 @@ import java.util.UUID;
  * <p><b>No lleva el tipo de disposición.</b> Quien paga no necesita saber si el crédito es de uso
  * propio o de distribuidor — necesita saber a qué cuenta va. Y hacer que el destino dependiera de un
  * tipo que viajaba en un mensaje es lo que permitía desviarlo (BK-13).
+ *
+ * <p><b>Each attempt of the payment is one of these (D63).</b> A failed attempt that another may overcome is asked
+ * again with its number and the moment it may leave ({@code notBefore}, the wait between attempts); the payment
+ * instruction is the one the disposition kept when it was authorized.
  */
 public record DispositionAuthorizedEvent(UUID dispositionId,
                                          UUID creditAccountId,
@@ -37,4 +42,16 @@ public record DispositionAuthorizedEvent(UUID dispositionId,
                                          String beneficiaryAccount,
                                          String beneficiaryAccountType,
                                          String beneficiaryTaxId,
-                                         String concept) {}
+                                         String concept,
+                                         int attempt,
+                                         Instant notBefore) {
+
+    /** The first attempt, to leave as soon as it can. */
+    public DispositionAuthorizedEvent(UUID dispositionId, UUID creditAccountId, UUID companyId, String sourceCompanyKey,
+                                      BigDecimal amount, String currency, String beneficiaryName,
+                                      String beneficiaryAccount, String beneficiaryAccountType,
+                                      String beneficiaryTaxId, String concept) {
+        this(dispositionId, creditAccountId, companyId, sourceCompanyKey, amount, currency, beneficiaryName,
+                beneficiaryAccount, beneficiaryAccountType, beneficiaryTaxId, concept, 1, null);
+    }
+}

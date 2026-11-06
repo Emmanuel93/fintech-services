@@ -12,9 +12,11 @@ import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -75,6 +77,56 @@ public class BankingClient {
         }
     }
 
+    // ── Fondeo ───────────────────────────────────────────────────────────────
+
+    public List<FundingSource> fundingSources() {
+        return webClient.get().uri("/api/v1/funding/sources")
+                .headers(DomainClientSupport.staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("banking-service", r))
+                .bodyToMono(new ParameterizedTypeReference<List<FundingSource>>() {})
+                .block();
+    }
+
+    public List<FundingMovement> fundingMovements(UUID sourceId) {
+        return webClient.get().uri("/api/v1/funding/sources/{id}/movements", sourceId)
+                .headers(DomainClientSupport.staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("banking-service", r))
+                .bodyToMono(new ParameterizedTypeReference<List<FundingMovement>>() {})
+                .block();
+    }
+
+    /** Registers a capital contribution or a funding line ({@code kind} is {@code capital} or {@code credit-lines}). */
+    public FundingSource registerFunding(String kind, Map<String, Object> body) {
+        return webClient.post().uri("/api/v1/funding/sources/" + kind)
+                .headers(DomainClientSupport.staffIdentity())
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("banking-service", r))
+                .bodyToMono(FundingSource.class)
+                .block();
+    }
+
+    public List<FundingMovement> recordFunding(UUID sourceId, Map<String, Object> body) {
+        return webClient.post().uri("/api/v1/funding/sources/{id}/movements", sourceId)
+                .headers(DomainClientSupport.staffIdentity())
+                .bodyValue(body)
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("banking-service", r))
+                .bodyToMono(new ParameterizedTypeReference<List<FundingMovement>>() {})
+                .block();
+    }
+
+    public List<FundingMovement> accrueFunding(LocalDate through) {
+        return webClient.post().uri(u -> u.path("/api/v1/funding/accruals").queryParam("through", through).build())
+                .headers(DomainClientSupport.staffIdentity())
+                .retrieve()
+                .onStatus(HttpStatusCode::isError, r -> DomainClientSupport.propagate("banking-service", r))
+                .bodyToMono(new ParameterizedTypeReference<List<FundingMovement>>() {})
+                .block();
+    }
+
     // ── Contratos del dominio ────────────────────────────────────────────────
 
     /** La CLABE ({@code clabe}) ya viene enmascarada de banking. */
@@ -82,6 +134,20 @@ public class BankingClient {
     public record BankAccount(UUID bankAccountId, UUID companyId, String institutionCode,
                               String institutionName, String clabe, String holderName,
                               String currency, String ledgerAccount, String status) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record FundingSource(UUID fundingSourceId, String kind, String counterpartyType, String counterpartyName,
+                                String counterpartyRfc, String contractReference, UUID bankAccountId,
+                                BigDecimal authorizedAmount, BigDecimal annualRate, BigDecimal openingFee,
+                                boolean openingFeePaid, LocalDate startDate, LocalDate maturityDate, String status,
+                                BigDecimal contributed, BigDecimal principal, BigDecimal interestPayable,
+                                LocalDate accruedThrough, BigDecimal available) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record FundingMovement(UUID fundingMovementId, UUID fundingSourceId, String type, BigDecimal amount,
+                                  LocalDate valueDate, LocalDate accruedFrom, LocalDate accruedThrough,
+                                  String reference, BigDecimal contributedAfter, BigDecimal principalAfter,
+                                  BigDecimal interestPayableAfter, String recordedBy, Instant recordedAt) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     public record PayoutRoute(UUID payoutRouteId, UUID companyId, String rail, String provider,

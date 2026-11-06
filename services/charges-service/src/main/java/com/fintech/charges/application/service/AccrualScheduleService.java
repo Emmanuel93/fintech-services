@@ -10,6 +10,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -58,6 +60,26 @@ public class AccrualScheduleService {
                                       BigDecimal nominalRate, BigDecimal moratoriumRate,
                                       BigDecimal principalBalance, BigDecimal openingFeeRate,
                                       LocalDate accrualStartDate) {
+        createFromActivation(creditAccountId, obligorPartyId, productType, productBehavior, nominalRate,
+                moratoriumRate, principalBalance, openingFeeRate, accrualStartDate, null);
+    }
+
+    /** @param graceDays the product's grace period before the moratorium; null uses the service default */
+    public void createFromActivation(UUID creditAccountId, UUID obligorPartyId,
+                                      String productType, String productBehavior,
+                                      BigDecimal nominalRate, BigDecimal moratoriumRate,
+                                      BigDecimal principalBalance, BigDecimal openingFeeRate,
+                                      LocalDate accrualStartDate, Integer graceDays) {
+        createFromActivation(creditAccountId, obligorPartyId, productType, productBehavior, nominalRate, moratoriumRate,
+                principalBalance, openingFeeRate, accrualStartDate, graceDays, null);
+    }
+
+    /** @param interestAccrual the product's interest mode (DAILY or PER_PERIOD); null is daily */
+    public void createFromActivation(UUID creditAccountId, UUID obligorPartyId,
+                                      String productType, String productBehavior,
+                                      BigDecimal nominalRate, BigDecimal moratoriumRate,
+                                      BigDecimal principalBalance, BigDecimal openingFeeRate,
+                                      LocalDate accrualStartDate, Integer graceDays, String interestAccrual) {
         if (scheduleRepository.existsByCreditAccountId(creditAccountId)) {
             log.info("AccrualSchedule already exists for creditAccountId={} — skipping (idempotent)",
                     creditAccountId);
@@ -72,11 +94,12 @@ public class AccrualScheduleService {
         AccrualSchedule schedule = AccrualSchedule.create(
                 creditAccountId, obligorPartyId, productType, productBehavior,
                 nominalRate, effectiveMoratoriumRate, principalBalance, principalBalance,
-                properties.getGracePeriodDays());
+                graceDays != null && graceDays >= 0 ? graceDays : properties.getGracePeriodDays());
 
         if (accrualStartDate != null) {
             schedule.startAccrualOn(accrualStartDate);
         }
+        schedule.accrueInterest(interestAccrual);
         scheduleRepository.save(schedule);
         log.info("AccrualSchedule created scheduleId={} creditAccountId={} productType={} nominalRate={}{}",
                 schedule.getScheduleId(), creditAccountId, productType, nominalRate,
@@ -92,7 +115,9 @@ public class AccrualScheduleService {
     public void updateBalanceFromEvent(UUID creditAccountId, BigDecimal newBalance, String accountStatus) {
         scheduleRepository.findByCreditAccountId(creditAccountId).ifPresent(schedule -> {
             schedule.updateBalance(newBalance);
-            if ("SETTLED".equalsIgnoreCase(accountStatus) || "WRITTEN_OFF".equalsIgnoreCase(accountStatus)) {
+            // A cancelled credit (D63) accrues nothing more either; its charges are reversed on its own fact.
+            if ("SETTLED".equalsIgnoreCase(accountStatus) || "WRITTEN_OFF".equalsIgnoreCase(accountStatus)
+                    || "CANCELLED".equalsIgnoreCase(accountStatus) || "CLOSED".equalsIgnoreCase(accountStatus)) {
                 schedule.close();
                 log.info("AccrualSchedule CLOSED creditAccountId={} trigger={}", creditAccountId, accountStatus);
             }
@@ -112,6 +137,19 @@ public class AccrualScheduleService {
      * <p>Se conecta <b>después</b> de corregir la base (BK-19). Al revés, la primera corrida habría
      * encendido el cobro sobre el saldo completo en toda la cartera vencida.
      */
+    /**
+     * A restructure took effect: the account accrues the agreed rate from now on. Without this the agreement only
+     * changed the portfolio's record and the client kept paying the old rate (2 Nov, E04: 24 % agreed, 32 % charged).
+     */
+    public void applyRestructure(UUID creditAccountId, BigDecimal newRate) {
+        scheduleRepository.findByCreditAccountId(creditAccountId).ifPresentOrElse(schedule -> {
+            BigDecimal anterior = schedule.getNominalRate();
+            schedule.changeNominalRate(newRate);
+            scheduleRepository.save(schedule);
+            log.info("Reestructura: tasa de devengo {} → {} creditAccountId={}", anterior, newRate, creditAccountId);
+        }, () -> log.warn("Reestructura sin calendario de devengo creditAccountId={} — nada que cambiar", creditAccountId));
+    }
+
     public void updateMoratorium(UUID creditAccountId, BigDecimal overduePrincipal,
                                LocalDate vencimientoMasAntiguo) {
         scheduleRepository.findByCreditAccountId(creditAccountId).ifPresent(schedule -> {
@@ -157,21 +195,49 @@ public class AccrualScheduleService {
         BigDecimal taxAmount = feeAmount.multiply(properties.getVatRate()).setScale(2, RoundingMode.HALF_UP);
         LocalDate today      = BusinessClock.current().today();
 
+        // Nothing to charge: a revolving line is approved with a limit, not a disbursed amount, so its basis is
+        // zero. A zero record would violate the amount check at commit, after the event had already gone out:
+        // the activation was then retried and never consumed, and the account never got its schedule.
+        if (feeAmount.signum() <= 0) {
+            log.info("OPENING_FEE omitted creditAccountId={} basis={} rate={}: the fee rounds to zero", accountId, basis, feeRate);
+            return;
+        }
+
         ChargeRecord fee = ChargeRecord.create(
                 accountId, schedule.getObligorPartyId(),
                 ChargeType.OPENING_FEE, basis, feeRate, null, feeAmount, BigDecimal.ZERO, today, null);
         chargeRecordRepository.save(fee);
 
-        ChargeRecord iva = ChargeRecord.createIva(
-                accountId, schedule.getObligorPartyId(), taxAmount, today, fee.getChargeId());
-        chargeRecordRepository.save(iva);
+        ChargeRecord iva = taxAmount.signum() > 0
+                ? ChargeRecord.createIva(accountId, schedule.getObligorPartyId(), taxAmount, today, fee.getChargeId())
+                : null;
+        if (iva != null) {
+            chargeRecordRepository.save(iva);
+        }
 
-        eventPublisher.publishChargeApplied(fee.getChargeId().toString(), accountId,
-                ChargeType.OPENING_FEE.name(), feeAmount);
-        eventPublisher.publishChargeApplied(iva.getChargeId().toString(), accountId,
-                "IVA", taxAmount);
+        // The events leave after the records are committed: what the portfolio applies always exists here.
+        afterCommit(() -> {
+            eventPublisher.publishChargeApplied(fee.getChargeId().toString(), accountId,
+                    ChargeType.OPENING_FEE.name(), feeAmount);
+            if (iva != null) {
+                eventPublisher.publishChargeApplied(iva.getChargeId().toString(), accountId, "IVA", taxAmount);
+            }
+        });
 
         log.info("OPENING_FEE charged creditAccountId={} basis={} rate={} amount={} tax={}",
                 accountId, basis, feeRate, feeAmount, taxAmount);
+    }
+
+    private static void afterCommit(Runnable envio) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            envio.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                envio.run();
+            }
+        });
     }
 }

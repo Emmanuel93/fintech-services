@@ -56,6 +56,9 @@ springdoc:
     path: /swagger-ui.html
 
 fintech:
+  test-support:
+    # Endpoints /internal/test-support/* — solo para pruebas E2E, deshabilitados por default.
+    enabled: ${TEST_SUPPORT_ENABLED:false}
   invoicing:
     serie: A
     # RFC genérico "público en general" (SAT) cuando el party aún no tiene perfil fiscal capturado.

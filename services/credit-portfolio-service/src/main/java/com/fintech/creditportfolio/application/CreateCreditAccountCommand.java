@@ -36,7 +36,7 @@ public record CreateCreditAccountCommand(
          * —el crédito no nace porque el organigrama no contesta— a cambio de un dato que quien
          * origina ya tiene a la mano.
          */
-        java.math.BigDecimal vatRate,
+        BigDecimal vatRate,
         String beneficiaryName,
         String beneficiaryTaxId,
         /**
@@ -52,5 +52,38 @@ public record CreateCreditAccountCommand(
          * nulo es la diferencia entre «nadie lo pidió» y «no sabemos», y sólo el primero permite
          * no aplicarlo.
          */
-        Integer bnplDeferralDays
-) {}
+        Integer bnplDeferralDays,
+        /** The CAT of the offer the client signed (annual, %, without IVA); null from older producers. */
+        BigDecimal cat
+) {
+
+    /** Without the CAT: producers that do not send it yet. */
+    public CreateCreditAccountCommand(
+            UUID contractId,
+            String contractNumber,
+            UUID obligorPartyId,
+            String productCode,
+            Integer productVersion,
+            String productType,
+            String productBehavior,
+            BigDecimal approvedAmount,
+            BigDecimal approvedLine,
+            Integer assignedTerm,
+            BigDecimal nominalRate,
+            BigDecimal moratoriumRate,
+            String amortizationType,
+            BigDecimal openingFeeRate,
+            String clabeAccount,
+            String riskTier,
+            String promoterCode,
+            String originUnitCode,
+            BigDecimal vatRate,
+            String beneficiaryName,
+            String beneficiaryTaxId,
+            Integer bnplDeferralDays) {
+        this(contractId, contractNumber, obligorPartyId, productCode, productVersion, productType, productBehavior,
+                approvedAmount, approvedLine, assignedTerm, nominalRate, moratoriumRate, amortizationType, openingFeeRate,
+                clabeAccount, riskTier, promoterCode, originUnitCode, vatRate, beneficiaryName, beneficiaryTaxId,
+                bnplDeferralDays, null);
+    }
+}

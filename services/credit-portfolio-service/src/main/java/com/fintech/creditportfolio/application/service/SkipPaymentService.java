@@ -1,5 +1,7 @@
 package com.fintech.creditportfolio.application.service;
 
+import com.fintech.creditportfolio.domain.config.BillingCycle;
+import com.fintech.creditportfolio.domain.config.SemiMonthlyCalendar;
 import com.fintech.creditportfolio.application.port.in.SkipPaymentUseCase;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.DispositionRepository;
@@ -39,11 +41,14 @@ public class SkipPaymentService implements SkipPaymentUseCase {
     private final InstallmentRepository installments;
     private final DispositionRepository dispositions;
     private final ProductConfigResolver configResolver;
+    private final PlanDeferral deferral;
 
     public SkipPaymentService(CreditAccountRepository accounts,
                               InstallmentRepository installments,
                               DispositionRepository dispositions,
-                              ProductConfigResolver configResolver) {
+                              ProductConfigResolver configResolver,
+                              PlanDeferral deferral) {
+        this.deferral       = deferral;
         this.accounts       = accounts;
         this.installments   = installments;
         this.dispositions   = dispositions;
@@ -84,18 +89,18 @@ public class SkipPaymentService implements SkipPaymentUseCase {
 
         // Un período de la cadencia del producto, no un mes fijo: una línea quincenal se corre
         // quince días, no treinta.
-        LocalDate newDueDate = AmortizationEngine.firstDueDate(
-                aSaltar.getDueDate(), config.getPaymentFrequency());
+        // From the plan's date and on a business day: one period later may fall on a weekend or a bank holiday.
+        SemiMonthlyCalendar fortnight = BillingCycle.semiMonthlyOf(config.getBillingCycle());
+        LocalDate newDueDate = deferral.dueDateAfter(aSaltar, config.getPaymentFrequency(), 1, fortnight);
 
         aSaltar.skip(opciones.skipMode(), newDueDate);
 
         // Las de atrás se corren también: dejar la saltada encima de la siguiente le daría al
         // cliente dos vencimientos el mismo día.
-        calendario.stream()
+        deferral.defer(calendario.stream()
                 .filter(i -> i.getInstallmentNumber() > aSaltar.getInstallmentNumber())
                 .filter(i -> !i.wasSkipped())
-                .forEach(i -> i.shiftDueDate(AmortizationEngine.firstDueDate(
-                        i.getDueDate(), config.getPaymentFrequency())));
+                .toList(), config.getPaymentFrequency(), 1, fortnight);
 
         installments.saveAll(calendario);
 

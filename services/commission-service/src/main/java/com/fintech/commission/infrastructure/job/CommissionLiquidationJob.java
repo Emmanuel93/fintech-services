@@ -29,7 +29,8 @@ public class CommissionLiquidationJob {
     public void run() {
         String previousPeriod = YearMonth.now(businessClock.clock()).minusMonths(1).toString().replace("-", "");
         log.info("CommissionLiquidationJob starting for period={}", previousPeriod);
-        int batches = liquidationService.runLiquidation(previousPeriod);
-        log.info("CommissionLiquidationJob finished period={} batches={}", previousPeriod, batches);
+        LiquidationService.LiquidationRun run = liquidationService.runLiquidation(previousPeriod);
+        log.info("CommissionLiquidationJob finished period={} lots={} carriedOver={} waiting={} retried={}", previousPeriod,
+                run.lotsOpened(), run.carriedOver(), run.waitingForBeneficiary(), run.retried());
     }
 }

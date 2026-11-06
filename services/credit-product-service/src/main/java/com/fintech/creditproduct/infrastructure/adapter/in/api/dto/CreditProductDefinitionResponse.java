@@ -1,6 +1,8 @@
 package com.fintech.creditproduct.infrastructure.adapter.in.api.dto;
 
+import com.fintech.creditproduct.domain.BillingCycle;
 import com.fintech.creditproduct.domain.Capabilities;
+import com.fintech.creditproduct.domain.DistributorCommission;
 import com.fintech.creditproduct.domain.CreditProductDefinition;
 import com.fintech.creditproduct.domain.RateCard;
 import com.fintech.creditproduct.domain.EligibilityRule;
@@ -55,6 +57,9 @@ public record CreditProductDefinitionResponse(
 
         /** Capability matrix — governs credit-portfolio motor behaviour. */
         Capabilities capabilities,
+        BillingCycle billingCycle,
+        /** The distributor's commission terms; null for every product but a distributor line. */
+        DistributorCommission distributorCommission,
 
         Set<String> eligiblePartyTypes,
         Set<RequiredDocumentResponse> requiredDocuments,
@@ -104,6 +109,8 @@ public record CreditProductDefinitionResponse(
                 d.getOpeningFeeRate(),
                 d.getPrepaymentFeeRate(),
                 d.getCapabilities(),
+                d.getBillingCycle(),
+                d.getDistributorCommission(),
                 d.getEligiblePartyTypes(),
                 d.getRequiredDocuments().stream()
                         .map(RequiredDocumentResponse::from)

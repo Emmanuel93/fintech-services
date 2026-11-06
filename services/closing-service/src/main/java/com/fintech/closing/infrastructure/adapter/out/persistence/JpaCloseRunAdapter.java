@@ -22,4 +22,7 @@ class JpaCloseRunAdapter implements CloseRunRepository {
 
     @Override
     public CloseRun save(CloseRun run) { return jpa.save(run); }
+
+    @Override
+    public Optional<CloseRun> findById(java.util.UUID runId) { return jpa.findById(runId); }
 }

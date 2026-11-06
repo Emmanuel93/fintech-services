@@ -13,6 +13,7 @@ import java.util.Set;
  *                              └─ failure       → FAILED    (terminal)
  *
  * APPROVED → OFFER_PRESENTED → OFFER_ACCEPTED → PENDING_SIGNATURE → CONTRACT_SIGNED → DISBURSED (terminal)
+ *                                                                                   └─ DISBURSEMENT_FAILED (terminal)
  *                │                  │
  *                └─ OFFER_REJECTED  └─ OFFER_REJECTED  (terminal)
  *                └─ OFFER_EXPIRED                       (terminal, TTL)
@@ -37,12 +38,14 @@ public enum ApplicationStatus {
     PENDING_SIGNATURE,
     CONTRACT_SIGNED,
     DISBURSED,
+    /** The credit was cancelled because its disbursement could not happen (D63): it never lent anything. */
+    DISBURSEMENT_FAILED,
     REJECTED,
     FAILED,
     CANCELLED;
 
     private static final Set<ApplicationStatus> TERMINAL =
-            Set.of(REJECTED, FAILED, CANCELLED, OFFER_REJECTED, OFFER_EXPIRED, DISBURSED);
+            Set.of(REJECTED, FAILED, CANCELLED, OFFER_REJECTED, OFFER_EXPIRED, DISBURSED, DISBURSEMENT_FAILED);
 
     /** Statuses where a human decision (approve/reject) is expected. */
     public boolean awaitingHumanDecision() {

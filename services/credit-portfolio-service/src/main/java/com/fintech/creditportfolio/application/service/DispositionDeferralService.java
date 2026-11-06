@@ -1,5 +1,6 @@
 package com.fintech.creditportfolio.application.service;
 
+import com.fintech.creditportfolio.domain.config.BillingCycle;
 import com.fintech.creditportfolio.application.port.in.DeferDispositionUseCase;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
@@ -26,14 +27,20 @@ import com.fintech.shared.time.BusinessClock;
 /**
  * Diferir una compra: el titular la saca del exigible del corte y la convierte en compra a plazos.
  *
- * <p>Tres cosas pasan, y el orden importa:
+ * <h2>Sólo el día de la compra</h2>
+ *
+ * Una compra que ya devengó no se parcializa. El cierre del día de la compra la mete al saldo que causa
+ * interés; diferirla después obligaría a reversar ese interés, y la reversa parcial —la parte de un cargo
+ * diario de la línea que le toca a una compra— es justo lo que no cuadra. Así que se difiere el mismo día
+ * de negocio en que se hizo, antes de su primer cierre, y nunca hay interés que reversar.
+ *
+ * <p>Al diferir:
  *
  * <ol>
  *   <li>La disposición pasa de {@code REVOLVING} a {@code AMORTIZED} — con eso <b>sale sola</b> del
  *       exigible del corte, sin restar nada.</li>
  *   <li>Se genera su calendario con la tasa de diferimiento del producto, que puede ser cero.</li>
- *   <li>Se publica el hecho para que {@code charges} <b>reverse el interés</b> que se devengó
- *       mientras la compra fue revolvente (BK-26).</li>
+ *   <li>Se publica el hecho ({@code credit-portfolio.disposition-deferred}).</li>
  * </ol>
  */
 @Service
@@ -97,12 +104,19 @@ public class DispositionDeferralService implements DeferDispositionUseCase {
                                     : "ya tiene plan"));
         }
 
+        LocalDate desde = compra.getCreatedAt().atZone(BusinessClock.current().zone()).toLocalDate();
+        LocalDate hoy = BusinessClock.current().today();
+        if (desde.isBefore(hoy)) {
+            // El cierre del día de la compra ya corrió, o puede estar corriendo: la compra causó interés.
+            throw new NoSePuedeDiferirException("La compra " + cmd.dispositionId() + " ya devengó interés: sólo"
+                    + " se puede diferir el día en que se hizo (" + desde + ")");
+        }
+
         int plazo = opciones.deferralTerm(cmd.termPeriods());
         BigDecimal rate = opciones.deferralRate(plazo).orElseThrow(
                 () -> new NoSePuedeDiferirException(
                         "El producto no tiene tasa de diferimiento para " + plazo + " pagos"));
 
-        LocalDate desde = compra.getCreatedAt().atZone(BusinessClock.current().zone()).toLocalDate();
         compra.defer(plazo);
         dispositions.save(compra);
 
@@ -112,12 +126,13 @@ public class DispositionDeferralService implements DeferDispositionUseCase {
         List<Installment> plan = amortizationEngine.generate(
                 compra.getDispositionId(), compra.getAmount(), rate, plazo,
                 account.getAmortizationType() != null ? account.getAmortizationType() : "FRENCH",
-                cadencia, AmortizationEngine.firstDueDate(BusinessClock.current().today(), cadencia),
-                account.getVatRate());
+                cadencia, null,
+                AmortizationEngine.firstDueDate(BusinessClock.current().today(), cadencia,
+                        BillingCycle.semiMonthlyOf(config.getBillingCycle())),
+                account.getVatRate(), BillingCycle.semiMonthlyOf(config.getBillingCycle()));
         installments.saveAll(plan);
 
-        // BK-26 · lo devengado mientras fue revolvente se reversa: el plan lo sustituye. Cartera no
-        // calcula cuánto — ese número es de charges, que es quien devengó.
+        // Mismo día de la compra: no devengó nada que reversar.
         eventPublisher.publishDispositionDeferred(new DispositionDeferredEvent(
                 compra.getDispositionId(), account.getCreditAccountId(), account.getObligorPartyId(),
                 compra.getAmount(), plazo, rate, desde, BusinessClock.current().today()));

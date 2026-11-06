@@ -1,5 +1,6 @@
 package com.fintech.identity.infrastructure.adapter.in.api;
 
+import com.fintech.shared.trace.Correlation;
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -12,14 +13,13 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
-import java.util.UUID;
 
 @Component
 @Order(1)
 public class MdcCorrelationFilter implements Filter {
 
-    static final String HEADER  = "X-Correlation-Id";
-    static final String MDC_KEY = "corrId";
+    static final String HEADER  = Correlation.HTTP_HEADER;
+    static final String MDC_KEY = Correlation.MDC_KEY;
 
     @Override
     public void doFilter(ServletRequest req, ServletResponse res, FilterChain chain)
@@ -27,17 +27,25 @@ public class MdcCorrelationFilter implements Filter {
         HttpServletRequest  httpReq = (HttpServletRequest)  req;
         HttpServletResponse httpRes = (HttpServletResponse) res;
 
-        String corrId = httpReq.getHeader(HEADER);
-        if (corrId == null || corrId.isBlank()) {
-            corrId = UUID.randomUUID().toString().substring(0, 8);
+        // The platform filter (shared) already put the request's id in the log context; this one only keeps the
+        // channel's contract when it runs alone (a slice test without the auto-configuration).
+        String corrId = Correlation.current();
+        if (corrId == null) {
+            corrId = Correlation.clean(httpReq.getHeader(HEADER));
+        }
+        if (corrId == null) {
+            corrId = Correlation.newId();
         }
 
+        String previo = MDC.get(MDC_KEY);
         MDC.put(MDC_KEY, corrId);
         httpRes.setHeader(HEADER, corrId);
         try {
             chain.doFilter(req, res);
         } finally {
-            MDC.remove(MDC_KEY);
+            if (previo == null) {
+                MDC.remove(MDC_KEY);
+            }
         }
     }
 }

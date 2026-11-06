@@ -6,9 +6,14 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.Optional;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import com.fintech.shared.time.BusinessClock;
+import java.util.Set;
 
 /**
  * Lo que el cierre sabe de una cuenta, aprendido <b>por evento</b>.
@@ -48,7 +53,30 @@ public class AccountCloseProfile {
     @Column(name = "next_close_date")                     private LocalDate nextCloseDate;
 
     @Column(name = "last_balance_version", nullable = false) private long lastBalanceVersion = -1L;
+    /**
+     * Desde qué día de negocio la cuenta está liquidada, castigada o cerrada. El corte de D filtra por
+     * esta fecha y no por el estado de hoy: una cuenta que se liquidó el 11 a las 00:07 sí corta el 10.
+     */
+    @Column(name = "terminal_since")                      private LocalDate terminalSince;
     @Column(name = "updated_at", nullable = false)        private Instant updatedAt;
+
+    /**
+     * The billing cycle of the product the account was opened with, pinned at activation. Null on
+     * accounts opened before the product declared one: those keep deriving from the policy table.
+     */
+    @Column(name = "billing_cutoff_rule", length = 30)    private String billingCutoffRule;
+    @Column(name = "billing_cutoff_day")                  private Short billingCutoffDay;
+    @Column(name = "billing_due_offset_days")             private Short billingDueOffsetDays;
+    @Column(name = "billing_grace_days")                  private Short billingGraceDays;
+    @Column(name = "billing_min_payment_rate", precision = 6, scale = 4) private BigDecimal billingMinPaymentRate;
+    @Column(name = "billing_shift", length = 10)          private String billingShift;
+    /** {@code SEMI_MONTHLY}: the two cutoff days ("6,21") and the day each one is paid by ("18,3"). */
+    @Column(name = "billing_cutoff_days", length = 16)    private String billingCutoffDays;
+    @Column(name = "billing_due_days", length = 16)       private String billingDueDays;
+
+    /** Los estados con los que una cuenta deja de cortar. Los mismos que filtra la materialización del corte. */
+    /** A credit cancelled because its disbursement failed (D63) is terminal too: it has no cycle left to cut. */
+    public static final Set<String> TERMINAL = Set.of("SETTLED", "WRITTEN_OFF", "CLOSED", "CANCELLED");
 
     protected AccountCloseProfile() {}
 
@@ -57,7 +85,28 @@ public class AccountCloseProfile {
                                                       String orgUnitCode, LocalDate activatedOn,
                                                       String paymentFrequency, Integer termPeriods,
                                                       BigDecimal nominalRate, BigDecimal principalBalance) {
+        return fromActivation(creditAccountId, obligorPartyId, productType, productBehavior, orgUnitCode,
+                activatedOn, paymentFrequency, termPeriods, nominalRate, principalBalance, null);
+    }
+
+    /** @param billingCycle the product's cycle pinned to this account; null keeps the policy fallback */
+    public static AccountCloseProfile fromActivation(UUID creditAccountId, UUID obligorPartyId,
+                                                      String productType, String productBehavior,
+                                                      String orgUnitCode, LocalDate activatedOn,
+                                                      String paymentFrequency, Integer termPeriods,
+                                                      BigDecimal nominalRate, BigDecimal principalBalance,
+                                                      BillingCycle billingCycle) {
         AccountCloseProfile p = new AccountCloseProfile();
+        if (billingCycle != null) {
+            p.billingCutoffRule     = billingCycle.cutoffRule().name();
+            p.billingCutoffDay      = billingCycle.cutoffDay() == null ? null : billingCycle.cutoffDay().shortValue();
+            p.billingDueOffsetDays  = (short) billingCycle.paymentDueOffsetDays();
+            p.billingGraceDays      = (short) billingCycle.graceDays();
+            p.billingMinPaymentRate = billingCycle.minimumPaymentRate();
+            p.billingShift          = billingCycle.shift().name();
+            p.billingCutoffDays     = csv(billingCycle.cutoffDays());
+            p.billingDueDays        = csv(billingCycle.paymentDueDays());
+        }
         p.creditAccountId  = creditAccountId;
         p.obligorPartyId   = obligorPartyId;
         p.productType      = productType;
@@ -84,12 +133,30 @@ public class AccountCloseProfile {
      */
     public boolean applyBalance(BigDecimal principal, BigDecimal totalDebt, String accountStatus,
                                  long balanceVersion) {
+        return applyBalance(principal, totalDebt, accountStatus, balanceVersion, null);
+    }
+
+    /**
+     * @param valueDate el día de negocio del hecho; {@code null} = hoy. Si el hecho deja la cuenta en
+     *                  un estado terminal, ésa es la fecha desde la que ya no corta.
+     */
+    public boolean applyBalance(BigDecimal principal, BigDecimal totalDebt, String accountStatus,
+                                 long balanceVersion, LocalDate valueDate) {
         if (balanceVersion <= lastBalanceVersion) {
             return false;
         }
         this.principalBalance   = principal != null ? principal : this.principalBalance;
         this.totalDebt          = totalDebt != null ? totalDebt : this.totalDebt;
-        if (accountStatus != null) this.status = accountStatus;
+        if (accountStatus != null) {
+            boolean eraTerminal = TERMINAL.contains(this.status);
+            boolean esTerminal  = TERMINAL.contains(accountStatus);
+            if (esTerminal && !eraTerminal) {
+                this.terminalSince = valueDate != null ? valueDate : com.fintech.shared.time.BusinessClock.current().today();
+            } else if (!esTerminal) {
+                this.terminalSince = null;
+            }
+            this.status = accountStatus;
+        }
         this.lastBalanceVersion = balanceVersion;
         this.updatedAt          = Instant.now();
         return true;
@@ -116,6 +183,22 @@ public class AccountCloseProfile {
     }
 
     public boolean isRevolving() { return "REVOLVING".equalsIgnoreCase(productBehavior); }
+
+    /** The cycle the account was opened with, when the product declared one. */
+    public Optional<BillingCycle> billingCycle() {
+        if (billingCutoffRule == null) return Optional.empty();
+        return BillingCycle.parse(billingCutoffRule,
+                billingCutoffDay == null ? null : billingCutoffDay.intValue(),
+                billingDueOffsetDays == null ? null : billingDueOffsetDays.intValue(),
+                billingGraceDays == null ? null : billingGraceDays.intValue(),
+                billingMinPaymentRate, billingShift,
+                ClosePolicy.days(billingCutoffDays), ClosePolicy.days(billingDueDays));
+    }
+
+    /** Two days as "6,21"; null without them. */
+    private static String csv(List<Integer> days) {
+        return days == null ? null : days.stream().map(String::valueOf).collect(Collectors.joining(","));
+    }
 
     public UUID getCreditAccountId()  { return creditAccountId; }
     public UUID getObligorPartyId()   { return obligorPartyId; }
@@ -149,4 +232,5 @@ public class AccountCloseProfile {
     public int getCurrentCycle()      { return currentCycle; }
     public LocalDate getNextCutoffDate() { return nextCutoffDate; }
     public long getLastBalanceVersion()  { return lastBalanceVersion; }
+    public LocalDate getTerminalSince() { return terminalSince; }
 }

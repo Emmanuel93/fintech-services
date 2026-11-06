@@ -1,5 +1,9 @@
 package com.fintech.creditportfolio.infrastructure.config;
 
+import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.BusinessCalendarDayListener;
+import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.CollectionAccountAssignedListener;
+import com.fintech.shared.trace.kafka.DeadLetters;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.ChargeAppliedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.ChargeReversedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.CollectionAgreementExecutedPayload;
@@ -7,6 +11,7 @@ import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.CreditPro
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DisbursementCompletedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DisbursementFailedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.CutoffClosedPayload;
+import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DayAccruedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DisbursementReturnedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.DispositionRequestedPayload;
 import com.fintech.creditportfolio.infrastructure.adapter.in.messaging.PaymentAppliedPayload;
@@ -24,11 +29,17 @@ import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
 import org.springframework.kafka.support.serializer.JsonDeserializer;
+import org.springframework.util.backoff.FixedBackOff;
 
+import java.time.Duration;
 import java.util.Map;
 
 @Configuration
 public class KafkaConfig {
+
+    /** Retries as each listener needs them; when they run out, the message goes to <topic>.DLT instead of a log line. */
+    @Autowired
+    private DeadLetters deadLetters;
 
     // El payload del reparto vive en el paquete de mensajería de entrada.
 
@@ -144,6 +155,26 @@ public class KafkaConfig {
         return factory;
     }
 
+    // ── closing.business-calendar-day ────────────────────────────────────────
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, CollectionAccountAssignedListener.CollectionAccountAssignedPayload>
+    collectionAccountAssignedListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, CollectionAccountAssignedListener.CollectionAccountAssignedPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, CollectionAccountAssignedListener.CollectionAccountAssignedPayload.class));
+        factory.setCommonErrorHandler(deadLetters.errorHandler());
+        return factory;
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, BusinessCalendarDayListener.CalendarDayPayload>
+    businessCalendarDayListenerContainerFactory(KafkaProperties properties) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, BusinessCalendarDayListener.CalendarDayPayload>();
+        factory.setConsumerFactory(jsonConsumerFactory(properties, BusinessCalendarDayListener.CalendarDayPayload.class));
+        factory.setCommonErrorHandler(deadLetters.errorHandler());
+        return factory;
+    }
+
     // ── Balance engine inbound (charges / payments / collections) ────────────
 
     @Bean
@@ -151,6 +182,9 @@ public class KafkaConfig {
     chargeAppliedListenerContainerFactory(KafkaProperties properties) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, ChargeAppliedPayload>();
         factory.setConsumerFactory(jsonConsumerFactory(properties, ChargeAppliedPayload.class));
+        // Un cargo descartado es interés que falta: se reintenta medio minuto, no diez veces seguidas en
+        // un instante. Si aun así se pierde, las cifras de control del día lo detectan.
+        factory.setCommonErrorHandler(deadLetters.errorHandler(new FixedBackOff(3_000L, 10)));
         return factory;
     }
 
@@ -237,6 +271,54 @@ public class KafkaConfig {
     disbursementReturnedListenerContainerFactory(KafkaProperties properties) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, DisbursementReturnedPayload>();
         factory.setConsumerFactory(jsonConsumerFactory(properties, DisbursementReturnedPayload.class));
+        return factory;
+    }
+
+    /**
+     * {@code charges.day-accrued}: un mensaje al día que dispara minutos de trabajo (la mora de toda la
+     * cartera). Uno a la vez y con margen de sondeo amplio para que el broker no lo dé por muerto a
+     * medio cierre; si falla, dos reintentos espaciados y después lo retoma el respaldo de las 02:00.
+     */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, DayAccruedPayload>
+    dayAccruedListenerContainerFactory(KafkaProperties properties) {
+        Map<String, Object> config = properties.buildConsumerProperties(null);
+        config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 1);
+        config.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, (int) Duration.ofHours(2).toMillis());
+        config.put(JsonDeserializer.TRUSTED_PACKAGES, "com.fintech.*");
+        config.put(JsonDeserializer.VALUE_DEFAULT_TYPE,
+                DayAccruedPayload.class.getName());
+        config.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, DayAccruedPayload>();
+        factory.setConsumerFactory(new DefaultKafkaConsumerFactory<>(config));
+        factory.setCommonErrorHandler(deadLetters.errorHandler(new FixedBackOff(60_000L, 2)));
+        return factory;
+    }
+
+    /**
+     * Las cuentas que devengaron tarde. Pocas y con paciencia, como el aviso del día: el listener puede esperar
+     * a que cartera consuma los cargos de esa cuenta. Si no se suelta, queda anotada y la retoma la reanudación.
+     */
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, com.fintech.creditportfolio.infrastructure.adapter.in.messaging.AccountAccruedPayload>
+    accountAccruedListenerContainerFactory(KafkaProperties properties) {
+        Map<String, Object> config = properties.buildConsumerProperties(null);
+        config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10);
+        config.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, (int) Duration.ofHours(2).toMillis());
+        config.put(JsonDeserializer.TRUSTED_PACKAGES, "com.fintech.*");
+        config.put(JsonDeserializer.VALUE_DEFAULT_TYPE,
+                com.fintech.creditportfolio.infrastructure.adapter.in.messaging.AccountAccruedPayload.class.getName());
+        config.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
+        var factory = new ConcurrentKafkaListenerContainerFactory<String,
+                com.fintech.creditportfolio.infrastructure.adapter.in.messaging.AccountAccruedPayload>();
+        factory.setConsumerFactory(new DefaultKafkaConsumerFactory<>(config));
+        factory.setCommonErrorHandler(deadLetters.errorHandler(new FixedBackOff(5_000L, 6)));
         return factory;
     }
 }

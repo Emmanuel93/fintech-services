@@ -21,6 +21,7 @@ public class RiskAssessmentUpdatedListener {
             containerFactory = "riskAssessmentUpdatedListenerContainerFactory")
     public void onMessage(RiskAssessmentUpdatedPayload p) {
         log.debug("risk.assessment-updated creditAccountId={} provision={}", p.creditAccountId(), p.provisionAmount());
-        provisionPostingService.onRiskAssessment(p.creditAccountId(), p.obligorPartyId(), p.provisionAmount(), p.calculatedAt());
+        provisionPostingService.onRiskAssessment(p.creditAccountId(), p.obligorPartyId(), p.provisionAmount(), p.calculatedAt(),
+                p.ifrs9Stage(), p.ead());
     }
 }

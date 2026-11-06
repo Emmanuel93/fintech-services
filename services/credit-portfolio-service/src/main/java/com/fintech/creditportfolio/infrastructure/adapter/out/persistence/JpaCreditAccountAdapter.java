@@ -7,6 +7,9 @@ import com.fintech.creditportfolio.application.port.out.PortfolioSummary;
 import com.fintech.creditportfolio.application.port.out.ProductMix;
 import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.CreditAccountStatus;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.PersistenceContext;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Repository;
@@ -25,6 +28,8 @@ class JpaCreditAccountAdapter implements CreditAccountRepository {
 
     private final SpringDataCreditAccountRepository jpa;
     private final SpringDataInstallmentRepository installments;
+    @PersistenceContext
+    private EntityManager entityManager;
 
     JpaCreditAccountAdapter(SpringDataCreditAccountRepository jpa,
                             SpringDataInstallmentRepository installments) {
@@ -33,7 +38,21 @@ class JpaCreditAccountAdapter implements CreditAccountRepository {
     }
 
     @Override public CreditAccount save(CreditAccount a) { return jpa.save(a); }
+    @Override public List<CreditAccount> findWithoutPaymentReference() {
+        return jpa.findByPaymentReferenceIsNullOrderByCreatedAtAsc();
+    }
     @Override public Optional<CreditAccount> findById(UUID id) { return jpa.findById(id); }
+    @Override public void lockForUpdate(UUID id) { jpa.lockForUpdate(id); }
+    @Override public Optional<CreditAccount> lockAndLoad(UUID id) {
+        CreditAccount account = entityManager.find(CreditAccount.class, id, LockModeType.PESSIMISTIC_WRITE);
+        if (account == null) {
+            return Optional.empty();
+        }
+        // The lock waits for the previous writer; the state is reloaded after it, never from the copy
+        // this transaction may have read earlier.
+        entityManager.refresh(account);
+        return Optional.of(account);
+    }
     @Override public Optional<CreditAccount> findByContractId(UUID contractId) { return jpa.findByContractId(contractId); }
     @Override public List<CreditAccount> findByObligorPartyId(UUID obligorPartyId) { return jpa.findByObligorPartyId(obligorPartyId); }
     @Override public List<CreditAccount> findAllByStatus(CreditAccountStatus status) { return jpa.findByStatus(status); }

@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Local shadow of {@code accruedInterestBalance} per credit account. {@code PaymentApplied} doesn't
@@ -35,7 +36,7 @@ public class AccountBalanceShadow {
         s.creditAccountId  = creditAccountId;
         s.interestBalance  = BigDecimal.ZERO;
         s.balanceVersion   = -1L;
-        s.updatedAt        = Instant.now();
+        s.updatedAt        = BusinessClock.current().now();
         return s;
     }
 
@@ -49,7 +50,7 @@ public class AccountBalanceShadow {
         BigDecimal collected = this.interestBalance.subtract(newInterestBalance);
         this.interestBalance = newInterestBalance;
         this.balanceVersion  = version;
-        this.updatedAt       = Instant.now();
+        this.updatedAt       = BusinessClock.current().now();
         return collected;
     }
 

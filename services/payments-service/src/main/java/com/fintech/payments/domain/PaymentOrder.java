@@ -1,10 +1,13 @@
 package com.fintech.payments.domain;
 
+import com.fintech.payments.domain.allocation.AllocationMode;
 import jakarta.persistence.*;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Aggregate root for a payment submission.
@@ -67,6 +70,33 @@ public class PaymentOrder {
     @Column(name = "overpayment_strategy")
     private String overpaymentStrategy;
 
+    /** Where the money came from (see {@link FundingSource}). */
+    @Column(name = "funding_source", nullable = false, updatable = false)
+    private String fundingSource = FundingSource.DIRECT.name();
+
+    /** The received credit this order applies part of; null for direct payments and balance applications. */
+    @Column(name = "inbound_credit_id", updatable = false)
+    private UUID inboundCreditId;
+
+    /** Its place in the received credit's prelation (1 = first applied). */
+    @Column(name = "allocation_seq", updatable = false)
+    private Integer allocationSeq;
+
+    /** REFERENCED, BY_RULE or CREDIT_BALANCE. */
+    @Column(name = "allocation_mode", updatable = false)
+    private String allocationMode;
+
+    /** When the money arrived: the portfolio applies the payment on this date. */
+    @Column(name = "received_at", updatable = false)
+    private Instant receivedAt;
+
+    /** The SPEI operation date: the day the bank books the money. */
+    @Column(name = "operation_date", updatable = false)
+    private LocalDate operationDate;
+
+    @Column(name = "tracking_key", updatable = false)
+    private String trackingKey;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -97,7 +127,41 @@ public class PaymentOrder {
         o.status          = PaymentStatus.PENDING.name();
         o.snapshotVersion = snapshotVersion;
         o.requestedAmount = amount;   // default: same as applied; updated by recordOverpayment
-        o.createdAt       = Instant.now();
+        o.createdAt       = BusinessClock.current().now();
+        return o;
+    }
+
+    /**
+     * The share of a received credit that goes to one loan, in the prelation's order. The external reference is the
+     * credit and the share, so a redelivered credit creates no second order.
+     */
+    public static PaymentOrder forReceivedCredit(UUID creditAccountId, UUID obligorPartyId, BigDecimal amount,
+                                                 UUID inboundCreditId, int allocationSeq, AllocationMode mode,
+                                                 Instant receivedAt, LocalDate operationDate, String trackingKey,
+                                                 long snapshotVersion) {
+        PaymentOrder o = create(creditAccountId, obligorPartyId, amount, PaymentMethod.SPEI,
+                "CREDIT:" + inboundCreditId + ":" + allocationSeq, snapshotVersion);
+        o.fundingSource = FundingSource.SPEI_CREDIT.name();
+        o.inboundCreditId = inboundCreditId;
+        o.allocationSeq = allocationSeq;
+        o.allocationMode = mode.name();
+        o.receivedAt = receivedAt;
+        o.operationDate = operationDate;
+        o.trackingKey = trackingKey;
+        return o;
+    }
+
+    /**
+     * The payer's balance in favor applied to one of their loans. No money moves in the bank: it was already there.
+     * {@code sourceKey} names the cause (the due installment and the day), so a redelivered event applies nothing twice.
+     */
+    public static PaymentOrder fromCreditBalance(UUID creditAccountId, UUID obligorPartyId, BigDecimal amount,
+                                                 String sourceKey, long snapshotVersion) {
+        PaymentOrder o = create(creditAccountId, obligorPartyId, amount, PaymentMethod.INTERNAL_TRANSFER,
+                "BALANCE:" + sourceKey, snapshotVersion);
+        o.fundingSource = FundingSource.CREDIT_BALANCE.name();
+        o.allocationMode = AllocationMode.CREDIT_BALANCE.name();
+        o.receivedAt = o.createdAt;
         return o;
     }
 
@@ -125,7 +189,7 @@ public class PaymentOrder {
                     "Cannot confirm payment in status " + status + " (orderId=" + paymentOrderId + ")");
         }
         this.status      = PaymentStatus.CONFIRMED.name();
-        this.confirmedAt = Instant.now();
+        this.confirmedAt = BusinessClock.current().now();
     }
 
     public void reject(String reason) {
@@ -136,7 +200,7 @@ public class PaymentOrder {
         }
         this.status          = PaymentStatus.REJECTED.name();
         this.rejectionReason = reason;
-        this.rejectedAt      = Instant.now();
+        this.rejectedAt      = BusinessClock.current().now();
     }
 
     public void reverse(String reason) {
@@ -146,7 +210,7 @@ public class PaymentOrder {
         }
         this.status        = PaymentStatus.REVERSED.name();
         this.reversalReason = reason;
-        this.reversedAt    = Instant.now();
+        this.reversedAt    = BusinessClock.current().now();
     }
 
     public boolean isPending()   { return PaymentStatus.PENDING.name().equals(status); }
@@ -168,4 +232,11 @@ public class PaymentOrder {
     public Instant getReversedAt()         { return reversedAt; }
     public BigDecimal getRequestedAmount() { return requestedAmount; }
     public String getOverpaymentStrategy() { return overpaymentStrategy; }
+    public FundingSource fundingSource()   { return FundingSource.valueOf(fundingSource); }
+    public UUID getInboundCreditId()       { return inboundCreditId; }
+    public Integer getAllocationSeq()      { return allocationSeq; }
+    public String getAllocationMode()      { return allocationMode; }
+    public Instant getReceivedAt()         { return receivedAt; }
+    public LocalDate getOperationDate()    { return operationDate; }
+    public String getTrackingKey()         { return trackingKey; }
 }

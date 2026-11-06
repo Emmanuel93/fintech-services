@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /** Published N days before an installment's dueDate (T5 lead time) — feeds Collections' early collections. */
 public class InstallmentUpcomingEvent {
@@ -20,7 +21,7 @@ public class InstallmentUpcomingEvent {
         this.creditAccountId = creditAccountId;
         this.dueDate          = dueDate;
         this.totalAmount     = totalAmount;
-        this.occurredAt      = Instant.now();
+        this.occurredAt      = BusinessClock.current().now();
     }
 
     public UUID getInstallmentId()     { return installmentId; }

@@ -3,6 +3,7 @@ package com.fintech.invoicing.domain;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /** Proyección local del perfil fiscal del party (receptor del CFDI). */
 @Entity
@@ -69,7 +70,7 @@ public class FiscalProfile {
         this.taxRegime  = taxRegime;
         this.taxZipCode = taxZipCode;
         this.cfdiUse    = cfdiUse;
-        this.updatedAt  = Instant.now();
+        this.updatedAt  = BusinessClock.current().now();
     }
 
     public UUID getPartyId()      { return partyId; }

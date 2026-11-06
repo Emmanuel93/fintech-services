@@ -1,5 +1,6 @@
 package com.fintech.stp.infrastructure.adapter.out.http.stub;
 
+import com.fintech.shared.time.BusinessClock;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -119,7 +120,7 @@ public class StubOrder {
         order.firmaValida = firmaValida;
         order.scenario = scenario.name();
         order.stpResponseId = stpResponseId;
-        order.receivedAt = Instant.now();
+        order.receivedAt = BusinessClock.current().now();
         return order;
     }
 

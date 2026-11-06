@@ -4,6 +4,7 @@ import com.fintech.disbursement.domain.DisbursementSource;
 import com.fintech.disbursement.domain.Rail;
 
 import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
@@ -20,6 +21,8 @@ import java.util.UUID;
  * @param sourceCompanyKey clave de empresa del emisor, a resolver contra {@code company_mappings}
  * @param companyId        empresa ya resuelta. Si viene, gana sobre {@code sourceCompanyKey}
  * @param sourceMetadata   contexto del emisor que se devuelve en eco. Opaco
+ * @param notBefore        the earliest moment the order may leave: the caller's wait between two attempts of the same
+ *                         payment. Null: as soon as the window is open
  */
 public record RequestDisbursementCommand(
         String sourceSystem,
@@ -39,8 +42,22 @@ public record RequestDisbursementCommand(
         String concept,
         Long numericReference,
         Rail rail,
-        String correlationId
+        String correlationId,
+        Instant notBefore
 ) {
+    /** A request to pay as soon as the window is open. */
+    public RequestDisbursementCommand(String sourceSystem, DisbursementSource sourceType, String sourceReference,
+                                      String sourceEventId, String sourceCompanyKey, UUID companyId,
+                                      Map<String, String> sourceMetadata, String beneficiaryName,
+                                      String beneficiaryAccount, String beneficiaryAccountType,
+                                      String beneficiaryTaxId, Integer beneficiaryInstitution, BigDecimal amount,
+                                      String currency, String concept, Long numericReference, Rail rail,
+                                      String correlationId) {
+        this(sourceSystem, sourceType, sourceReference, sourceEventId, sourceCompanyKey, companyId, sourceMetadata,
+                beneficiaryName, beneficiaryAccount, beneficiaryAccountType, beneficiaryTaxId, beneficiaryInstitution,
+                amount, currency, concept, numericReference, rail, correlationId, null);
+    }
+
     public Rail railOrDefault() { return rail != null ? rail : Rail.SPEI; }
     public String currencyOrDefault() { return currency != null && !currency.isBlank() ? currency : "MXN"; }
     public Map<String, String> metadataOrEmpty() { return sourceMetadata != null ? sourceMetadata : Map.of(); }

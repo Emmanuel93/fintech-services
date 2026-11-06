@@ -1,5 +1,6 @@
 package com.fintech.stp.domain;
 
+import com.fintech.shared.time.BusinessClock;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -192,7 +193,7 @@ public class StpPaymentOrder {
         order.orderingTaxId = orderingTaxId;
         order.orderingAccountType = orderingAccountType != null ? orderingAccountType : "40";
         order.orderingClientNumber = orderingClientNumber;
-        order.createdAt = Instant.now();
+        order.createdAt = BusinessClock.current().now();
         return order;
     }
 
@@ -203,7 +204,7 @@ public class StpPaymentOrder {
         this.signingKeyId = signingKeyId;
         this.status = StpPaymentOrderStatus.SENT.name();
         this.attemptCount++;
-        this.sentAt = Instant.now();
+        this.sentAt = BusinessClock.current().now();
     }
 
     /** STP aceptó el registro. No significa que el dinero haya salido. */
@@ -232,6 +233,24 @@ public class StpPaymentOrder {
         this.errorDetail = detail;
     }
 
+    /**
+     * The relay gave up and STP never answered: the order may be at STP or not, and only the reconciliation of its
+     * operation date can tell. It stays in flight (SENT), so the poller keeps looking for it.
+     */
+    public void awaitReconciliation(String detail) {
+        requireNotTerminal("awaitReconciliation");
+        this.status = StpPaymentOrderStatus.SENT.name();
+        this.errorDetail = detail;
+        if (this.sentAt == null) {
+            this.sentAt = BusinessClock.current().now();
+        }
+    }
+
+    /** Whether the order is waiting for the reconciliation to tell whether STP ever registered it. */
+    public boolean isUnanswered() {
+        return status() == StpPaymentOrderStatus.SENT;
+    }
+
     /** No se pudo ni enviar: empresa sin resolver, sin llave vigente, CLABE inválida. */
     public void fail(String reason) {
         requireNotTerminal("fail");
@@ -243,7 +262,7 @@ public class StpPaymentOrder {
     public void settle(Instant settledAt, String cepUrl, Boolean beneficiaryNameMatches) {
         requireNotTerminal("settle");
         this.status = StpPaymentOrderStatus.SETTLED.name();
-        this.settledAt = settledAt != null ? settledAt : Instant.now();
+        this.settledAt = settledAt != null ? settledAt : BusinessClock.current().now();
         this.cepUrl = cepUrl;
         this.beneficiaryNameMatches = beneficiaryNameMatches;
     }

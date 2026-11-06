@@ -75,6 +75,10 @@ public class MovementTrace {
     @Column(name = "last_event_id", length = 120)
     private String lastEventId;
 
+    /** Why the payout ended without the money leaving; null unless FAILED. */
+    @Column(name = "failure_reason", length = 500)
+    private String failureReason;
+
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
@@ -213,6 +217,21 @@ public class MovementTrace {
         this.status = "RETURNED";
         advance(eventId);
     }
+
+    /**
+     * The payout ended without the money leaving: the bank rejected it, or it never reached the bank. Terminal, with
+     * its reason. Before, nothing told the trace, and a rejected payout stayed dispatched for good (D61).
+     */
+    public void failed(String reason, String eventId) {
+        if (isPastDispatch()) {
+            return;   // the money left: a late failure does not undo a settlement
+        }
+        this.status = "FAILED";
+        this.failureReason = reason == null || reason.length() <= 500 ? reason : reason.substring(0, 500);
+        advance(eventId);
+    }
+
+    public String getFailureReason() { return failureReason; }
 
     private void advance(String eventId) {
         this.lastEventId = eventId;

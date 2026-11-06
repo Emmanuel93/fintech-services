@@ -71,7 +71,13 @@ public class WriteOffService implements WriteOffUseCase {
         var snapshot = snapshotRepository.findById(collectionCase.getCreditAccountId());
         BigDecimal principal = snapshot.map(s -> s.getPrincipalBalance()).orElse(collectionCase.getTotalDebt());
         BigDecimal interest  = snapshot.map(s -> s.getAccruedInterestBalance()).orElse(BigDecimal.ZERO);
-        BigDecimal penalty   = snapshot.map(s -> s.getPenaltyBalance()).orElse(BigDecimal.ZERO);
+        // The rest of the debt — moratorium, fees and the IVA charged on all of it — goes with the penalty: the
+        // record must total what the portfolio writes off. Built from the penalty balance alone it left the IVA out
+        // ($696.40 between this record and the ledger in the 2 Nov E2E).
+        BigDecimal penalty   = snapshot.map(s -> s.getTotalDebt() != null
+                        ? s.getTotalDebt().subtract(s.getPrincipalBalance()).subtract(s.getAccruedInterestBalance()).max(BigDecimal.ZERO)
+                        : s.getPenaltyBalance())
+                .orElse(BigDecimal.ZERO);
 
         WriteOffRecord record = WriteOffRecord.create(cmd.caseId(), collectionCase.getCreditAccountId(),
                 collectionCase.getObligorPartyId(), principal, interest, penalty,

@@ -35,18 +35,24 @@ public class DispositionAuthorizedListener {
             return;
         }
 
+        // Each attempt of the same disposition is its own order: the first keeps the bare disposition id (the key it had
+        // before attempts existed), a later one adds its number, as a commission lot does (D63).
+        int attempt = event.attempt() == null || event.attempt() < 1 ? 1 : event.attempt();
+        String dispositionId = String.valueOf(event.dispositionId());
+
         Map<String, String> metadata = new LinkedHashMap<>();
-        metadata.put("dispositionId", String.valueOf(event.dispositionId()));
+        metadata.put("dispositionId", dispositionId);
         metadata.put("creditAccountId", String.valueOf(event.creditAccountId()));
+        metadata.put("attempt", String.valueOf(attempt));
         if (event.dispositionType() != null) {
             metadata.put("dispositionType", event.dispositionType());
         }
 
-        requestDisbursement.request(new RequestDisbursementCommand(
+        requestDisbursement.requestOrReject(new RequestDisbursementCommand(
                 SOURCE_SYSTEM,
                 DisbursementSource.DISPOSITION,
-                String.valueOf(event.dispositionId()),
-                String.valueOf(event.dispositionId()),
+                dispositionId,
+                attempt == 1 ? dispositionId : dispositionId + ":" + attempt,
                 event.sourceCompanyKey(),
                 event.companyId(),
                 metadata,
@@ -60,6 +66,7 @@ public class DispositionAuthorizedListener {
                 event.concept(),
                 event.numericReference(),
                 Rail.SPEI,
-                String.valueOf(event.creditAccountId())));
+                String.valueOf(event.creditAccountId()),
+                event.notBefore()));
     }
 }

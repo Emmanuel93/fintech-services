@@ -185,3 +185,207 @@ databaseChangeLog:
             path: db/changelog/creditportfolio/025-candado-de-crones.sql
             relativeToChangelogFile: false
             splitStatements: true
+  - changeSet:
+      id: 026-vista-estado-de-cuenta
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/026-vista-estado-de-cuenta.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 027-cierre-del-dia
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/027-cierre-del-dia.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 028-compuertas-del-cierre
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/028-compuertas-del-cierre.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 029-lote-del-cierre
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/029-lote-del-cierre.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 030-cierre-por-cuenta
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/030-cierre-por-cuenta.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 031-foto-diaria
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/031-foto-diaria.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 032-ciclo-de-facturacion
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/032-ciclo-de-facturacion.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 033-foto-con-libro
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/033-foto-con-libro.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 034-cuotas-facturadas
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/034-cuotas-facturadas.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 035-capital-que-causa-interes
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/035-capital-que-causa-interes.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 036-desglose-y-reestructura
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/036-desglose-y-reestructura.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 037-interes-del-periodo
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/037-interes-del-periodo.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 038-corte-de-cada-estado
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/038-corte-de-cada-estado.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 039-cat-contratado
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/039-cat-contratado.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 040-fecha-de-pago-de-la-cuota
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/040-fecha-de-pago-de-la-cuota.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 041-calendario-bancario
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/041-calendario-bancario.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 042-referencia-de-pago-y-clabe-de-cobro
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/042-referencia-de-pago-y-clabe-de-cobro.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 043-exigido-del-dia-sin-pagar
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/043-exigido-del-dia-sin-pagar.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 044-desembolso-fallido
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/044-desembolso-fallido.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 045-quincena-de-calendario
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/045-quincena-de-calendario.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 046-iva-del-periodo
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/046-iva-del-periodo.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 047-comision-de-distribuidora
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/047-comision-de-distribuidora.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 048-atraso-de-estados-en-la-foto
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/048-atraso-de-estados-en-la-foto.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 049-cierre-de-linea-tras-quita
+      author: credit-portfolio-service
+      changes:
+        - sqlFile:
+            path: db/changelog/creditportfolio/049-cierre-de-linea-tras-quita.sql
+            relativeToChangelogFile: false
+            splitStatements: true

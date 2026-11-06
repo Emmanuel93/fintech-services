@@ -60,6 +60,34 @@ public class PayoutTraceListener {
                 "disbursement.accepted:" + event.disbursementId());
     }
 
+    /** FAILED: the payout ended without the money leaving (a rejection, an order STP never registered). */
+    @KafkaListener(
+            topics = "${fintech.banking.topics.disbursement-failed:disbursement.failed}",
+            groupId = "${spring.kafka.consumer.group-id}",
+            containerFactory = "disbursementFailedListenerContainerFactory")
+    public void onDisbursementFailed(DisbursementFailedPayload event) {
+        if (event.disbursementId() == null) {
+            log.warn("disbursement.failed sin id de pago — no hay traza que cerrar");
+            return;
+        }
+        String reason = event.failureCode() == null ? event.failureReason()
+                : event.failureCode() + (event.failureReason() == null ? "" : " — " + event.failureReason());
+        traces.failed(event.disbursementId(), event.amount(), reason, "disbursement.failed:" + event.disbursementId());
+    }
+
+    /** RETURNED: the receiving bank returned the money. */
+    @KafkaListener(
+            topics = "${fintech.banking.topics.disbursement-returned:disbursement.returned}",
+            groupId = "${spring.kafka.consumer.group-id}",
+            containerFactory = "disbursementReturnedListenerContainerFactory")
+    public void onDisbursementReturned(DisbursementReturnedPayload event) {
+        if (event.disbursementId() == null) {
+            log.warn("disbursement.returned sin id de pago — no hay traza que cerrar");
+            return;
+        }
+        traces.returned(event.disbursementId(), event.amount(), "disbursement.returned:" + event.disbursementId());
+    }
+
     /**
      * El crédito sale del eco de metadatos que disbursement devuelve sin entenderlo. Una orden que no
      * viene de cartera no lo trae, y su traza simplemente no aparece por crédito — que es correcto.
@@ -94,5 +122,20 @@ public class PayoutTraceListener {
                                               Map<String, String> sourceMetadata,
                                               BigDecimal amount,
                                               String externalRef,
+                                              Instant occurredOn) {}
+
+    /** Lo que banking lee de {@code disbursement.failed}. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record DisbursementFailedPayload(UUID disbursementId,
+                                            BigDecimal amount,
+                                            String failureCode,
+                                            String failureReason,
+                                            Instant occurredOn) {}
+
+    /** Lo que banking lee de {@code disbursement.returned}. */
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record DisbursementReturnedPayload(UUID disbursementId,
+                                              BigDecimal amount,
+                                              String returnCauseCode,
                                               Instant occurredOn) {}
 }

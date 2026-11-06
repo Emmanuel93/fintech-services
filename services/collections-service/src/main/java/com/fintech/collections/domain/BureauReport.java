@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Append-only. BR-01: one per sourceRecordId — the same write-off/quita is never reported twice.
@@ -58,14 +59,14 @@ public class BureauReport {
         r.sourceRecordId    = sourceRecordId;
         r.amountReported    = amountReported;
         r.status            = BureauReportStatus.PENDING;
-        r.createdAt         = Instant.now();
+        r.createdAt         = BusinessClock.current().now();
         return r;
     }
 
     public void markSubmitted(String bureauReference) {
         this.status          = BureauReportStatus.SUBMITTED;
         this.bureauReference = bureauReference;
-        this.submittedAt     = Instant.now();
+        this.submittedAt     = BusinessClock.current().now();
     }
 
     public void markFailed() {

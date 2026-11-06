@@ -1,5 +1,6 @@
 package com.fintech.banking.infrastructure.adapter.in.api;
 
+import com.fintech.banking.domain.FundingRuleException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -20,6 +21,12 @@ class ApiExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     ProblemDetail conflicto(IllegalStateException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+    }
+
+    /** A funding instruction the rules do not allow: the message says why. */
+    @ExceptionHandler(FundingRuleException.class)
+    ProblemDetail reglaDeFondeo(FundingRuleException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
     }
 
     @ExceptionHandler(NoSuchElementException.class)

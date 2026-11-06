@@ -1,6 +1,8 @@
 package com.fintech.creditportfolio.application.service;
 
 import com.fintech.creditportfolio.application.port.out.ProductConfigVersionRepository;
+import com.fintech.creditportfolio.domain.config.BillingCycle;
+import com.fintech.creditportfolio.domain.config.DistributorCommission;
 import com.fintech.creditportfolio.domain.config.Capabilities;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import org.slf4j.Logger;
@@ -36,6 +38,35 @@ public class ProductConfigVersionService {
             String targetAudience, Capabilities capabilities,
             String amortizationType, String paymentFrequency, Integer amountStep,
             BigDecimal nominalRateAnnual, BigDecimal moratoriumRateAnnual, BigDecimal openingFeeRate) {
+        upsertActivated(productCode, productVersion, productType, behavior, targetAudience, capabilities,
+                amortizationType, paymentFrequency, amountStep, nominalRateAnnual, moratoriumRateAnnual,
+                openingFeeRate, null);
+    }
+
+    /** @param billingCycle the product's billing cycle; null when the catalog's event predates it */
+    public void upsertActivated(
+            String productCode, int productVersion, String productType, String behavior,
+            String targetAudience, Capabilities capabilities,
+            String amortizationType, String paymentFrequency, Integer amountStep,
+            BigDecimal nominalRateAnnual, BigDecimal moratoriumRateAnnual, BigDecimal openingFeeRate,
+            BillingCycle billingCycle) {
+        upsertActivated(productCode, productVersion, productType, behavior, targetAudience, capabilities,
+                amortizationType, paymentFrequency, amountStep, nominalRateAnnual, moratoriumRateAnnual,
+                openingFeeRate, billingCycle, null, null, null, null, null, null);
+    }
+
+    /**
+     * @param distributorCommission the distributor's commission terms; null for every product but a distributor line
+     * @param minAmount             the product's ranges, what a placement is validated against; null when the event
+     *                              predates them
+     */
+    public void upsertActivated(
+            String productCode, int productVersion, String productType, String behavior,
+            String targetAudience, Capabilities capabilities,
+            String amortizationType, String paymentFrequency, Integer amountStep,
+            BigDecimal nominalRateAnnual, BigDecimal moratoriumRateAnnual, BigDecimal openingFeeRate,
+            BillingCycle billingCycle, DistributorCommission distributorCommission,
+            BigDecimal minAmount, BigDecimal maxAmount, Integer minTerm, Integer maxTerm, Integer termStep) {
 
         Capabilities caps = capabilities != null
                 ? capabilities
@@ -63,14 +94,21 @@ public class ProductConfigVersionService {
             v.overwriteFrom(productType, behavior, targetAudience, caps, amortizationType,
                     paymentFrequency, amountStep, nominalRateAnnual, moratoriumRateAnnual,
                     openingFeeRate, "ACTIVE");
+            v.defineBillingCycle(billingCycle);
+            v.defineDistributorCommission(distributorCommission);
+            v.defineRanges(minAmount, maxAmount, minTerm, maxTerm, termStep);
             repository.save(v);
             log.info("ProductConfigVersion updated code={} version={}", productCode, productVersion);
         } else {
-            repository.save(ProductConfigVersion.of(
+            ProductConfigVersion v = ProductConfigVersion.of(
                     productCode, productVersion, productType, behavior, targetAudience, caps,
                     amortizationType, paymentFrequency, amountStep,
                     nominalRateAnnual, moratoriumRateAnnual, openingFeeRate,
-                    "ACTIVE", false));
+                    "ACTIVE", false);
+            v.defineBillingCycle(billingCycle);
+            v.defineDistributorCommission(distributorCommission);
+            v.defineRanges(minAmount, maxAmount, minTerm, maxTerm, termStep);
+            repository.save(v);
             log.info("ProductConfigVersion stored code={} version={}", productCode, productVersion);
         }
     }

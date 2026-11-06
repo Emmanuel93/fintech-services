@@ -7,6 +7,7 @@ import org.hibernate.type.SqlTypes;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Bilateral agreement with the debtor: RESTRUCTURE (new terms, same obligation) or
@@ -59,6 +60,10 @@ public class CollectionAgreement {
     @Column(name = "proposed_at", nullable = false, updatable = false)
     private Instant proposedAt;
 
+    /** The staff session that proposed it; whoever proposes cannot authorize. Empty on agreements older than the rule. */
+    @Column(name = "proposed_by", length = 80, updatable = false)
+    private String proposedBy;
+
     @Column(name = "responded_at")
     private Instant respondedAt;
 
@@ -99,22 +104,28 @@ public class CollectionAgreement {
         a.type            = type;
         a.status          = AgreementStatus.PROPOSED;
         a.originalDebt    = originalDebt;
-        a.proposedAt      = Instant.now();
+        a.proposedAt      = BusinessClock.current().now();
         a.bureauReported  = false;
         return a;
+    }
+
+    /** Records who proposed it. Set once, when it is proposed. */
+    public CollectionAgreement proposedBy(String staffUserId) {
+        this.proposedBy = staffUserId;
+        return this;
     }
 
     /** The debtor accepts the proposal. */
     public void accept() {
         requireStatus(AgreementStatus.PROPOSED);
         this.status      = AgreementStatus.ACCEPTED;
-        this.respondedAt = Instant.now();
+        this.respondedAt = BusinessClock.current().now();
     }
 
     public void reject() {
         requireStatus(AgreementStatus.PROPOSED);
         this.status      = AgreementStatus.REJECTED;
-        this.respondedAt = Instant.now();
+        this.respondedAt = BusinessClock.current().now();
     }
 
     /** AG-05: no response within agreement_response_days (T5). */
@@ -126,10 +137,17 @@ public class CollectionAgreement {
     /** AG-02: requires authorizationRef — no agreement executes without explicit approval. */
     public void execute(String authorizedBy, String authorizationRef) {
         requireStatus(AgreementStatus.ACCEPTED);
+        if (authorizedBy == null || authorizedBy.isBlank()) {
+            throw new InvalidAgreementStateException("Un convenio no se ejecuta sin saber quién lo autoriza");
+        }
+        if (proposedBy != null && proposedBy.equals(authorizedBy)) {
+            throw new InvalidAgreementStateException(
+                    "Quien propone el convenio no puede autorizarlo: lo autoriza otra persona");
+        }
         this.status           = AgreementStatus.EXECUTED;
         this.authorizedBy      = authorizedBy;
         this.authorizationRef = authorizationRef;
-        this.executedAt       = Instant.now();
+        this.executedAt       = BusinessClock.current().now();
     }
 
     public void markBureauReported() { this.bureauReported = true; }
@@ -155,6 +173,7 @@ public class CollectionAgreement {
     public BigDecimal getForgivenAmount() { return forgivenAmount; }
     public RestructureTerms getNewTerms() { return newTerms; }
     public String getAuthorizedBy()   { return authorizedBy; }
+    public String getProposedBy()     { return proposedBy; }
     public String getAuthorizationRef() { return authorizationRef; }
     public Instant getProposedAt()    { return proposedAt; }
     public Instant getRespondedAt()   { return respondedAt; }

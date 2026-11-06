@@ -39,6 +39,11 @@ public class WriteOffCandidatesJob {
     @SchedulerLock(name = "collections.write-off-candidates", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
     @Scheduled(cron = "0 0 6 * * MON", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
+        execute();
+    }
+
+    /** The job's work without the scheduler lock: what test support runs once per simulated day. */
+    public void execute() {
         List<CollectionCase> candidates = caseRepository.findByStatusInAndDaysDelinquentGreaterThanEqual(
                 List.of(CaseStatus.MANAGED, CaseStatus.LEGAL), properties.getWriteOffThresholdDays());
         log.info("WriteOffCandidatesJob starting candidates={}", candidates.size());

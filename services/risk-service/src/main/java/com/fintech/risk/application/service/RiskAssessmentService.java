@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * PR-01: nightly full-recompute of every ACTIVE RiskProfile — bucket, ifrs9Stage and provision —
@@ -31,7 +32,11 @@ public class RiskAssessmentService {
     }
 
     public Result reassessAll() {
-        Instant now = Instant.now();
+        // The night evaluates the day that just closed: its delinquency and balances are the snapshot of D. Dating
+        // the ECL with the instant the job runs (D+1, 01:00) moved the last day of each month into the next
+        // period (2 Nov E2E: 7 provision vouchers of 31-Oct in 202611).
+        BusinessClock clock = BusinessClock.current();
+        Instant now = clock.today().minusDays(1).atTime(23, 59, 59).atZone(clock.zone()).toInstant();
         List<RiskProfile> active = profileRepository.findByStatus(RiskProfileStatus.ACTIVE);
         int assessed = 0, skippedNoPolicy = 0, failed = 0;
 

@@ -24,6 +24,6 @@ public class BalanceUpdatedListener {
         log.debug("balance-updated received creditAccountId={} totalDebt={} status={}",
                 payload.creditAccountId(), payload.totalDebt(), payload.accountStatus());
         riskProfileService.onBalanceUpdated(
-                payload.creditAccountId(), payload.totalDebt(), payload.accountStatus());
+                payload.creditAccountId(), payload.totalDebt(), payload.availableCredit(), payload.accountStatus());
     }
 }

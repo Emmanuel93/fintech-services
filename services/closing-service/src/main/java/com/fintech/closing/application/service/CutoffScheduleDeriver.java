@@ -2,6 +2,7 @@ package com.fintech.closing.application.service;
 
 import com.fintech.closing.domain.AccountCloseProfile;
 import com.fintech.closing.domain.ClosePolicy;
+import com.fintech.closing.domain.BillingCycle;
 import com.fintech.closing.domain.CutoffRule;
 import com.fintech.closing.domain.CutoffSchedule;
 import com.fintech.closing.domain.PaymentCadence;
@@ -12,6 +13,8 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.time.DayOfWeek;
+import java.time.temporal.TemporalAdjusters;
 import java.util.Optional;
 
 /**
@@ -50,7 +53,10 @@ public class CutoffScheduleDeriver {
      * @return vacío si el producto no tiene corte, o si el ciclo excede el plazo del crédito.
      */
     public Optional<CutoffSchedule> derive(AccountCloseProfile profile, ClosePolicy policy, int cycle) {
-        if (policy.cutoffRule() == CutoffRule.NONE || profile.getActivatedOn() == null || cycle < 1) {
+        // The rules are the product's cycle pinned to the account; the policy table is what accounts
+        // opened before the product declared one still use (and the calendar always comes from it).
+        BillingCycle rules = profile.billingCycle().orElseGet(() -> BillingCycle.fromPolicy(policy));
+        if (rules.cutoffRule() == CutoffRule.NONE || profile.getActivatedOn() == null || cycle < 1) {
             return Optional.empty();
         }
         // Un préstamo a plazo no corta después de su última cuota: ahí ya no hay nada que cortar.
@@ -58,13 +64,21 @@ public class CutoffScheduleDeriver {
             return Optional.empty();
         }
 
-        LocalDate crudo = rawDate(profile, policy, cycle);
+        LocalDate crudo = rawDate(profile, rules, cycle);
         if (crudo == null) return Optional.empty();
 
         String calendarCode = policy.getCalendarCode();
-        LocalDate cutoff = calendar.shift(calendarCode, crudo, policy.shift());
-        LocalDate paymentDueDate = calendar.shift(calendarCode,
-                cutoff.plusDays(policy.getPaymentDueOffsetDays()), policy.shift());
+        // A fortnight ends on its day whatever day it is: the cutoff is the period's boundary and the nightly close runs
+        // every day. Moving it to the next business day would start the next fortnight a day or two late. Only the
+        // payment due date moves.
+        boolean fortnight = rules.cutoffRule() == CutoffRule.SEMI_MONTHLY;
+        LocalDate cutoff = fortnight ? crudo : calendar.shift(calendarCode, crudo, rules.shift());
+        // The fortnight's statement is paid by a fixed day when the product says so (the 18th for the cutoff of the
+        // 6th, the 3rd for the one of the 21st); otherwise a number of days after the cutoff.
+        LocalDate rawDue = fortnight
+                ? rules.semiMonthly().dueDate(cutoff).orElseGet(() -> cutoff.plusDays(rules.paymentDueOffsetDays()))
+                : cutoff.plusDays(rules.paymentDueOffsetDays());
+        LocalDate paymentDueDate = calendar.shift(calendarCode, rawDue, rules.shift());
 
         // El corrimiento del corte puede empujarlo más allá de la fecha límite calculada sobre el
         // crudo. La invariante `limite >= corte` la impone la base; se respeta aquí.
@@ -74,10 +88,10 @@ public class CutoffScheduleDeriver {
     }
 
     /** La fecha antes de aplicar el calendario. Aquí vive la diferencia entre reglas. */
-    private LocalDate rawDate(AccountCloseProfile profile, ClosePolicy policy, int cycle) {
+    private LocalDate rawDate(AccountCloseProfile profile, BillingCycle rules, int cycle) {
         LocalDate alta = profile.getActivatedOn();
 
-        return switch (policy.cutoffRule()) {
+        return switch (rules.cutoffRule()) {
             // No revolvente: la cadencia del plan, anclada al alta. El primer corte cae un período
             // después de activar — igual que la primera cuota que genera cartera.
             case INSTALLMENT_DUE_DATE -> cadenceOf(profile).advance(alta, cycle);
@@ -95,10 +109,24 @@ public class CutoffScheduleDeriver {
 
             // Día fijo del mes, igual para todo el producto. El primer corte es el siguiente que
             // llegue después del alta, no el del mes del alta si ya pasó.
-            case DAY_OF_MONTH -> fixedDayOfMonth(alta, policy.getCutoffDay(), cycle);
+            case DAY_OF_MONTH -> fixedDayOfMonth(alta, rules.cutoffDay(), cycle);
+
+            // A fixed weekday: the first one strictly after activation, then every period of the
+            // product's frequency (weekly or biweekly keep the weekday; a monthly frequency would not).
+            case DAY_OF_WEEK -> fixedDayOfWeek(alta, rules.cutoffDay(), cadenceOf(profile), cycle);
+
+            // The fortnight: the cycle-th of its two cutoff days (the 6th and the 21st) strictly after the activation,
+            // the same days for every account of the product, whatever day each one was activated.
+            case SEMI_MONTHLY -> rules.semiMonthly().advance(alta, cycle);
 
             case NONE -> null;
         };
+    }
+
+    private static LocalDate fixedDayOfWeek(LocalDate alta, Integer isoDay, PaymentCadence cadence, int cycle) {
+        if (isoDay == null || isoDay < 1 || isoDay > 7) return null;
+        LocalDate first = alta.with(TemporalAdjusters.next(DayOfWeek.of(isoDay)));
+        return cadence.advance(first, cycle - 1);
     }
 
     /**
@@ -118,7 +146,7 @@ public class CutoffScheduleDeriver {
         return profile.cadence();
     }
 
-    private LocalDate fixedDayOfMonth(LocalDate alta, Short day, int cycle) {
+    private LocalDate fixedDayOfMonth(LocalDate alta, Integer day, int cycle) {
         if (day == null) return null;
         LocalDate first = alta.withDayOfMonth(Math.min(day, alta.lengthOfMonth()));
         if (!first.isAfter(alta)) {

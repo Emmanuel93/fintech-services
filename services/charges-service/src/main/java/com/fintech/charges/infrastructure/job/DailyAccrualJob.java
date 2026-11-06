@@ -3,15 +3,16 @@ package com.fintech.charges.infrastructure.job;
 import com.fintech.charges.application.service.InterestAccrualService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
-import net.javacrumbs.shedlock.spring.annotation.SchedulerLock;
-import com.fintech.shared.time.BusinessClock;
 
+/**
+ * El devengo ordinario de un día. No tiene cron propio: lo dispara {@link DayCloseAccrualJob} a las
+ * 00:05 del día siguiente, antes del moratorio y de la mora.
+ */
 @Component
 public class DailyAccrualJob {
 
@@ -19,18 +20,9 @@ public class DailyAccrualJob {
     private static final Logger log = LoggerFactory.getLogger(DailyAccrualJob.class);
 
     private final InterestAccrualService accrualService;
-    private final BusinessClock businessClock;
 
-    public DailyAccrualJob(InterestAccrualService accrualService, BusinessClock businessClock) {
-        this.businessClock = businessClock;
+    public DailyAccrualJob(InterestAccrualService accrualService) {
         this.accrualService = accrualService;
-    }
-
-    // Runs at 23:00 every day — per-schedule tx isolation via service proxy
-    @SchedulerLock(name = "charges.daily-accrual", lockAtMostFor = "PT2H", lockAtLeastFor = "PT30S")
-    @Scheduled(cron = "0 0 23 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
-    public void runDailyAccrual() {
-        runDailyAccrualFor(businessClock.today());
     }
 
     /**
@@ -41,7 +33,12 @@ public class DailyAccrualJob {
      * reloj</b>, un día a la vez. Con la fecha fija dentro del job eso era imposible desde fuera y la
      * única forma de sembrar historia era escribir saldos a mano.
      */
-    public void runDailyAccrualFor(LocalDate today) {
+    public AccrualTally runDailyAccrualFor(LocalDate today) {
+        return runDailyAccrualFor(today, false);
+    }
+
+    /** @param dayClose si corre dentro del cierre del día: sus cargos forman el lote que cartera cuadra. */
+    public AccrualTally runDailyAccrualFor(LocalDate today, boolean dayClose) {
         List<UUID> scheduleIds = accrualService.findScheduleIdsForAccrual(today);
         log.info("DailyAccrualJob starting date={} schedules={}", today, scheduleIds.size());
 
@@ -49,7 +46,7 @@ public class DailyAccrualJob {
         int errors  = 0;
         for (UUID scheduleId : scheduleIds) {
             try {
-                accrualService.accrueInterestForSchedule(scheduleId, today);
+                accrualService.accrueInterestForSchedule(scheduleId, today, dayClose);
                 success++;
             } catch (Exception ex) {
                 errors++;
@@ -57,5 +54,6 @@ public class DailyAccrualJob {
             }
         }
         log.info("DailyAccrualJob finished date={} success={} errors={}", today, success, errors);
+        return new AccrualTally(scheduleIds.size(), success, errors);
     }
 }

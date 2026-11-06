@@ -1,6 +1,7 @@
 package com.fintech.creditportfolio.application.service;
 
 import com.fintech.creditportfolio.domain.Installment;
+import com.fintech.creditportfolio.domain.config.SemiMonthlyCalendar;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -10,6 +11,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.IntFunction;
 
 /**
  * Config-driven amortisation engine — the strategy and payment cadence are chosen from the
@@ -22,7 +24,8 @@ import java.util.UUID;
  * </ul>
  *
  * Payment frequency drives the rate-per-period and due-date increments:
- * WEEKLY (52/yr), BIWEEKLY (26/yr), MONTHLY (12/yr).
+ * WEEKLY (52/yr), BIWEEKLY (26/yr), SEMI_MONTHLY (24/yr: two fixed days a month, the product's cutoff days — the
+ * distributor line pays on the 6th and the 21st; without days, the 15th and the last day), MONTHLY (12/yr).
  */
 @Component
 public class AmortizationEngine {
@@ -44,27 +47,50 @@ public class AmortizationEngine {
     private enum Cadence {
         WEEKLY(52),
         BIWEEKLY(26),
+        SEMI_MONTHLY(24),
         MONTHLY(12);
 
         final int periodsPerYear;
         Cadence(int p) { this.periodsPerYear = p; }
 
-        LocalDate advance(LocalDate from, int periodsFromStart) {
+        LocalDate advance(LocalDate from, int periodsFromStart, SemiMonthlyCalendar fortnight) {
             return switch (this) {
-                case WEEKLY   -> from.plusWeeks(periodsFromStart);
-                case BIWEEKLY -> from.plusWeeks(2L * periodsFromStart);
-                case MONTHLY  -> from.plusMonths(periodsFromStart);
+                case WEEKLY       -> from.plusWeeks(periodsFromStart);
+                case BIWEEKLY     -> from.plusWeeks(2L * periodsFromStart);
+                case SEMI_MONTHLY -> fortnight.advance(from, periodsFromStart);
+                case MONTHLY      -> from.plusMonths(periodsFromStart);
             };
         }
 
         static Cadence from(String paymentFrequency) {
             if (paymentFrequency == null) return MONTHLY;
             return switch (paymentFrequency.toUpperCase()) {
-                case "WEEKLY"   -> WEEKLY;
-                case "BIWEEKLY" -> BIWEEKLY;
-                default          -> MONTHLY;
+                case "WEEKLY"       -> WEEKLY;
+                case "BIWEEKLY"     -> BIWEEKLY;
+                case "SEMI_MONTHLY" -> SEMI_MONTHLY;
+                default              -> MONTHLY;
             };
         }
+    }
+
+    // ── The fortnight ──────────────────────────────────────────────────────
+    // Two cutoffs a month on the product's days (SemiMonthlyCalendar). Closing derives the cutoffs with its own copy of
+    // the calendar (it does not depend on this class on purpose): a disagreement shows in the end-to-end run.
+
+    /**
+     * The share of its first fortnight a plan that starts on {@code start} bears, in (0, 1]. A placement made on the
+     * 16th has the money five of the fifteen days of the fortnight that ends on the 21st: its first period bears a
+     * third of the fortnight's interest. One made on a cutoff day starts paying at the next one, a whole fortnight.
+     */
+    static BigDecimal firstFortnightShare(LocalDate start, LocalDate firstDue, SemiMonthlyCalendar fortnight) {
+        if (start == null || firstDue == null || !start.isBefore(firstDue) || !fortnight.isCutoff(firstDue)) {
+            return BigDecimal.ONE;
+        }
+        LocalDate previous = fortnight.previousCutoff(firstDue);
+        long length = firstDue.toEpochDay() - previous.toEpochDay();
+        long held = firstDue.toEpochDay() - start.toEpochDay();
+        return held >= length ? BigDecimal.ONE
+                : BigDecimal.valueOf(held).divide(BigDecimal.valueOf(length), MC);
     }
 
     /**
@@ -75,7 +101,50 @@ public class AmortizationEngine {
      * el plan y, con él, la fecha en que la cuenta empieza a envejecer.
      */
     public static LocalDate firstDueDate(LocalDate from, String paymentFrequency) {
-        return Cadence.from(paymentFrequency).advance(from, 1);
+        return firstDueDate(from, paymentFrequency, SemiMonthlyCalendar.CALENDAR_FORTNIGHT);
+    }
+
+    /** The first due date of a plan on the product's fortnight: its first cutoff strictly after {@code from}. */
+    public static LocalDate firstDueDate(LocalDate from, String paymentFrequency, SemiMonthlyCalendar fortnight) {
+        return Cadence.from(paymentFrequency).advance(from, 1, fortnight);
+    }
+
+    /**
+     * {@code from} moved {@code periods} periods of the cadence, counted from {@code from} in one step: moving a
+     * month at a time drifts the day (31 Jan → 28 Feb → 28 Mar), counting from the anchor does not.
+     */
+    public static LocalDate shift(LocalDate from, String paymentFrequency, int periods) {
+        return shift(from, paymentFrequency, periods, SemiMonthlyCalendar.CALENDAR_FORTNIGHT);
+    }
+
+    /** {@code from} moved {@code periods} periods, on the product's fortnight when it pays by fortnights. */
+    public static LocalDate shift(LocalDate from, String paymentFrequency, int periods, SemiMonthlyCalendar fortnight) {
+        return periods <= 0 ? from : Cadence.from(paymentFrequency).advance(from, periods, fortnight);
+    }
+
+    /**
+     * The first date of the plan's cadence, counted from {@code anchor}, that falls after {@code today}. A new plan
+     * that keeps the old one's day of the month keeps the statement cutoffs aligned (closing derives an
+     * installment loan's cutoffs from the same cadence).
+     */
+    public static LocalDate nextDueAfter(LocalDate anchor, LocalDate today, String paymentFrequency) {
+        return nextDueAfter(anchor, today, paymentFrequency, SemiMonthlyCalendar.CALENDAR_FORTNIGHT);
+    }
+
+    /** The first date of the plan's cadence after {@code today}, on the product's fortnight when it pays by them. */
+    public static LocalDate nextDueAfter(LocalDate anchor, LocalDate today, String paymentFrequency,
+                                         SemiMonthlyCalendar fortnight) {
+        Cadence cadence = Cadence.from(paymentFrequency);
+        if (cadence == Cadence.SEMI_MONTHLY) {
+            // Fixed days: the first cutoff after today, whatever the anchor's day was.
+            return fortnight.advance(today.isBefore(anchor) ? anchor.minusDays(1) : today, 1);
+        }
+        LocalDate d = anchor;
+        int n = 0;
+        while (!d.isAfter(today)) {
+            d = cadence.advance(anchor, ++n, fortnight);
+        }
+        return d;
     }
 
     /**
@@ -120,17 +189,55 @@ public class AmortizationEngine {
                                        BigDecimal nominalRateAnnual, int termPeriods,
                                        String amortizationType, String paymentFrequency,
                                        LocalDate firstPaymentDate, BigDecimal vatRate) {
+        return generate(scheduleId, principal, nominalRateAnnual, termPeriods, amortizationType, paymentFrequency,
+                null, firstPaymentDate, vatRate);
+    }
+
+    /**
+     * A plan that knows the day the money was delivered.
+     *
+     * <p>Only the calendar fortnight uses it: its periods end on fixed days, so the first one is as long as the days
+     * between the delivery and the first cutoff. That first period bears its share of the fortnight's interest
+     * ({@link #firstFortnightShare}) and every installment stays the same amount: the annuity is solved over the
+     * shorter first period. The other cadences start a whole period after the delivery and are unchanged.
+     *
+     * @param startDate the day the money was delivered; null for a whole first period
+     */
+    public List<Installment> generate(UUID scheduleId, BigDecimal principal,
+                                       BigDecimal nominalRateAnnual, int termPeriods,
+                                       String amortizationType, String paymentFrequency,
+                                       LocalDate startDate, LocalDate firstPaymentDate, BigDecimal vatRate) {
+        return generate(scheduleId, principal, nominalRateAnnual, termPeriods, amortizationType, paymentFrequency,
+                startDate, firstPaymentDate, vatRate, SemiMonthlyCalendar.CALENDAR_FORTNIGHT);
+    }
+
+    /**
+     * A plan on the product's fortnight: its installments fall on the fortnight's two cutoff days (the distributor
+     * line: the 6th and the 21st), the first one on {@code firstPaymentDate}.
+     *
+     * @param fortnight the product's two cutoff days; only a SEMI_MONTHLY plan reads it
+     */
+    public List<Installment> generate(UUID scheduleId, BigDecimal principal,
+                                       BigDecimal nominalRateAnnual, int termPeriods,
+                                       String amortizationType, String paymentFrequency,
+                                       LocalDate startDate, LocalDate firstPaymentDate, BigDecimal vatRate,
+                                       SemiMonthlyCalendar fortnight) {
 
         Cadence cadence = Cadence.from(paymentFrequency);
+        SemiMonthlyCalendar q = fortnight != null ? fortnight : SemiMonthlyCalendar.CALENDAR_FORTNIGHT;
         BigDecimal iva = vatRate != null ? vatRate : BigDecimal.ZERO;
         BigDecimal r = nominalRateAnnual
                 .divide(BigDecimal.valueOf(cadence.periodsPerYear), MC);
+        BigDecimal firstRate = cadence == Cadence.SEMI_MONTHLY
+                ? r.multiply(firstFortnightShare(startDate, firstPaymentDate, q), MC)
+                : r;
+        IntFunction<LocalDate> dueOf = i -> cadence.advance(firstPaymentDate, i - 1, q);
 
         String method = amortizationType == null ? "FRENCH" : amortizationType.toUpperCase();
         return switch (method) {
-            case "GERMAN" -> german(scheduleId, principal, r, termPeriods, cadence, firstPaymentDate, iva);
-            case "BULLET" -> bullet(scheduleId, principal, r, termPeriods, cadence, firstPaymentDate, iva);
-            default        -> french(scheduleId, principal, r, termPeriods, cadence, firstPaymentDate, iva);
+            case "GERMAN" -> german(scheduleId, principal, r, firstRate, termPeriods, dueOf, iva);
+            case "BULLET" -> bullet(scheduleId, principal, r, firstRate, termPeriods, dueOf, iva);
+            default        -> french(scheduleId, principal, r, firstRate, termPeriods, dueOf, iva);
         };
     }
 
@@ -144,21 +251,31 @@ public class AmortizationEngine {
 
     // ── FRENCH: fixed payment ───────────────────────────────────────────────
 
-    private List<Installment> french(UUID scheduleId, BigDecimal principal, BigDecimal r,
-                                     int n, Cadence cadence, LocalDate first, BigDecimal iva) {
+    private List<Installment> french(UUID scheduleId, BigDecimal principal, BigDecimal r, BigDecimal firstRate,
+                                     int n, IntFunction<LocalDate> dueOf, BigDecimal iva) {
         // La anualidad se resuelve sobre la tasa incrementada por el IVA: así el importe cobrado
         // —capital + interés + impuesto— es el mismo todos los meses. Resolverla sobre la tasa
         // financiera y sumar el IVA encima deja un cobro que decrece con el interés.
-        BigDecimal pmt = fixedPayment(principal, r.multiply(BigDecimal.ONE.add(iva), MC), n);
+        BigDecimal withTax = r.multiply(BigDecimal.ONE.add(iva), MC);
+        BigDecimal pmt = fixedPayment(principal, withTax, n);
+        if (firstRate.compareTo(r) != 0) {
+            // A shorter first period: the same payment every period, solved over it. Discounting the first payment at
+            // its own rate gives the annuity times (1 + first) / (1 + r), both with the tax.
+            BigDecimal firstWithTax = firstRate.multiply(BigDecimal.ONE.add(iva), MC);
+            pmt = fixedPaymentExact(principal, withTax, n)
+                    .multiply(BigDecimal.ONE.add(firstWithTax, MC), MC)
+                    .divide(BigDecimal.ONE.add(withTax, MC), MC)
+                    .setScale(SCALE, RoundingMode.HALF_UP);
+        }
         List<Installment> out = new ArrayList<>();
         BigDecimal balance = principal;
         for (int i = 1; i <= n; i++) {
-            BigDecimal interest = balance.multiply(r, MC).setScale(SCALE, RoundingMode.HALF_UP);
+            BigDecimal interest = balance.multiply(i == 1 ? firstRate : r, MC).setScale(SCALE, RoundingMode.HALF_UP);
             BigDecimal tax = iva(interest, iva);
             BigDecimal principalI = (i == n)
                     ? balance                                  // clear rounding residue
                     : pmt.subtract(interest).subtract(tax).setScale(SCALE, RoundingMode.HALF_UP);
-            out.add(Installment.of(scheduleId, i, cadence.advance(first, i - 1), principalI, interest, tax));
+            out.add(Installment.of(scheduleId, i, dueOf.apply(i), principalI, interest, tax));
             balance = balance.subtract(principalI);
         }
         return out;
@@ -166,15 +283,15 @@ public class AmortizationEngine {
 
     // ── GERMAN: fixed principal, decreasing interest ────────────────────────
 
-    private List<Installment> german(UUID scheduleId, BigDecimal principal, BigDecimal r,
-                                     int n, Cadence cadence, LocalDate first, BigDecimal iva) {
+    private List<Installment> german(UUID scheduleId, BigDecimal principal, BigDecimal r, BigDecimal firstRate,
+                                     int n, IntFunction<LocalDate> dueOf, BigDecimal iva) {
         BigDecimal fixedPrincipal = principal.divide(BigDecimal.valueOf(n), SCALE, RoundingMode.DOWN);
         List<Installment> out = new ArrayList<>();
         BigDecimal balance = principal;
         for (int i = 1; i <= n; i++) {
-            BigDecimal interest = balance.multiply(r, MC).setScale(SCALE, RoundingMode.HALF_UP);
+            BigDecimal interest = balance.multiply(i == 1 ? firstRate : r, MC).setScale(SCALE, RoundingMode.HALF_UP);
             BigDecimal principalI = (i == n) ? balance : fixedPrincipal;   // last clears residue
-            out.add(Installment.of(scheduleId, i, cadence.advance(first, i - 1), principalI, interest,
+            out.add(Installment.of(scheduleId, i, dueOf.apply(i), principalI, interest,
                     iva(interest, iva)));
             balance = balance.subtract(principalI);
         }
@@ -183,13 +300,13 @@ public class AmortizationEngine {
 
     // ── BULLET: interest only, principal at maturity ────────────────────────
 
-    private List<Installment> bullet(UUID scheduleId, BigDecimal principal, BigDecimal r,
-                                     int n, Cadence cadence, LocalDate first, BigDecimal iva) {
-        BigDecimal interest = principal.multiply(r, MC).setScale(SCALE, RoundingMode.HALF_UP);
+    private List<Installment> bullet(UUID scheduleId, BigDecimal principal, BigDecimal r, BigDecimal firstRate,
+                                     int n, IntFunction<LocalDate> dueOf, BigDecimal iva) {
         List<Installment> out = new ArrayList<>();
         for (int i = 1; i <= n; i++) {
+            BigDecimal interest = principal.multiply(i == 1 ? firstRate : r, MC).setScale(SCALE, RoundingMode.HALF_UP);
             BigDecimal principalI = (i == n) ? principal : BigDecimal.ZERO.setScale(SCALE);
-            out.add(Installment.of(scheduleId, i, cadence.advance(first, i - 1), principalI, interest,
+            out.add(Installment.of(scheduleId, i, dueOf.apply(i), principalI, interest,
                     iva(interest, iva)));
         }
         return out;
@@ -201,11 +318,16 @@ public class AmortizationEngine {
     }
 
     private BigDecimal fixedPayment(BigDecimal principal, BigDecimal r, int n) {
+        return fixedPaymentExact(principal, r, n).setScale(SCALE, RoundingMode.HALF_UP);
+    }
+
+    /** The annuity before rounding: what a shorter first period scales before it is rounded once. */
+    private BigDecimal fixedPaymentExact(BigDecimal principal, BigDecimal r, int n) {
         if (r.compareTo(BigDecimal.ZERO) == 0) {
             return principal.divide(BigDecimal.valueOf(n), MC);
         }
         BigDecimal onePlusR = BigDecimal.ONE.add(r, MC);
         BigDecimal factor   = BigDecimal.ONE.subtract(onePlusR.pow(-n, MC), MC);
-        return principal.multiply(r, MC).divide(factor, MC).setScale(SCALE, RoundingMode.HALF_UP);
+        return principal.multiply(r, MC).divide(factor, MC);
     }
 }

@@ -4,9 +4,10 @@ import com.fintech.commission.application.port.out.CommissionRecordRepository;
 import com.fintech.commission.domain.CommissionRecord;
 import com.fintech.commission.domain.CommissionRecordStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 public interface JpaCommissionRecordRepository
@@ -19,12 +20,16 @@ public interface JpaCommissionRecordRepository
     List<CommissionRecord> findByCreditAccountId(UUID creditAccountId);
 
     @Override
-    Optional<CommissionRecord> findFirstByCreditAccountIdAndStatusOrderByAccrualDateDesc(
-            UUID creditAccountId, CommissionRecordStatus status);
-
-    @Override
     List<CommissionRecord> findByBeneficiaryPartyIdAndStatus(UUID beneficiaryPartyId, CommissionRecordStatus status);
 
     @Override
-    List<CommissionRecord> findByStatusAndPeriod(CommissionRecordStatus status, String period);
+    @Query("SELECT r FROM CommissionRecord r WHERE r.status = com.fintech.commission.domain.CommissionRecordStatus.ACCRUED "
+            + "AND r.period <= :period ORDER BY r.beneficiaryPartyId, r.productType, r.accrualDate")
+    List<CommissionRecord> findOpenUpTo(@Param("period") String period);
+
+    @Override
+    List<CommissionRecord> findByPaymentRef(String paymentRef);
+
+    @Override
+    List<CommissionRecord> findByLiquidationBatchId(UUID batchId);
 }

@@ -3,6 +3,7 @@ package com.fintech.collections.domain;
 import jakarta.persistence.*;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Un periodo en que la cobranza automática de un caso está callada.
@@ -58,7 +59,7 @@ public class CommunicationHold {
         h.reason    = reason;
         h.heldUntil = heldUntil;
         h.sourceId  = sourceId;
-        h.createdAt = Instant.now();
+        h.createdAt = BusinessClock.current().now();
         return h;
     }
 
@@ -78,7 +79,7 @@ public class CommunicationHold {
     /** Lo levanta antes de tiempo. `by` nulo = lo levantó el sistema (promesa rota). */
     public void release(String by, String note) {
         if (releasedAt != null) return;
-        this.releasedAt  = Instant.now();
+        this.releasedAt  = BusinessClock.current().now();
         this.releasedBy  = by;
         this.releaseNote = note;
     }

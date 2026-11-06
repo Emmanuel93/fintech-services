@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -36,6 +37,21 @@ public class CloseUnit {
     @Column(name = "product_type", length = 40)
     private String productType;
 
+    /** De quién es la cuenta. Viaja con la unidad para que el reparto no vuelva a leer el perfil. */
+    @Column(name = "obligor_party_id")
+    private UUID obligorPartyId;
+
+    @Column(name = "product_behavior", length = 20)
+    private String productBehavior;
+
+    /** {@code CUSTOMER} o {@code DISTRIBUTOR}: el corte se reparte por cliente y por distribuidora. */
+    @Column(name = "holder_kind", length = 20)
+    private String holderKind;
+
+    /** Cuándo salió al tópico de trabajo. Nula = todavía no; vieja y aún PENDING = hay que reenviarla. */
+    @Column(name = "dispatched_at")
+    private Instant dispatchedAt;
+
     @Column(name = "status", nullable = false, length = 10)
     private String status;
 
@@ -61,6 +77,17 @@ public class CloseUnit {
 
     @Column(name = "balance_version")
     private Long balanceVersion;
+
+    /** From the portfolio's snapshot of D: what the statement prints as days past due. */
+    @Column(name = "days_delinquent_at_day")
+    private Integer daysDelinquentAtDay;
+
+    /** From the same snapshot: the principal closing's own rewind to D must agree with. */
+    @Column(name = "principal_at_day")
+    private BigDecimal principalAtDay;
+
+    @Column(name = "snapshot_taken_at")
+    private Instant snapshotTakenAt;
 
     @Column(name = "completed_at")
     private Instant completedAt;
@@ -137,6 +164,10 @@ public class CloseUnit {
     public String getUnitKey()       { return unitKey; }
     public UUID getCreditAccountId() { return creditAccountId; }
     public String getProductType()   { return productType; }
+    public UUID getObligorPartyId()  { return obligorPartyId; }
+    public String getProductBehavior() { return productBehavior; }
+    public String getHolderKind()    { return holderKind; }
+    public Instant getDispatchedAt() { return dispatchedAt; }
     public UnitStatus status()       { return UnitStatus.valueOf(status); }
     public String getLeaseOwner()    { return leaseOwner; }
     public Instant getLeaseExpiresAt() { return leaseExpiresAt; }
@@ -145,4 +176,15 @@ public class CloseUnit {
     public String getLastError()     { return lastError; }
     public void setBalanceVersion(Long v) { this.balanceVersion = v; }
     public Long getBalanceVersion()  { return balanceVersion; }
+
+    /** Attaches what the portfolio saw at the end of D; normally done in bulk when the run is planned. */
+    public void attachSnapshot(int daysDelinquent, BigDecimal principal, Instant takenAt) {
+        this.daysDelinquentAtDay = daysDelinquent;
+        this.principalAtDay      = principal;
+        this.snapshotTakenAt     = takenAt;
+    }
+    public boolean hasSnapshot()            { return daysDelinquentAtDay != null; }
+    public Integer getDaysDelinquentAtDay() { return daysDelinquentAtDay; }
+    public BigDecimal getPrincipalAtDay()   { return principalAtDay; }
+    public Instant getSnapshotTakenAt()     { return snapshotTakenAt; }
 }

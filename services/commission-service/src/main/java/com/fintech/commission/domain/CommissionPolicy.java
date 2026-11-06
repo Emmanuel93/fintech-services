@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Versioned commission rate per (productType, commissionType[, distributorPartyId]) — one ACTIVE at
@@ -59,7 +60,7 @@ public class CommissionPolicy {
         p.rate                 = rate;
         p.version              = version;
         p.status               = PolicyStatus.ACTIVE;
-        p.createdAt             = Instant.now();
+        p.createdAt             = BusinessClock.current().now();
         return p;
     }
 

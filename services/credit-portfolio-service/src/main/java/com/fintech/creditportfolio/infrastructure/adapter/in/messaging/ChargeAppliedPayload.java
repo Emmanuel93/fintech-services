@@ -24,5 +24,7 @@ public record ChargeAppliedPayload(
          * <p>Se propaga al {@code balance-updated} para que contabilidad asiente la póliza en el
          * período del hecho y no en el de su procesamiento.
          */
-        LocalDate effectiveDate
+        LocalDate effectiveDate,
+        /** El cierre del día que generó el cargo; nulo si no salió de uno. Es el lote que se cuadra. */
+        LocalDate dayCloseDate
 ) {}

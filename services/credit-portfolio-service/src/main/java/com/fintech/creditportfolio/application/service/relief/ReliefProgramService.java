@@ -1,15 +1,19 @@
 package com.fintech.creditportfolio.application.service.relief;
 
+import com.fintech.creditportfolio.domain.config.BillingCycle;
+import com.fintech.creditportfolio.domain.config.SemiMonthlyCalendar;
 import com.fintech.creditportfolio.application.port.in.ManageReliefProgramUseCase;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.application.port.out.ReliefProgramRepository;
-import com.fintech.creditportfolio.application.service.AmortizationEngine;
+import com.fintech.creditportfolio.application.service.PlanDeferral;
+import com.fintech.creditportfolio.application.service.ProductConfigResolver;
 import com.fintech.creditportfolio.domain.CreditAccount;
 import com.fintech.creditportfolio.domain.CreditAccountStatus;
 import com.fintech.creditportfolio.domain.Installment;
 import com.fintech.creditportfolio.domain.InstallmentStatus;
+import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import com.fintech.creditportfolio.domain.event.DelinquencyStatusUpdatedEvent;
 import com.fintech.creditportfolio.domain.event.ReliefGrantedEvent;
 import com.fintech.creditportfolio.domain.relief.ReliefEnrollment;
@@ -19,7 +23,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -45,15 +51,21 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
     private final CreditAccountRepository accounts;
     private final InstallmentRepository installments;
     private final CreditPortfolioEventPublisher eventPublisher;
+    private final ProductConfigResolver configResolver;
+    private final PlanDeferral deferral;
 
     public ReliefProgramService(ReliefProgramRepository programs,
                                 CreditAccountRepository accounts,
                                 InstallmentRepository installments,
-                                CreditPortfolioEventPublisher eventPublisher) {
+                                CreditPortfolioEventPublisher eventPublisher,
+                                ProductConfigResolver configResolver,
+                                PlanDeferral deferral) {
         this.programs      = programs;
         this.accounts       = accounts;
         this.installments   = installments;
         this.eventPublisher = eventPublisher;
+        this.configResolver = configResolver;
+        this.deferral       = deferral;
     }
 
     @Override
@@ -127,7 +139,10 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
         return inscritas;
     }
 
-    private void enroll(ReliefProgram p, CreditAccount account) {
+    private void enroll(ReliefProgram p, CreditAccount reached) {
+        // The program reached the account through a listing read earlier: it is locked and read again before its
+        // delinquency is recalculated and saved, so no balance applied since is put back.
+        CreditAccount account = accounts.lockAndLoad(reached.getCreditAccountId()).orElse(reached);
         List<Installment> calendario = installments
                 .findByScheduleIdOrdered(account.getCreditAccountId()).stream()
                 .filter(i -> i.getStatus() != InstallmentStatus.PAID)
@@ -138,14 +153,10 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
 
         // Se corren TODAS las pendientes, no sólo las primeras N: dejar las de atrás quietas
         // amontonaría los vencimientos justo cuando la vigencia termina.
-        String cadencia = account.isRevolving() ? "MONTHLY" : "MONTHLY";
-        for (Installment installment : calendario) {
-            LocalDate updated = installment.getDueDate();
-            for (int i = 0; i < p.getDeferredPeriods(); i++) {
-                updated = AmortizationEngine.firstDueDate(updated, cadencia);
-            }
-            installment.shiftDueDate(updated);
-        }
+        // A period is the product's: two periods of a weekly microloan are two weeks, not two months. Every plan used
+        // to move by months whatever its frequency (the cadence was "MONTHLY" on both branches of a ternary).
+        // Each one moves from its plan's date and lands on a business day, as a skipped payment does.
+        deferral.defer(calendario, cadenceOf(account), p.getDeferredPeriods(), fortnightOf(account));
         installments.saveAll(calendario);
 
         LocalDate despues = calendario.isEmpty() ? null : calendario.get(0).getDueDate();
@@ -170,6 +181,20 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
                 p.waivesAccrual(), antes, despues));
     }
 
+    /** The fortnight's cutoff days of the account's product: where a distributor's installments move to. */
+    private SemiMonthlyCalendar fortnightOf(CreditAccount account) {
+        return BillingCycle.semiMonthlyOf(configResolver.resolveForAccount(account.getProductCode(), account.getProductVersion())
+                .map(ProductConfigVersion::getBillingCycle).orElse(null));
+    }
+
+    /** The account's payment frequency, from its product version; monthly when the product does not say. */
+    private String cadenceOf(CreditAccount account) {
+        return configResolver.resolveForAccount(account.getProductCode(), account.getProductVersion())
+                .map(ProductConfigVersion::getPaymentFrequency)
+                .filter(f -> f != null && !f.isBlank())
+                .orElse("MONTHLY");
+    }
+
     /**
      * Recalcula el atraso con el calendario ya corrido y lo publica.
      *
@@ -185,13 +210,12 @@ public class ReliefProgramService implements ManageReliefProgramUseCase {
                 .min(Comparator.naturalOrder())
                 .orElse(null);
 
-        int dias = masAntigua == null ? 0
-                : (int) java.time.temporal.ChronoUnit.DAYS.between(masAntigua, hoy);
-        java.math.BigDecimal overduePrincipal = masAntigua == null ? java.math.BigDecimal.ZERO
+        int dias = masAntigua == null ? 0 : (int) ChronoUnit.DAYS.between(masAntigua, hoy);
+        BigDecimal overduePrincipal = masAntigua == null ? BigDecimal.ZERO
                 : calendario.stream()
                         .filter(i -> i.getDueDate().isBefore(hoy))
                         .map(Installment::getPrincipalAmount)
-                        .reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add);
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         account.updateDelinquency(dias);
         accounts.save(account);

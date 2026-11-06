@@ -26,12 +26,17 @@ public class SecurityConfig {
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/actuator/health", "/actuator/info", "/actuator/metrics", "/actuator/prometheus").permitAll()
+                        // Test support (clock shift, job triggers): only exists with fintech.test-support.enabled=true; the gateway never routes /internal/*.
+                        .requestMatchers("/internal/test-support/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/v3/api-docs", "/v3/api-docs.yaml", "/v3/api-docs/**",
                                 "/swagger-ui.html", "/swagger-ui/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/commissions/policies")
                                 .hasAnyRole("COMMERCIAL", "ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/v1/commissions/liquidation-runs")
+                                .hasAnyRole("FINANCE", "ADMIN")
+                        // Where commission money is sent: treasury's decision, not any authenticated user's.
+                        .requestMatchers(HttpMethod.PUT, "/api/v1/commissions/beneficiaries/*/payout-account")
                                 .hasAnyRole("FINANCE", "ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))

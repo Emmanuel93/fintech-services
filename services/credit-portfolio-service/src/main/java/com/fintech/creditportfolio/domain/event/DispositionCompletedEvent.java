@@ -3,6 +3,7 @@ package com.fintech.creditportfolio.domain.event;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * A wallet-initiated disposition finished processing. dispositionType decides how the
@@ -30,7 +31,7 @@ public class DispositionCompletedEvent {
         this.dispositionType = dispositionType;
         this.availableCredit = availableCredit;
         this.balanceVersion  = balanceVersion;
-        this.occurredAt      = Instant.now();
+        this.occurredAt      = BusinessClock.current().now();
     }
 
     public UUID getDispositionId()       { return dispositionId; }

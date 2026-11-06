@@ -93,6 +93,9 @@ springdoc:
   show-actuator: false
 
 fintech:
+  test-support:
+    # Endpoints /internal/test-support/* — solo para pruebas E2E, deshabilitados por default.
+    enabled: ${TEST_SUPPORT_ENABLED:false}
   # Candado de crones: la tabla vive en el esquema del servicio (ver SchedulingLockAutoConfiguration).
   scheduling:
     lock:

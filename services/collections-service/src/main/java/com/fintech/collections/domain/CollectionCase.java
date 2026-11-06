@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Aggregate root — one per creditAccountId currently in delinquency (CC-01: only one
@@ -71,7 +72,7 @@ public class CollectionCase {
         c.currentBucket    = DelinquencyBucket.fromDaysDelinquent(daysDelinquent);
         c.totalDebt        = totalDebt;
         c.strategy         = strategy;
-        c.openedAt         = Instant.now();
+        c.openedAt         = BusinessClock.current().now();
         return c;
     }
 
@@ -107,14 +108,14 @@ public class CollectionCase {
     public void close() {
         if (status.isTerminal()) return; // idempotent
         this.status   = CaseStatus.CLOSED;
-        this.closedAt = Instant.now();
+        this.closedAt = BusinessClock.current().now();
     }
 
     /** CC-05: only after WriteOffExecuted. */
     public void markWrittenOff() {
         guardNotTerminal();
         this.status   = CaseStatus.WRITTEN_OFF;
-        this.closedAt = Instant.now();
+        this.closedAt = BusinessClock.current().now();
     }
 
     private void guardNotTerminal() {

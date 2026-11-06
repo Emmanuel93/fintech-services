@@ -74,3 +74,11 @@ databaseChangeLog:
   - include:
       file: db/changelog/identity/019-seed-treasury-capabilities.sql
       relativeToChangelogFile: false
+
+  - include:
+      file: db/changelog/identity/020-seed-collections-capabilities.sql
+      relativeToChangelogFile: false
+
+  - include:
+      file: db/changelog/identity/021-seed-funding-capability.sql
+      relativeToChangelogFile: false

@@ -56,5 +56,8 @@ springdoc:
     path: /swagger-ui.html
 
 fintech:
+  test-support:
+    # Endpoints /internal/test-support/* — solo para pruebas E2E, deshabilitados por default.
+    enabled: ${TEST_SUPPORT_ENABLED:false}
   payments:
     max-payment-amount: 0

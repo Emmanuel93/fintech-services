@@ -12,4 +12,6 @@
     <include file="db/changelog/wallet/005-add-wallet-balance.sql"        relativeToChangelogFile="false"/>
     <include file="db/changelog/wallet/006-create-wallet-withdrawals.sql" relativeToChangelogFile="false"/>
     <include file="db/changelog/wallet/007-create-wallet-movements.sql"   relativeToChangelogFile="false"/>
+    <include file="db/changelog/wallet/008-disposicion-una-vez.sql"       relativeToChangelogFile="false"/>
+    <include file="db/changelog/wallet/009-estados-de-cartera.sql"        relativeToChangelogFile="false"/>
 </databaseChangeLog>

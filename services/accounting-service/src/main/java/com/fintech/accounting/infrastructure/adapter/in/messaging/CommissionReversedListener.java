@@ -1,5 +1,6 @@
 package com.fintech.accounting.infrastructure.adapter.in.messaging;
 
+import com.fintech.accounting.application.CommissionMoves.Accrual;
 import com.fintech.accounting.application.service.CommissionPostingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,7 +21,10 @@ public class CommissionReversedListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "commissionReversedListenerContainerFactory")
     public void onMessage(CommissionReversedPayload p) {
-        log.debug("commission-reversed commissionId={} amount={}", p.commissionId(), p.amount());
-        commissionPostingService.onCommissionReversed(p.commissionId(), p.creditAccountId(), p.amount(), p.occurredOn());
+        log.debug("commission-reversed commissionId={} reverses={} amount={}", p.commissionId(),
+                p.reversesCommissionId(), p.amount());
+        commissionPostingService.onCommissionReversed(new Accrual(p.commissionId(), p.creditAccountId(),
+                p.beneficiaryPartyId(), p.productType(), p.amount(), p.ivaAmount(), null, p.reversesCommissionId(),
+                p.occurredOn(), p.settlement()));
     }
 }

@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Money leaving the user's own walletBalance — spend/transfer-out, not a debt repayment
@@ -59,7 +60,7 @@ public class WalletWithdrawal {
         w.amount          = amount;
         w.payeeAccount    = payeeAccount;
         w.status          = "PENDING";
-        w.createdAt       = Instant.now();
+        w.createdAt       = BusinessClock.current().now();
         w.updatedAt       = w.createdAt;
         return w;
     }
@@ -67,12 +68,12 @@ public class WalletWithdrawal {
     public void markSent(String externalRef) {
         this.status     = "SENT";
         this.externalRef = externalRef;
-        this.updatedAt  = Instant.now();
+        this.updatedAt  = BusinessClock.current().now();
     }
 
     public void markFailed() {
         this.status    = "FAILED";
-        this.updatedAt = Instant.now();
+        this.updatedAt = BusinessClock.current().now();
     }
 
     public UUID getWithdrawalId()    { return withdrawalId; }

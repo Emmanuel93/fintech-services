@@ -2,6 +2,7 @@ package com.fintech.disbursement.infrastructure.adapter.in.messaging;
 
 import com.fintech.disbursement.application.ProviderOutcome;
 import com.fintech.disbursement.application.port.in.ApplyProviderOutcomeUseCase;
+import com.fintech.shared.time.BusinessClock;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
@@ -55,11 +56,11 @@ public class ProviderOutcomeListener {
             groupId = "${spring.kafka.consumer.group-id}",
             containerFactory = "providerRejectedListenerContainerFactory")
     public void onRejected(ProviderOutcomePayloads.Rejected payload) {
-        log.info("Conector rechazó disbursementId={} code={} retryable={}",
-                payload.disbursementId(), payload.providerCode(), payload.retryable());
+        log.info("Conector rechazó disbursementId={} code={} retryable={} técnico={}",
+                payload.disbursementId(), payload.providerCode(), payload.retryable(), payload.technical());
         applyOutcome.apply(new ProviderOutcome.Rejected(
                 payload.disbursementId(), payload.providerCode(),
-                reason(payload), payload.retryable(), orNow(payload.occurredOn())));
+                reason(payload), payload.retryable(), payload.technical(), orNow(payload.occurredOn())));
     }
 
     @KafkaListener(
@@ -81,6 +82,6 @@ public class ProviderOutcomeListener {
     }
 
     private static Instant orNow(Instant value) {
-        return value != null ? value : Instant.now();
+        return value != null ? value : BusinessClock.current().now();
     }
 }

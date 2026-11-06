@@ -7,6 +7,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Entity
 @Table(name = "scoring_policies", schema = "scoring")
@@ -90,7 +91,7 @@ public class ScoringPolicy {
         p.description       = description;
         p.active            = true;
         p.version           = version;
-        p.createdAt         = Instant.now();
+        p.createdAt         = BusinessClock.current().now();
         NoHistoryPolicy nh  = noHistory == null ? NoHistoryPolicy.DEFAULT : noHistory;
         p.noHistoryScore        = nh.score();
         p.noHistoryRequirements = nh.requirements().stream().map(Enum::name).toArray(String[]::new);

@@ -5,6 +5,7 @@ import com.fintech.closing.domain.CalendarDay;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 @Repository
@@ -21,4 +22,7 @@ class JpaCalendarDayAdapter implements CalendarDayRepository {
 
     @Override
     public CalendarDay save(CalendarDay day) { return jpa.save(day); }
+
+    @Override
+    public List<CalendarDay> findAll(String calendarCode) { return jpa.findByCalendarCodeOrderByDayAsc(calendarCode); }
 }

@@ -1,6 +1,7 @@
 package com.fintech.audit.infrastructure.config;
 
 import com.fintech.audit.infrastructure.adapter.in.api.JwtAuthenticationFilter;
+import org.springframework.http.HttpMethod;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -35,8 +36,11 @@ public class SecurityConfig {
                         // Ingesta de acceso: la escribe el canal por cada empleado que navega, no sólo
                         // los auditores. Sigue exigiendo identidad válida (X-User-Id del gateway); es
                         // escritura append-only, no lectura de la bitácora.
-                        .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/audit/access").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/v1/audit/access").authenticated()
                         // Leer la bitácora sigue restringido a roles de auditoría.
+                        // Reprocesar o descartar un mensaje fallido mueve la operación: administración u operación.
+                        .requestMatchers(HttpMethod.POST, "/api/v1/audit/failures/**").hasAnyRole("ADMIN", "OPS")
+                        .requestMatchers("/api/v1/audit/failures/**").hasAnyRole("AUDITOR", "REGULATOR", "ADMIN", "OPS")
                         .requestMatchers("/api/v1/audit/**").hasAnyRole("AUDITOR", "REGULATOR", "ADMIN")
                         .anyRequest().authenticated())
                 .exceptionHandling(e -> e

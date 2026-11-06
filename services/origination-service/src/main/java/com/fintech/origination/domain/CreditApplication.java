@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Aggregate root for the underwriting subdomain (ADR-001).
@@ -129,7 +130,7 @@ public class CreditApplication {
             throw new IllegalArgumentException("requestedTerm must be positive");
         }
 
-        Instant now = Instant.now();
+        Instant now = BusinessClock.current().now();
         CreditApplication a = new CreditApplication();
         a.applicationId   = UUID.randomUUID();
         a.prospectId      = prospectId;
@@ -221,7 +222,7 @@ public class CreditApplication {
         this.decidedBy       = decidedBy;
         this.rejectionReason = rejectionReason;
         this.decision        = "REJECTED";
-        this.rejectedAt      = Instant.now();
+        this.rejectedAt      = BusinessClock.current().now();
         this.status          = ApplicationStatus.REJECTED;
         touch();
     }
@@ -236,7 +237,7 @@ public class CreditApplication {
         this.riskLevel       = riskLevel;
         this.decidedBy       = "SYSTEM";
         this.decision        = "REJECTED";
-        this.rejectedAt      = Instant.now();
+        this.rejectedAt      = BusinessClock.current().now();
         this.status          = ApplicationStatus.REJECTED;
         touch();
     }
@@ -368,7 +369,7 @@ public class CreditApplication {
             throw new IllegalStateException(
                     "Cannot sign contract in status " + status + " — expected PENDING_SIGNATURE");
         }
-        this.contract.complete(clabeAccount, documentRef, Instant.now(), bnplDeferralDays);
+        this.contract.complete(clabeAccount, documentRef, BusinessClock.current().now(), bnplDeferralDays);
         this.status = ApplicationStatus.CONTRACT_SIGNED;
         touch();
     }
@@ -383,6 +384,26 @@ public class CreditApplication {
         touch();
     }
 
+    /**
+     * DISBURSED → DISBURSEMENT_FAILED: the credit was cancelled because its disbursement could not happen (D63). The
+     * one transition out of a terminal status, as a payment that settled and then came back. From CONTRACT_SIGNED too:
+     * the cancellation can be heard before the activation it follows.
+     *
+     * @return whether it changed (a redelivery finds it failed already)
+     */
+    public boolean markDisbursementFailed() {
+        if (status == ApplicationStatus.DISBURSEMENT_FAILED) {
+            return false;
+        }
+        if (status != ApplicationStatus.DISBURSED && status != ApplicationStatus.CONTRACT_SIGNED) {
+            throw new IllegalStateException(
+                    "Cannot mark a failed disbursement in status " + status + " — expected DISBURSED");
+        }
+        this.status = ApplicationStatus.DISBURSEMENT_FAILED;
+        touch();
+        return true;
+    }
+
     // ── Guard ────────────────────────────────────────────────────────────────
 
     private void guardNotTerminal() {
@@ -393,7 +414,7 @@ public class CreditApplication {
     }
 
     private void touch() {
-        this.updatedAt = Instant.now();
+        this.updatedAt = BusinessClock.current().now();
     }
 
     // ── Getters ──────────────────────────────────────────────────────────────

@@ -22,6 +22,11 @@ public class AgreementExpirationJob {
     @SchedulerLock(name = "collections.agreement-expiration", lockAtMostFor = "PT1H", lockAtLeastFor = "PT30S")
     @Scheduled(cron = "0 15 8 * * *", zone = "${fintech.business.zone:America/Mexico_City}")
     public void run() {
+        execute();
+    }
+
+    /** The job's work without the scheduler lock: what test support runs once per simulated day. */
+    public void execute() {
         log.info("AgreementExpirationJob starting");
         agreementService.expireStaleProposals();
         log.info("AgreementExpirationJob finished");

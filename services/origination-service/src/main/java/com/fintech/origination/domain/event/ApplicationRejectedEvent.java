@@ -2,6 +2,7 @@ package com.fintech.origination.domain.event;
 
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 public class ApplicationRejectedEvent {
 
@@ -17,7 +18,7 @@ public class ApplicationRejectedEvent {
     public ApplicationRejectedEvent(UUID applicationId, UUID prospectId, String productType,
                                      String approvalFlow, String decidedBy, String rejectionReason) {
         this.eventId         = UUID.randomUUID().toString();
-        this.occurredOn      = Instant.now();
+        this.occurredOn      = BusinessClock.current().now();
         this.applicationId   = applicationId;
         this.prospectId      = prospectId;
         this.productType     = productType;

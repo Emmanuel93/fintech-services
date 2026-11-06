@@ -9,6 +9,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Versioned rate matrix for a productType — one ACTIVE per productType (PP-01), same pattern as
@@ -41,7 +42,35 @@ public class ProvisionPolicy {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
+    /**
+     * The ECL floor of each stage: the 12-month ECL in Stage 1, the lifetime ECL in Stages 2 and 3. Null in the
+     * policies written before stages counted (the band alone applies then).
+     */
+    @Column(name = "stage1_rate")
+    private BigDecimal stage1Rate;
+
+    @Column(name = "stage2_rate")
+    private BigDecimal stage2Rate;
+
+    @Column(name = "stage3_rate")
+    private BigDecimal stage3Rate;
+
+    /** Credit conversion factor: the share of the undrawn line expected to be drawn before a default. */
+    @Column(name = "undrawn_ccf", nullable = false)
+    private BigDecimal undrawnCcf = BigDecimal.ZERO;
+
     protected ProvisionPolicy() {}
+
+    /** A policy with stage floors and a credit conversion factor besides the band matrix. */
+    public static ProvisionPolicy create(String productType, int version, Map<DelinquencyBucket, BigDecimal> rates,
+                                         Map<Ifrs9Stage, BigDecimal> stageFloors, BigDecimal undrawnCcf) {
+        ProvisionPolicy p = create(productType, version, rates);
+        p.stage1Rate = stageFloors.get(Ifrs9Stage.STAGE_1);
+        p.stage2Rate = stageFloors.get(Ifrs9Stage.STAGE_2);
+        p.stage3Rate = stageFloors.get(Ifrs9Stage.STAGE_3);
+        p.undrawnCcf = undrawnCcf != null ? undrawnCcf : BigDecimal.ZERO;
+        return p;
+    }
 
     /**
      * Creates an ACTIVE policy. PP-02: every bucket must have a rate — missing any of the 7 is
@@ -59,7 +88,7 @@ public class ProvisionPolicy {
         p.productType = productType;
         p.version     = version;
         p.status      = PolicyStatus.ACTIVE;
-        p.createdAt   = Instant.now();
+        p.createdAt   = BusinessClock.current().now();
         rates.forEach((bucket, rate) -> {
             ProvisionRateBand band = ProvisionRateBand.of(bucket, rate);
             band.assignTo(p);
@@ -67,6 +96,26 @@ public class ProvisionPolicy {
         });
         return p;
     }
+
+    /**
+     * The rate for an account in this stage and band: the higher of the stage's ECL floor and the band's rate. A
+     * forborne account at 0 DPD is Stage 2 and reserves the lifetime floor, not the performing band; an account
+     * still on probation out of Stage 3 keeps the Stage 3 floor.
+     */
+    public BigDecimal rateFor(Ifrs9Stage stage, DelinquencyBucket bucket) {
+        BigDecimal banda = rateFor(bucket);
+        BigDecimal piso = switch (stage) {
+            case STAGE_1 -> stage1Rate;
+            case STAGE_2 -> stage2Rate;
+            case STAGE_3 -> stage3Rate;
+        };
+        return piso == null ? banda : piso.max(banda);
+    }
+
+    public BigDecimal getUndrawnCcf()      { return undrawnCcf != null ? undrawnCcf : BigDecimal.ZERO; }
+    public BigDecimal getStage1Rate()      { return stage1Rate; }
+    public BigDecimal getStage2Rate()      { return stage2Rate; }
+    public BigDecimal getStage3Rate()      { return stage3Rate; }
 
     /** RC-02 input: the rate to apply for a bucket. PP-02: missing band fails, never defaults. */
     public BigDecimal rateFor(DelinquencyBucket bucket) {

@@ -170,3 +170,38 @@ databaseChangeLog:
             path: db/changelog/creditproduct/020-kyc-por-producto.sql
             relativeToChangelogFile: false
             splitStatements: false
+
+  - changeSet:
+      id: 021-ciclo-de-facturacion
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/021-ciclo-de-facturacion.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 022-interes-por-periodo
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/022-interes-por-periodo.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+
+  - changeSet:
+      id: 023-distribuidora-quincenal
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/023-distribuidora-quincenal.sql
+            relativeToChangelogFile: false
+            splitStatements: true
+  - changeSet:
+      id: 024-comision-de-distribuidora
+      author: fintech
+      changes:
+        - sqlFile:
+            path: db/changelog/creditproduct/024-comision-de-distribuidora.sql
+            relativeToChangelogFile: false
+            splitStatements: true

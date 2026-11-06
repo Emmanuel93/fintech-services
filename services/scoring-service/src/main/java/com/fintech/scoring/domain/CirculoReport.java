@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 @Entity
 @Table(name = "circulo_reports", schema = "scoring")
@@ -128,7 +129,7 @@ public class CirculoReport {
             r.reportId   = reportId;
             r.prefetchId = prefetchId;
             r.prospectId = prospectId;
-            r.queriedAt  = Instant.now();
+            r.queriedAt  = BusinessClock.current().now();
         }
 
         public Builder status(CirculoReportStatus v)            { r.status = v; return this; }

@@ -137,6 +137,23 @@ public class CreditProductDefinition {
     @Column(nullable = false, columnDefinition = "jsonb")
     private Capabilities capabilities;
 
+    /**
+     * How accounts of this product cut and pay: cutoff rule, days to pay, grace and minimum payment.
+     * Published on activation and pinned to each account by the portfolio; closing derives the
+     * cutoff calendar from it, charges takes the grace period. Defaults per product type.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "billing_cycle", nullable = false, columnDefinition = "jsonb")
+    private BillingCycle billingCycle;
+
+    /**
+     * What a distributor earns on what her clients pay and how it is settled (a distributor line); null for every
+     * other product. Published on activation: the portfolio schedules and nets it, the statement prints it.
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "distributor_commission", columnDefinition = "jsonb")
+    private DistributorCommission distributorCommission;
+
     // ── Timestamps ────────────────────────────────────────────────────────────
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -239,6 +256,7 @@ public class CreditProductDefinition {
         d.openingFeeRate           = openingFeeRate;
         d.prepaymentFeeRate        = prepaymentFeeRate;
         d.capabilities             = capabilities != null ? capabilities : Capabilities.defaultFor(productType);
+        d.billingCycle             = BillingCycle.defaultFor(productType);
         d.createdAt                = Instant.now();
         d.eligiblePartyTypes       = new LinkedHashSet<>(eligiblePartyTypes);
         d.requiredDocuments        = new LinkedHashSet<>(requiredDocuments);
@@ -345,6 +363,30 @@ public class CreditProductDefinition {
     public BigDecimal getOpeningFeeRate()               { return openingFeeRate; }
     public BigDecimal getPrepaymentFeeRate()            { return prepaymentFeeRate; }
     public Capabilities getCapabilities()               { return capabilities; }
+    public BillingCycle getBillingCycle()               { return billingCycle; }
+
+    /** Declares the billing cycle explicitly (a DRAFT only); null keeps the product type's default. */
+    public void defineBillingCycle(BillingCycle cycle) {
+        if (cycle == null) return;
+        cycle.inconsistency().ifPresent(reason -> {
+            throw new IllegalArgumentException("billingCycle: " + reason);
+        });
+        this.billingCycle = cycle;
+    }
+
+    public DistributorCommission getDistributorCommission() { return distributorCommission; }
+
+    /** The distributor's commission terms; only a distributor line has them. */
+    public void defineDistributorCommission(DistributorCommission commission) {
+        if (commission == null) return;
+        if (productType != ProductType.DISTRIBUTOR_LINE) {
+            throw new IllegalArgumentException("distributorCommission: only a DISTRIBUTOR_LINE pays a distributor");
+        }
+        commission.inconsistency().ifPresent(reason -> {
+            throw new IllegalArgumentException("distributorCommission: " + reason);
+        });
+        this.distributorCommission = commission;
+    }
     public Instant getCreatedAt()                       { return createdAt; }
     public Instant getActivatedAt()                     { return activatedAt; }
     public Instant getRetiredAt()                       { return retiredAt; }

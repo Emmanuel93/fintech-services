@@ -3,6 +3,7 @@ package com.fintech.origination.domain.event;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Immutable snapshot emitted when the contract is signed.
@@ -41,6 +42,8 @@ public class CreditProductCreationRequestedEvent {
     private final String obligorTaxId;
     /** Días de BNPL que el cliente pidió al firmar; nulo si no pidió ninguno. */
     private final Integer bnplDeferralDays;
+    /** The CAT of the offer the client signed (annual, %, without IVA): the statement shows it (DT-ENR 36-IX, 37). */
+    private final BigDecimal cat;
 
     public CreditProductCreationRequestedEvent(
             UUID applicationId,
@@ -62,9 +65,10 @@ public class CreditProductCreationRequestedEvent {
             String promoterCode,
             String obligorName,
             String obligorTaxId,
-            Integer bnplDeferralDays) {
+            Integer bnplDeferralDays,
+            BigDecimal cat) {
         this.eventId        = UUID.randomUUID().toString();
-        this.occurredOn     = Instant.now();
+        this.occurredOn     = BusinessClock.current().now();
         this.applicationId  = applicationId;
         this.contractNumber = contractNumber;
         this.obligorPartyId = obligorPartyId;
@@ -85,6 +89,7 @@ public class CreditProductCreationRequestedEvent {
         this.obligorName    = obligorName;
         this.obligorTaxId   = obligorTaxId;
         this.bnplDeferralDays = bnplDeferralDays;
+        this.cat = cat;
     }
 
     public String getEventId()             { return eventId; }
@@ -109,4 +114,5 @@ public class CreditProductCreationRequestedEvent {
     public String getObligorName()         { return obligorName; }
     public String getObligorTaxId()        { return obligorTaxId; }
     public Integer getBnplDeferralDays()  { return bnplDeferralDays; }
+    public BigDecimal getCat()             { return cat; }
 }

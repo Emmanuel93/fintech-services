@@ -24,6 +24,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Despacha lo pendiente al conector del proveedor.
@@ -58,6 +59,8 @@ public class DisbursementDispatchService implements DispatchDisbursementsUseCase
     private final DisbursementProperties properties;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
+    /** Cycles running now, from the claim to the last hand-off (see {@link #dispatching()}). */
+    private final AtomicInteger cycles = new AtomicInteger();
 
     public DisbursementDispatchService(DisbursementOrderRepository orders,
                                        DisbursementEventRepository events,
@@ -82,25 +85,35 @@ public class DisbursementDispatchService implements DispatchDisbursementsUseCase
 
     @Override
     public int dispatchDue() {
-        List<Claim> claims = transactionTemplate.execute(status -> claimBatch());
-        if (claims == null || claims.isEmpty()) {
-            return 0;
-        }
-
-        int dispatched = 0;
-        for (Claim claim : claims) {
-            try {
-                providerDispatch.dispatch(claim.order(), claim.route());
-                dispatched++;
-            } catch (RuntimeException e) {
-                log.error("No se pudo despachar disbursementId={} provider={}: {}",
-                        claim.order().getDisbursementId(), claim.route().provider(), e.getMessage());
-                UUID id = claim.order().getDisbursementId();
-                String detail = e.getMessage();
-                transactionTemplate.executeWithoutResult(status -> handleDispatchFailure(id, detail));
+        cycles.incrementAndGet();
+        try {
+            List<Claim> claims = transactionTemplate.execute(status -> claimBatch());
+            if (claims == null || claims.isEmpty()) {
+                return 0;
             }
+
+            int dispatched = 0;
+            for (Claim claim : claims) {
+                try {
+                    providerDispatch.dispatch(claim.order(), claim.route());
+                    dispatched++;
+                } catch (RuntimeException e) {
+                    log.error("No se pudo despachar disbursementId={} provider={}: {}",
+                            claim.order().getDisbursementId(), claim.route().provider(), e.getMessage());
+                    UUID id = claim.order().getDisbursementId();
+                    String detail = e.getMessage();
+                    transactionTemplate.executeWithoutResult(status -> handleDispatchFailure(id, detail));
+                }
+            }
+            return dispatched;
+        } finally {
+            cycles.decrementAndGet();
         }
-        return dispatched;
+    }
+
+    @Override
+    public boolean dispatching() {
+        return cycles.get() > 0;
     }
 
     /** Transacción corta: reclama el lote y lo deja marcado {@code DISPATCHED} en base. */

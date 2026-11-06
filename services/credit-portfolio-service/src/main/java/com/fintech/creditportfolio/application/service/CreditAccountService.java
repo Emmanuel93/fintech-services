@@ -1,5 +1,13 @@
 package com.fintech.creditportfolio.application.service;
 
+import com.fintech.creditportfolio.domain.config.SemiMonthlyCalendar;
+import com.fintech.creditportfolio.domain.config.BillingCycle;
+import java.util.Map;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
+import com.fintech.creditportfolio.application.port.out.PartyVerificationRepository;
+import com.fintech.creditportfolio.application.port.out.BusinessCalendarRepository;
+import com.fintech.creditportfolio.application.port.out.PaymentReferenceSequence;
 import com.fintech.creditportfolio.application.CreateCreditAccountCommand;
 import com.fintech.creditportfolio.application.ProcessAgreementExecutedCommand;
 import com.fintech.creditportfolio.application.ProcessDispositionCommand;
@@ -7,7 +15,6 @@ import com.fintech.creditportfolio.application.port.in.ActivateCreditAccountUseC
 import com.fintech.creditportfolio.application.port.in.FindCreditAccountUseCase;
 import com.fintech.creditportfolio.application.port.in.ProcessAgreementExecutedUseCase;
 import com.fintech.creditportfolio.application.port.in.ProcessDispositionUseCase;
-import com.fintech.creditportfolio.application.port.in.SettleDisbursementUseCase;
 import com.fintech.creditportfolio.application.port.out.BalanceEventRepository;
 import com.fintech.creditportfolio.application.port.out.CreditAccountRepository;
 import com.fintech.creditportfolio.application.port.out.CreditPortfolioEventPublisher;
@@ -15,20 +22,26 @@ import com.fintech.creditportfolio.application.port.out.DispositionRepository;
 import com.fintech.creditportfolio.application.port.out.InstallmentRepository;
 import com.fintech.creditportfolio.domain.BalanceEvent;
 import com.fintech.creditportfolio.domain.CreditAccount;
+import com.fintech.creditportfolio.domain.PaymentReference;
 import com.fintech.creditportfolio.domain.CreditAccountNotFoundException;
 import com.fintech.creditportfolio.domain.CreditAccountStatus;
 import com.fintech.creditportfolio.domain.Disposition;
 import com.fintech.creditportfolio.domain.DispositionStatus;
 import com.fintech.creditportfolio.domain.DispositionType;
 import com.fintech.creditportfolio.domain.PartyVerification;
+import com.fintech.creditportfolio.domain.DistributorCommissionSchedule;
 import com.fintech.creditportfolio.domain.Installment;
+import com.fintech.creditportfolio.domain.PlacementGate;
+import com.fintech.creditportfolio.domain.StatementCoverage;
+import java.util.ArrayList;
+import com.fintech.creditportfolio.domain.event.AccountRestructuredEvent;
+import com.fintech.creditportfolio.domain.InstallmentStatus;
 import com.fintech.creditportfolio.domain.config.Capabilities;
 import com.fintech.creditportfolio.domain.config.PaymentOptions;
 import com.fintech.creditportfolio.domain.config.ProductConfigVersion;
 import com.fintech.creditportfolio.domain.event.BalanceUpdatedEvent;
 import com.fintech.creditportfolio.domain.event.CreditAccountActivatedEvent;
 import com.fintech.creditportfolio.domain.event.DispositionAuthorizedEvent;
-import com.fintech.creditportfolio.domain.event.DispositionCompletedEvent;
 import com.fintech.creditportfolio.domain.event.DispositionRejectedEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,7 +51,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import com.fintech.shared.time.BusinessClock;
 
 /**
@@ -48,7 +63,7 @@ import com.fintech.shared.time.BusinessClock;
 @Service
 @Transactional
 public class CreditAccountService implements ActivateCreditAccountUseCase, FindCreditAccountUseCase,
-        ProcessDispositionUseCase, ProcessAgreementExecutedUseCase, SettleDisbursementUseCase {
+        ProcessDispositionUseCase, ProcessAgreementExecutedUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(CreditAccountService.class);
 
@@ -58,6 +73,8 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
     private final BalanceEventRepository balanceEventRepository;
     private final com.fintech.creditportfolio.application.port.out.PartyVerificationRepository partyVerificationRepository;
     private final AmortizationEngine amortizationEngine;
+    private final BankingCalendar bankingCalendar;
+    private final PaymentReferenceSequence paymentReferences;
 
     /** IVA nacional, para los créditos cuya sucursal todavía no se resuelve al originar. */
     @org.springframework.beans.factory.annotation.Value("${fintech.credit-portfolio.vat-rate:0.16}")
@@ -74,6 +91,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
      */
     private final int defaultDispositionTerm;
 
+    /** Without the published calendar (tests): only weekends are non-business days. */
     public CreditAccountService(CreditAccountRepository accountRepository,
                                  DispositionRepository dispositionRepository,
                                  InstallmentRepository installmentRepository,
@@ -81,10 +99,37 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                                  AmortizationEngine amortizationEngine,
                                  CreditPortfolioEventPublisher eventPublisher,
                                  ProductConfigResolver configResolver,
-                                 com.fintech.creditportfolio.application.port.out.PartyVerificationRepository partyVerificationRepository,
-                                 @org.springframework.beans.factory.annotation.Value(
-                                     "${fintech.credit-portfolio.default-disposition-term:12}")
+                                 PartyVerificationRepository partyVerificationRepository,
                                  int defaultDispositionTerm) {
+        this(accountRepository, dispositionRepository, installmentRepository, balanceEventRepository,
+                amortizationEngine, eventPublisher, configResolver, partyVerificationRepository,
+                new BankingCalendar(new BusinessCalendarRepository() {
+                    @Override public void upsert(String c, LocalDate d, boolean b, String l) { }
+                    @Override public Map<LocalDate, Boolean> exceptions(String c) { return Map.of(); }
+                }), new InMemoryPaymentReferences(), defaultDispositionTerm);
+    }
+
+    /** For tests without a database: consecutive references from the first of the range. */
+    static final class InMemoryPaymentReferences implements PaymentReferenceSequence {
+        private final AtomicLong next = new AtomicLong(PaymentReference.MIN_BODY);
+        @Override public long nextBody() { return next.getAndIncrement(); }
+    }
+
+    @Autowired
+    public CreditAccountService(CreditAccountRepository accountRepository,
+                                 DispositionRepository dispositionRepository,
+                                 InstallmentRepository installmentRepository,
+                                 BalanceEventRepository balanceEventRepository,
+                                 AmortizationEngine amortizationEngine,
+                                 CreditPortfolioEventPublisher eventPublisher,
+                                 ProductConfigResolver configResolver,
+                                 PartyVerificationRepository partyVerificationRepository,
+                                 BankingCalendar bankingCalendar,
+                                 PaymentReferenceSequence paymentReferences,
+                                 @Value("${fintech.credit-portfolio.default-disposition-term:12}")
+                                 int defaultDispositionTerm) {
+        this.bankingCalendar = bankingCalendar;
+        this.paymentReferences = paymentReferences;
         this.defaultDispositionTerm = defaultDispositionTerm;
         this.accountRepository      = accountRepository;
         this.dispositionRepository  = dispositionRepository;
@@ -94,6 +139,16 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         this.eventPublisher         = eventPublisher;
         this.configResolver         = configResolver;
         this.partyVerificationRepository = partyVerificationRepository;
+    }
+
+    /**
+     * The account, locked for this transaction and read after the lock. Every writer of an account goes through
+     * here or through the balance applier: a writer that read it before another committed and saved it after
+     * would put back the balances it read. That is how an opening fee reached the ledger and not the balances on
+     * the clean run of 2026-11-02.
+     */
+    private Optional<CreditAccount> lockedAccount(UUID creditAccountId) {
+        return accountRepository.lockAndLoad(creditAccountId).or(() -> accountRepository.findById(creditAccountId));
     }
 
     /**
@@ -133,6 +188,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         // equivocada y corregirlo después obligaría a regenerarlo, que es reescribir lo que el
         // cliente firmó.
         account.sealVatRate(cmd.vatRate() != null ? cmd.vatRate() : ivaPorDefecto);
+        account.sealCat(cmd.cat());
 
         accountRepository.save(account);
         log.info("CreditAccount created accountId={} contractId={} status=PENDING_ACTIVATION vatRate={}",
@@ -157,6 +213,8 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                     config.getPaymentFrequency(),
                     AmortizationEngine.firstDueDate(arranqueBnpl, config.getPaymentFrequency()),
                     account.getVatRate());
+            // Due on business days: one that falls on a weekend or a bank holiday is due the next business day.
+            bankingCalendar.followBusinessDays(schedule);
             installmentRepository.saveAll(schedule);
             log.info("AmortizationSchedule generated scheduleId={} method={} freq={} installments={}",
                     scheduleId, config.getAmortizationType(), config.getPaymentFrequency(), schedule.size());
@@ -174,6 +232,9 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
             Disposition disposition = Disposition.create(
                     account.getCreditAccountId(), resolveDispositionType(caps), disbursementAmount, null);
             disposition.markProcessing();
+            // Kept with the disposition: a later attempt of the payment sends this same instruction (D63).
+            disposition.recordPayee(account.getBeneficiaryName(), account.getClabeAccount(), "40",
+                    account.getBeneficiaryTaxId(), "DISPOSICION DE CREDITO");
             dispositionRepository.save(disposition);
 
             instruction = new CreditAccountActivatedEvent.DisbursementInstruction(
@@ -212,8 +273,20 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         // reparable por esa reconciliación. Sellarla de verdad en el alta exige resolver la
         // sucursal antes de publicar, y eso es trabajo aparte.
         account.sealOriginUnit(cmd.originUnitCode());
+        // The loan's payment reference: the numeric reference its owner types in a SPEI transfer to pay it.
+        account.assignPaymentReference(PaymentReference.of(paymentReferences.nextBody()));
         account.activate(disbursementAmount);
         accountRepository.save(account);
+
+        // The debt is born here, so the ledger starts here too. Until 2026-11-02 the activation set the
+        // principal without a balance_events row: every loan's ledger began after the money was lent and
+        // the sum of its entries could never equal its balances (100 loans, $6.38 M). The subledger has
+        // to carry every balance change, or nothing downstream (statements, accounting) can reconcile.
+        if (disbursementAmount.signum() > 0) {
+            balanceEventRepository.save(BalanceEvent.record(account.getCreditAccountId(),
+                    "activation:" + account.getCreditAccountId(), "ACTIVATION_DISBURSEMENT", disbursementAmount,
+                    account, BusinessClock.current().today()));
+        }
 
         // 6. Publish CreditAccountActivated (con la instrucción de desembolso si hay dinero que mover)
         eventPublisher.publishCreditAccountActivated(new CreditAccountActivatedEvent(
@@ -237,7 +310,9 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                 config.getPaymentFrequency(),
                 account.getAssignedTerm(),
                 // BNPL: charges no devenga antes de esta fecha. Nulo cuando el producto no lo usa.
-                arranqueBnpl.isAfter(BusinessClock.current().today()) ? arranqueBnpl : null));
+                arranqueBnpl.isAfter(BusinessClock.current().today()) ? arranqueBnpl : null,
+                // The product's billing cycle, pinned to the account the day it opens.
+                config.getBillingCycle()).withPaymentReference(account.getPaymentReference()));
 
         log.info("CreditAccount activated and event published accountId={}", account.getCreditAccountId());
         return account;
@@ -384,10 +459,10 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
             return;
         }
 
-        CreditAccount account = accountRepository.findById(cmd.creditAccountId())
+        CreditAccount account = lockedAccount(cmd.creditAccountId())
                 .orElseThrow(() -> new CreditAccountNotFoundException(cmd.creditAccountId().toString()));
 
-        String rejectionReason = validateDisposition(account, cmd.amount());
+        String rejectionReason = validateDisposition(account, cmd.amount(), cmd.termPeriods());
         if (rejectionReason == null) {
             rejectionReason = validateBeneficiary(account, cmd);
         }
@@ -401,7 +476,7 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
             log.warn("Disposition rejected creditAccountId={} amount={} reason={}",
                     cmd.creditAccountId(), cmd.amount(), rejectionReason);
             eventPublisher.publishDispositionRejected(new DispositionRejectedEvent(
-                    cmd.sourceEventId(), cmd.creditAccountId(), cmd.amount(), rejectionReason));
+                    cmd.sourceEventId(), cmd.creditAccountId(), account.getObligorPartyId(), cmd.amount(), rejectionReason));
             return;
         }
 
@@ -420,6 +495,11 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         // veredicto era CLEARED contra la lista del día 3» en vez de tener que reconstruirlo.
         recordAmlSnapshot(disposition, aml);
 
+        // Where the money goes, decided once and kept with the disposition: a later attempt sends the same (D63).
+        Destino destino = destinationOf(account, cmd, type);
+        disposition.recordPayee(destino.beneficiaryName(), destino.beneficiaryAccount(),
+                destino.beneficiaryAccountType(), destino.beneficiaryTaxId(), "DISPOSICION DE CREDITO");
+
         dispositionRepository.save(disposition);
 
         // BK-11 · Aquí NO sale dinero. La disposición queda PROCESSING y se publica el hecho:
@@ -429,7 +509,6 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         // activo crecía y el banco bajaba contra nada.
         //
         // Se completa en `onDisbursementCompleted`, cuando hay evidencia del proveedor.
-        Destino destino = destinationOf(account, cmd, type);
         eventPublisher.publishDispositionAuthorized(new DispositionAuthorizedEvent(
                 disposition.getDispositionId(), account.getCreditAccountId(), null,
                 // La unidad de origen es la clave con la que el orquestador resuelve la empresa.
@@ -477,118 +556,6 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
 
         log.info("Disposición AUTORIZADA (pendiente de pago) dispositionId={} creditAccountId={} type={} amount={}",
                 disposition.getDispositionId(), account.getCreditAccountId(), type, cmd.amount());
-    }
-
-    /**
-     * disbursement.completed — el pago salió y hay evidencia. La disposición pasa de PROCESSING a
-     * COMPLETED con el externalRef real y se publica disposition-completed: el mismo hecho que wallet
-     * y notifications ya consumen, ahora honesto (antes se publicaba con "SPEI-STUB-…" antes de que
-     * saliera un peso, §8.5). Idempotente: un evento repetido sobre una disposición ya terminal se ignora.
-     */
-    @Override
-    public void onDisbursementCompleted(UUID dispositionId, String externalRef) {
-        Disposition disposition = dispositionRepository.findById(dispositionId).orElse(null);
-        if (disposition == null) {
-            log.warn("disbursement.completed sin disposición conocida dispositionId={} — ignorado", dispositionId);
-            return;
-        }
-        if (disposition.getStatus() != DispositionStatus.PROCESSING) {
-            log.info("disbursement.completed sobre disposición no-PROCESSING dispositionId={} status={} — idempotente",
-                    dispositionId, disposition.getStatus());
-            return;
-        }
-
-        disposition.complete(externalRef);
-        dispositionRepository.save(disposition);
-
-        CreditAccount account = accountRepository.findById(disposition.getCreditAccountId()).orElse(null);
-        if (account == null) {
-            log.warn("disbursement.completed: cuenta ausente creditAccountId={} — disposición completada sin evento",
-                    disposition.getCreditAccountId());
-            return;
-        }
-
-        eventPublisher.publishDispositionCompleted(new DispositionCompletedEvent(
-                disposition.getDispositionId(), account.getCreditAccountId(), account.getObligorPartyId(),
-                disposition.getAmount(), disposition.getDispositionType().name(),
-                account.getAvailableCredit(), account.getBalanceVersion()));
-
-        log.info("Disposition COMPLETED por disbursement dispositionId={} externalRef={}",
-                dispositionId, externalRef);
-    }
-
-    /**
-     * disbursement.failed — el dinero no va a llegar. La disposición pasa a FAILED. La reversa del
-     * principal contabilizado en la activación (la deuda nació al activar) queda como seguimiento:
-     * exige una decisión de dominio sobre el estado de la cuenta y no se improvisa aquí.
-     */
-    @Override
-    public void onDisbursementFailed(UUID dispositionId, String failureCode, String failureReason) {
-        Disposition disposition = dispositionRepository.findById(dispositionId).orElse(null);
-        if (disposition == null) {
-            log.warn("disbursement.failed sin disposición conocida dispositionId={} — ignorado", dispositionId);
-            return;
-        }
-        if (disposition.getStatus() != DispositionStatus.PROCESSING) {
-            log.info("disbursement.failed sobre disposición no-PROCESSING dispositionId={} status={} — idempotente",
-                    dispositionId, disposition.getStatus());
-            return;
-        }
-        disposition.fail();
-        dispositionRepository.save(disposition);
-        // El saldo subió al autorizar. Si el pago no salió, tiene que bajar: sin esto el cliente
-        // queda debiendo un dinero que nunca recibió.
-        undoBalance(disposition, "DISPOSITION_FAILED");
-        log.warn("Disposición FALLIDA y saldo revertido dispositionId={} code={} reason={}",
-                dispositionId, failureCode, failureReason);
-    }
-
-    /**
-     * disbursement.returned — el banco receptor devolvió el dinero.
-     *
-     * <p>Distinto de un fallo: el pago salió, llegó y volvió. A diferencia del fallo, aquí la
-     * disposición pudo estar ya COMPLETED, así que también se deshace desde ese estado.
-     */
-    @Override
-    public void onDisbursementReturned(UUID dispositionId, String reason) {
-        Disposition disposition = dispositionRepository.findById(dispositionId).orElse(null);
-        if (disposition == null) {
-            log.warn("disbursement.returned sin disposición conocida dispositionId={} — ignorado", dispositionId);
-            return;
-        }
-        if (disposition.getStatus() == DispositionStatus.REVERSED) {
-            log.info("disbursement.returned repetido dispositionId={} — idempotente", dispositionId);
-            return;
-        }
-
-        disposition.reverse();
-        dispositionRepository.save(disposition);
-        undoBalance(disposition, "DISPOSITION_RETURNED");
-        log.warn("Disposición DEVUELTA por el banco receptor y saldo revertido dispositionId={} motivo={}",
-                dispositionId, reason);
-    }
-
-    /** Devuelve el saldo y el cupo, y publica el hecho para que el resto se entere. */
-    private void undoBalance(Disposition disposition, String motivo) {
-        CreditAccount account = accountRepository.findById(disposition.getCreditAccountId()).orElse(null);
-        if (account == null) {
-            log.error("No se pudo revertir el saldo: cuenta ausente creditAccountId={}",
-                    disposition.getCreditAccountId());
-            return;
-        }
-        account.revertDisposition(disposition.getAmount());
-        accountRepository.save(account);
-
-        balanceEventRepository.save(BalanceEvent.record(account.getCreditAccountId(),
-                disposition.getDispositionId().toString(), motivo,
-                disposition.getAmount().negate(), account));
-
-        eventPublisher.publishBalanceUpdated(new BalanceUpdatedEvent(
-                account.getCreditAccountId(), account.getObligorPartyId(),
-                account.getPrincipalBalance(), account.getAccruedInterestBalance(),
-                account.getPenaltyBalance(), account.getAvailableCredit(), account.getTotalDebt(),
-                motivo, account.getStatus().name(), account.getBalanceVersion(),
-                account.getOriginUnitCode()));
     }
 
     /** CP-04 (terminal/suspended), CP-05 (single disposition for non-revolving), CP-03 (available credit). */
@@ -647,12 +614,18 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
         // distribuidora se cobra por quincenas y una revolvente de nómina no tiene por qué usar la
         // misma: con "MONTHLY" fijo, un plazo de 24 quincenas producía 24 cuotas mensuales —el
         // doble de tiempo— y los vencimientos caían donde ningún contrato los puso.
-        String cadencia = configResolver
-                .resolveForAccount(account.getProductCode(), account.getProductVersion())
+        Optional<ProductConfigVersion> config = configResolver
+                .resolveForAccount(account.getProductCode(), account.getProductVersion());
+        String cadencia = config
                 .map(ProductConfigVersion::getPaymentFrequency)
                 .filter(f -> f != null && !f.isBlank())
                 .orElse("MONTHLY");
+        // The fortnight's two cutoff days (the distributor line: the 6th and the 21st): each installment falls on one.
+        SemiMonthlyCalendar quincena = BillingCycle.semiMonthlyOf(config.map(ProductConfigVersion::getBillingCycle).orElse(null));
 
+        // The plan starts the day the placement is made. On the fortnight its first installment is the first cutoff
+        // after that day, and that first period bears the share of the fortnight the money was held.
+        LocalDate hoy = BusinessClock.current().today();
         List<Installment> calendario = amortizationEngine.generate(
                 disposition.getDispositionId(),          // el calendario cuelga de la disposición
                 disposition.getAmount(),
@@ -660,8 +633,14 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
                 plazo,
                 account.getAmortizationType() != null ? account.getAmortizationType() : "FRENCH",
                 cadencia,
-                AmortizationEngine.firstDueDate(BusinessClock.current().today(), cadencia),
-                account.getVatRate());
+                hoy,
+                AmortizationEngine.firstDueDate(hoy, cadencia, quincena),
+                account.getVatRate(),
+                quincena);
+        // A distributor's placement carries her commission on each installment: her flat share of what the client
+        // pays, capped at the plan's interest so it never comes out of the capital.
+        config.map(ProductConfigVersion::getDistributorCommission)
+                .ifPresent(terms -> DistributorCommissionSchedule.plan(calendario, terms));
         installmentRepository.saveAll(calendario);
 
         log.info("Calendario de disposición generado dispositionId={} creditAccountId={} plazo={} cadencia={} cuotas={}",
@@ -669,17 +648,45 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
     }
 
     private String validateDisposition(CreditAccount account, BigDecimal amount) {
+        return validateDisposition(account, amount, null);
+    }
+
+    /**
+     * CP-04 (terminal/suspended), CP-05 (single disposition for non-revolving), CP-03 (available credit) and, on a
+     * line that pays a distributor, the product's ranges and the arrears gate: a placement fits the product's amounts
+     * and terms, and the line does not place while a statement of hers is unpaid past its due date (from the first
+     * day late until she pays what is overdue, the same day).
+     */
+    private String validateDisposition(CreditAccount account, BigDecimal amount, Integer termPeriods) {
         if (account.getStatus() == CreditAccountStatus.SUSPENDED) {
             return "ACCOUNT_SUSPENDED";
+        }
+        if (account.getStatus() == CreditAccountStatus.ACTIVE && account.isRevolving()) {
+            Optional<ProductConfigVersion> config = configResolver == null ? Optional.empty()
+                    : configResolver.resolveForAccount(account.getProductCode(), account.getProductVersion());
+            if (config.map(ProductConfigVersion::getDistributorCommission).isPresent()) {
+                String outOfRange = config.get().placementOutOfRange(amount, termPeriods);
+                if (outOfRange != null) return outOfRange;
+                // Blocked while a statement is unpaid past due; closed for good once collections forgave part of her debt.
+                List<BalanceEvent> ledger = balanceEventRepository.paymentsOf(account.getCreditAccountId());
+                PlacementGate gate = PlacementGate.evaluate(
+                        StatementCoverage.obligationsFrom(installmentRepository.findByScheduleIdOrdered(account.getCreditAccountId())),
+                        StatementCoverage.paymentsFrom(ledger), BusinessClock.current().today(), StatementCoverage.quitaOn(ledger));
+                if (gate.blocked()) return gate.reason();
+            }
         }
         if (account.getStatus() != CreditAccountStatus.ACTIVE) {
             return "ACCOUNT_NOT_ACTIVE: status=" + account.getStatus();
         }
         if (!account.isRevolving()) {
+            // D68: in flight counts too. Counting only the completed one let a second disposition through while the
+            // first was being paid (or after it failed): two payouts for one loan.
             boolean alreadyDisposed = dispositionRepository.findByCreditAccountId(account.getCreditAccountId())
-                    .stream().anyMatch(d -> d.getStatus() == DispositionStatus.COMPLETED);
+                    .stream().anyMatch(d -> d.getStatus() == DispositionStatus.COMPLETED
+                            || d.getStatus() == DispositionStatus.PROCESSING
+                            || d.getStatus() == DispositionStatus.PENDING);
             if (alreadyDisposed) {
-                return "SINGLE_DISPOSITION_ONLY: product already has a completed disposition";
+                return "SINGLE_DISPOSITION_ONLY: product already has a disposition paid or in flight";
             }
             return null;
         }
@@ -692,9 +699,9 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
 
     /**
      * collections.agreement-executed. QUITA_PARCIAL reduces debt (penalty→interest→principal,
-     * same hierarchy as a payment but with no cash). RESTRUCTURE only updates the account's own
-     * rate/term — see CreditAccount.applyRestructure for the documented scope limit (no schedule
-     * regeneration, no Charges rate sync).
+     * same hierarchy as a payment but with no cash). RESTRUCTURE changes rate and term, replaces the
+     * unpaid installments of an installment loan with a new plan over the outstanding principal, and
+     * publishes {@code account-restructured} so charges accrues at the agreed rate from that day.
      */
     @Override
     public void process(ProcessAgreementExecutedCommand cmd) {
@@ -703,33 +710,118 @@ public class CreditAccountService implements ActivateCreditAccountUseCase, FindC
             return;
         }
 
-        CreditAccount account = accountRepository.findById(cmd.creditAccountId())
+        CreditAccount account = lockedAccount(cmd.creditAccountId())
                 .orElseThrow(() -> new CreditAccountNotFoundException(cmd.creditAccountId().toString()));
 
         if ("QUITA_PARCIAL".equals(cmd.type())) {
+            // The forgiveness is measured bucket by bucket (IVA, moratorium, interest, principal, as applyForgiveness
+            // allocates it) and travels with its breakdown. Published without it, accounting deduced the split from
+            // its own shadow, which does not keep the IVA apart, and credited principal $234.11 more than the
+            // portfolio forgave (E27, 2 Nov E2E).
+            BigDecimal capAntes = account.getPrincipalBalance();
+            BigDecimal intAntes = account.getAccruedInterestBalance();
+            BigDecimal morAntes = account.getPenaltyBalance();
+            BigDecimal ivaAntes = account.getIvaBalance();
             account.applyForgiveness(cmd.forgivenAmount());
             accountRepository.save(account);
+            BigDecimal capDelta = account.getPrincipalBalance().subtract(capAntes);
+            BigDecimal intDelta = account.getAccruedInterestBalance().subtract(intAntes);
+            BigDecimal morDelta = account.getPenaltyBalance().subtract(morAntes);
+            BigDecimal ivaDelta = account.getIvaBalance().subtract(ivaAntes);
+            BigDecimal medido = capDelta.add(intDelta).add(morDelta).add(ivaDelta);
 
-            balanceEventRepository.save(BalanceEvent.record(account.getCreditAccountId(), cmd.sourceEventId(),
-                    "AGREEMENT_QUITA_PARCIAL", cmd.forgivenAmount().negate(), account));
+            BalanceEvent asiento = BalanceEvent.record(account.getCreditAccountId(), cmd.sourceEventId(),
+                    "AGREEMENT_QUITA_PARCIAL", medido, account).withBreakdown(capDelta, intDelta, ivaDelta, morDelta);
+            balanceEventRepository.save(asiento);
 
             eventPublisher.publishBalanceUpdated(new BalanceUpdatedEvent(
                     account.getCreditAccountId(), account.getObligorPartyId(),
                     account.getPrincipalBalance(), account.getAccruedInterestBalance(),
                     account.getPenaltyBalance(), account.getAvailableCredit(), account.getTotalDebt(),
                     "AGREEMENT_QUITA_PARCIAL", account.getStatus().name(), account.getBalanceVersion(),
-                    account.getOriginUnitCode()));
+                    account.getOriginUnitCode(), null,
+                    // The IVA travels with the moratorium, as every other movement publishes it (accounting nets both
+                    // against 1203), and on its own in the detail.
+                    medido, capDelta, intDelta, morDelta.add(ivaDelta), asiento.getValueDate())
+                    .withSourceEventId(cmd.sourceEventId()).withDetail(ivaDelta, null));
 
             log.info("Agreement QUITA_PARCIAL applied creditAccountId={} forgiven={}",
                     cmd.creditAccountId(), cmd.forgivenAmount());
         } else if ("RESTRUCTURE".equals(cmd.type())) {
+            BigDecimal tasaAnterior = account.getNominalRate();
             account.applyRestructure(cmd.newNominalRate(), cmd.newTermMonths());
             accountRepository.save(account);
-            log.info("Agreement RESTRUCTURE applied creditAccountId={} newRate={} newTerm={}",
-                    cmd.creditAccountId(), cmd.newNominalRate(), cmd.newTermMonths());
+            NewPlan plan = account.isRevolving() ? NewPlan.NONE : replan(account, cmd.newTermMonths());
+            // The agreement goes to the ledger with no money moved: it is what a redelivery finds (idempotency) and
+            // what the statement shows as the period's restructure.
+            balanceEventRepository.save(BalanceEvent.record(account.getCreditAccountId(), cmd.sourceEventId(),
+                            "AGREEMENT_RESTRUCTURE", BigDecimal.ZERO, account)
+                    .withBreakdown(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO));
+            eventPublisher.publishAccountRestructured(new AccountRestructuredEvent(cmd.sourceEventId(),
+                    account.getCreditAccountId(), account.getObligorPartyId(), agreementIdOf(cmd.sourceEventId()), tasaAnterior,
+                    account.getNominalRate(), account.getPrincipalBalance(), plan.term(), plan.firstDueDate(),
+                    plan.replaced(), BusinessClock.current().today()));
+            log.info("Agreement RESTRUCTURE applied creditAccountId={} rate {} → {} newTerm={} firstDue={} replaced={}",
+                    cmd.creditAccountId(), tasaAnterior, account.getNominalRate(), plan.term(), plan.firstDueDate(),
+                    plan.replaced());
         } else {
             log.warn("Unknown CollectionAgreement type '{}' for creditAccountId={} — ignored",
                     cmd.type(), cmd.creditAccountId());
+        }
+    }
+
+    /** What a restructure did to an installment loan's plan. */
+    record NewPlan(Integer term, LocalDate firstDueDate, int replaced) {
+        static final NewPlan NONE = new NewPlan(null, null, 0);
+    }
+
+    /**
+     * The new plan of a restructured installment loan: its unpaid installments are REPLACED and the principal
+     * still owed is amortized at the new rate over the new term, keeping the old plan's day of the month (so the
+     * statement cutoffs, derived from the same cadence, stay aligned). Arrears of interest, IVA and penalty stay
+     * owed in their buckets: the next payment covers them first, as any payment does. Numbering continues after
+     * the last number used, so the record of the old plan is kept.
+     */
+    NewPlan replan(CreditAccount account, Integer newTerm) {
+        UUID id = account.getCreditAccountId();
+        List<Installment> pendientes = installmentRepository.findByScheduleIdOrdered(id).stream()
+                .filter(i -> i.getStatus() != InstallmentStatus.PAID)
+                .toList();
+        if (pendientes.isEmpty() || account.getPrincipalBalance().signum() <= 0) {
+            return NewPlan.NONE;
+        }
+        int plazo = newTerm != null && newTerm > 0 ? newTerm : pendientes.size();
+        ProductConfigVersion config = configResolver.resolveForAccount(account.getProductCode(), account.getProductVersion())
+                .orElse(null);
+        String frecuencia = config != null ? config.getPaymentFrequency() : null;
+        String metodo = account.getAmortizationType() != null ? account.getAmortizationType()
+                : config != null ? config.getAmortizationType() : null;
+        LocalDate hoy = BusinessClock.current().today();
+        SemiMonthlyCalendar quincena = BillingCycle.semiMonthlyOf(config != null ? config.getBillingCycle() : null);
+        LocalDate primera = AmortizationEngine.nextDueAfter(pendientes.get(0).getDueDate(), hoy, frecuencia, quincena);
+
+        int siguiente = installmentRepository.maxInstallmentNumber(id) + 1;
+        pendientes.forEach(Installment::replace);
+        installmentRepository.saveAll(pendientes);
+
+        List<Installment> generado = amortizationEngine.generate(id, account.getPrincipalBalance(),
+                account.getNominalRate(), plazo, metodo, frecuencia, null, primera, account.getVatRate(), quincena);
+        List<Installment> nuevo = new ArrayList<>();
+        for (int k = 0; k < generado.size(); k++) {
+            Installment g = generado.get(k);
+            nuevo.add(Installment.of(id, siguiente + k, g.getDueDate(), g.getPrincipalAmount(),
+                    g.getInterestAmount(), g.getTaxAmount()));
+        }
+        bankingCalendar.followBusinessDays(nuevo);
+        installmentRepository.saveAll(nuevo);
+        return new NewPlan(plazo, primera, pendientes.size());
+    }
+
+    private static UUID agreementIdOf(String sourceEventId) {
+        try {
+            return sourceEventId == null ? null : UUID.fromString(sourceEventId);
+        } catch (IllegalArgumentException e) {
+            return null;
         }
     }
 

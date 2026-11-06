@@ -11,5 +11,7 @@ public record BalanceUpdatedPayload(
         UUID creditAccountId,
         UUID obligorPartyId,
         BigDecimal totalDebt,
-        String accountStatus
+        String accountStatus,
+        /** Available credit on a revolving line: the undrawn exposure. Null on loans and older producers. */
+        BigDecimal availableCredit
 ) {}

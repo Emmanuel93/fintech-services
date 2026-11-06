@@ -1,5 +1,6 @@
 package com.fintech.creditproduct.infrastructure.adapter.in.api.dto;
 
+import com.fintech.creditproduct.domain.BillingCycle;
 import com.fintech.creditproduct.domain.Capabilities;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
@@ -106,5 +107,29 @@ public record CreateCreditProductRequest(
          * Per-product eligibility rules evaluated at application creation time.
          * Complement the global scoring policy — product-specific hard limits.
          */
-        @Valid List<EligibilityRuleRequest> eligibilityRules
-) {}
+        @Valid List<EligibilityRuleRequest> eligibilityRules,
+
+        /** How the product's accounts cut and pay. When null, the product type's default applies. */
+        BillingCycle billingCycle
+) {
+
+    /** The request as it was before the billing cycle existed: the product type's default applies. */
+    public CreateCreditProductRequest(String productCode, String productType, String name, String description,
+                                      String targetAudience, String currency, BigDecimal nominalRateAnnual,
+                                      BigDecimal moratoriumRateAnnual, Integer minTerm, Integer maxTerm, Integer defaultTerm,
+                                      BigDecimal minAmount, BigDecimal maxAmount, BigDecimal defaultCreditLine,
+                                      BigDecimal minCreditLine, BigDecimal maxCreditLine, Integer amountStep, Integer termStep,
+                                      String amortizationType, String defaultPaymentFrequency,
+                                      Set<String> allowedPaymentFrequencies, Integer minApprovalScore,
+                                      String defaultApprovalFlow, BigDecimal openingFeeRate, BigDecimal prepaymentFeeRate,
+                                      Set<String> eligiblePartyTypes, Set<RequiredDocumentRequest> requiredDocuments,
+                                      Set<String> channelAvailabilities, Capabilities capabilities,
+                                      List<RateCardRequest> rateCards, List<EligibilityRuleRequest> eligibilityRules) {
+        this(productCode, productType, name, description, targetAudience, currency, nominalRateAnnual,
+                moratoriumRateAnnual, minTerm, maxTerm, defaultTerm, minAmount, maxAmount, defaultCreditLine,
+                minCreditLine, maxCreditLine, amountStep, termStep, amortizationType, defaultPaymentFrequency,
+                allowedPaymentFrequencies, minApprovalScore, defaultApprovalFlow, openingFeeRate, prepaymentFeeRate,
+                eligiblePartyTypes, requiredDocuments, channelAvailabilities, capabilities, rateCards,
+                eligibilityRules, null);
+    }
+}

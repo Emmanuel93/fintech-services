@@ -159,6 +159,14 @@ public class CreditPortfolioClient {
             BigDecimal minimumPayment,
             BigDecimal principalPaid,
             BigDecimal overdueAmount,
-            Integer    overdueInstallments
-    ) {}
+            Integer    overdueInstallments,
+
+            // Una línea de distribuidora: si hoy puede colocar y, si no, por qué y cuánto debe pagar para volver a
+            // hacerlo. Nulos en los productos que no pagan a una distribuidora.
+            Boolean    placementBlocked,
+            String     placementBlockReason,
+            BigDecimal overdueStatementsAmount
+    ) {
+        public boolean blockedForPlacements() { return Boolean.TRUE.equals(placementBlocked); }
+    }
 }

@@ -25,8 +25,12 @@ public sealed interface ProviderOutcome {
      *
      * @param retryable si es transitorio, la orden vuelve a la cola en vez de terminar (DB-08)
      */
+    /**
+     * The provider did not take the order. {@code technical}: for a technical reason (its link, an order it never
+     * registered), not a rule; a new request may succeed.
+     */
     record Rejected(UUID disbursementId, String providerCode, String reason,
-                    boolean retryable, Instant observedAt) implements ProviderOutcome {}
+                    boolean retryable, boolean technical, Instant observedAt) implements ProviderOutcome {}
 
     /** El banco receptor devolvió el dinero después de haberse liquidado. */
     record Returned(UUID disbursementId, String causeCode, Instant observedAt) implements ProviderOutcome {}

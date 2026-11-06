@@ -16,5 +16,7 @@ public enum DisbursementSource {
     /** Entrada por la API de producto, con Idempotency-Key. */
     API,
     /** Alta manual de operación, con motivo. */
-    MANUAL
+    MANUAL,
+    /** Pago de un lote de comisiones a su beneficiaria (distribuidora o promotor), neto de retenciones. */
+    COMMISSION
 }

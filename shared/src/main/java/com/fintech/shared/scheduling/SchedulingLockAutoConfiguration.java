@@ -1,11 +1,12 @@
 package com.fintech.shared.scheduling;
 
+import com.fintech.shared.simulation.SimulatorGuard;
 import javax.sql.DataSource;
-
 import net.javacrumbs.shedlock.core.LockProvider;
 import net.javacrumbs.shedlock.provider.jdbctemplate.JdbcTemplateLockProvider;
 import net.javacrumbs.shedlock.spring.annotation.EnableSchedulerLock;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
@@ -14,7 +15,10 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.env.Environment;
 import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.util.Set;
 
 /**
  * Un solo ejecutor por cron, aunque el servicio corra con varias réplicas.
@@ -46,14 +50,33 @@ import org.springframework.jdbc.core.JdbcTemplate;
 @EnableSchedulerLock(defaultLockAtMostFor = "PT30M")
 public class SchedulingLockAutoConfiguration {
 
+    private static final Logger log = LoggerFactory.getLogger(SchedulingLockAutoConfiguration.class);
+
+    /**
+     * The recovery crons: they resume or retry what a business job started and never create a business fact of their
+     * own, so they stay on even while the business crons are paused.
+     */
+    static final String ALWAYS_ON_DEFAULT = "charges.accrual-monitor,closing.cutoff-monitor,closing.cutoff-run,"
+            + "credit-portfolio.day-close-retry,statement.retry";
+
     @Bean
     @ConditionalOnMissingBean(LockProvider.class)
     public LockProvider scheduledJobLockProvider(DataSource dataSource,
-                                                 @Value("${fintech.scheduling.lock.table:shedlock}") String table) {
-        return new JdbcTemplateLockProvider(JdbcTemplateLockProvider.Configuration.builder()
+                                                 @Value("${fintech.scheduling.lock.table:shedlock}") String table,
+                                                 @Value("${fintech.scheduling.paused:false}") boolean paused,
+                                                 @Value("${fintech.scheduling.always-on:" + ALWAYS_ON_DEFAULT + "}")
+                                                 Set<String> alwaysOn,
+                                                 Environment environment) {
+        LockProvider jdbc = new JdbcTemplateLockProvider(JdbcTemplateLockProvider.Configuration.builder()
                 .withJdbcTemplate(new JdbcTemplate(dataSource))
                 .withTableName(table)
                 .usingDbTime()
                 .build());
+        if (!paused) {
+            return jdbc;
+        }
+        SimulatorGuard.requireNonProduction(environment, "crones de negocio en pausa", "FINTECH_SCHEDULING_PAUSED=false");
+        log.warn("Crones de negocio en pausa: los dispara la simulación. Siguen encendidos: {}", alwaysOn);
+        return new PausableLockProvider(jdbc, alwaysOn);
     }
 }

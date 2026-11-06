@@ -2,6 +2,7 @@ package com.fintech.stp.application.service;
 
 import com.fintech.stp.application.StpProperties;
 import com.fintech.stp.application.port.in.RelayOutboxUseCase;
+import com.fintech.stp.application.port.out.OutboxMessageHandler;
 import com.fintech.stp.application.port.out.OutboxMessageRepository;
 import com.fintech.stp.application.port.out.SigningKeyProvider;
 import com.fintech.stp.application.port.out.StpCompanyRepository;
@@ -26,8 +27,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Toma lo pendiente del outbox, firma y lo envía a STP.
@@ -63,6 +67,7 @@ public class OutboxRelayService implements RelayOutboxUseCase {
     private final StpEventPublisher eventPublisher;
     private final StpProperties properties;
     private final TransactionTemplate transactionTemplate;
+    private final Map<String, OutboxMessageHandler> handlers;
 
     public OutboxRelayService(OutboxMessageRepository outboxRepository,
                               StpPaymentOrderRepository orderRepository,
@@ -72,7 +77,8 @@ public class OutboxRelayService implements RelayOutboxUseCase {
                               StpGatewayPort gateway,
                               StpEventPublisher eventPublisher,
                               StpProperties properties,
-                              TransactionTemplate transactionTemplate) {
+                              TransactionTemplate transactionTemplate,
+                              List<OutboxMessageHandler> handlers) {
         this.outboxRepository = outboxRepository;
         this.orderRepository = orderRepository;
         this.eventRepository = eventRepository;
@@ -82,6 +88,8 @@ public class OutboxRelayService implements RelayOutboxUseCase {
         this.eventPublisher = eventPublisher;
         this.properties = properties;
         this.transactionTemplate = transactionTemplate;
+        this.handlers = handlers.stream()
+                .collect(Collectors.toUnmodifiableMap(OutboxMessageHandler::messageType, Function.identity()));
     }
 
     @Override
@@ -112,7 +120,7 @@ public class OutboxRelayService implements RelayOutboxUseCase {
                 }
                 OutboxMessage message = batch.get(0);
                 claimed.set(message.getOutboxId());
-                dispatch(message);
+                route(message);
                 return Boolean.TRUE;
             });
             return Boolean.TRUE.equals(any) ? Outcome.PROCESSED : Outcome.EMPTY;
@@ -125,6 +133,24 @@ public class OutboxRelayService implements RelayOutboxUseCase {
                     outboxRepository.findById(outboxId).ifPresent(message -> handleFailure(message, e)));
             return Outcome.FAILED;
         }
+    }
+
+    /**
+     * Registering an order with STP is this relay's own job; any other type goes to its handler. A new kind of
+     * message plugs in as an {@link OutboxMessageHandler} without touching the relay.
+     */
+    private void route(OutboxMessage message) {
+        if (OutboxMessage.TYPE_REGISTER_ORDER.equals(message.getMessageType())) {
+            dispatch(message);
+            return;
+        }
+        OutboxMessageHandler handler = handlers.get(message.getMessageType());
+        if (handler == null) {
+            throw new IllegalStateException("No hay quien entregue mensajes de tipo " + message.getMessageType());
+        }
+        handler.handle(message);
+        message.markSent();
+        outboxRepository.save(message);
     }
 
     private void dispatch(OutboxMessage message) {
@@ -164,8 +190,12 @@ public class OutboxRelayService implements RelayOutboxUseCase {
         order.markSent(sello, keyMetadata.getKeyId());
         orderRepository.save(order);
 
-        StpGatewayPort.RegistrationResult result = gateway.registerPaymentOrder(
-                toRequest(order, company, ordering, firma, sello));
+        StpGatewayPort.RegistrationResult result;
+        try {
+            result = gateway.registerPaymentOrder(toRequest(order, company, ordering, firma, sello));
+        } catch (RuntimeException e) {
+            throw new UnansweredRegistration(e);
+        }
 
         if (BanxicoResponseCode.isAccepted(result.stpResponseId())) {
             accept(order, message, String.valueOf(result.stpResponseId()));
@@ -185,6 +215,8 @@ public class OutboxRelayService implements RelayOutboxUseCase {
                 // El corte por intentos también aplica aquí. Sin esto, un rechazo transitorio
                 // sostenido —el enlace de STP en modo consultas, por ejemplo— reprogramaba el
                 // mensaje para siempre: la orden nunca llegaba a FAILED y nadie la revisaba nunca.
+                // The rejection it publishes is final (D58): published as retryable, the disbursement retried the
+                // same request, the idempotency guard dropped it, and the order waited for an answer forever.
                 if (message.getAttemptCount() + 1 >= properties.getOutbox().getMaxAttempts()) {
                     StpPaymentOrderStatus from = order.status();
                     String detail = "Agotados los intentos con rechazo transitorio "
@@ -202,7 +234,8 @@ public class OutboxRelayService implements RelayOutboxUseCase {
                 }
                 order.scheduleRetry(code, result.descripcionError());
                 orderRepository.save(order);
-                message.scheduleRetry(code.name() + ": " + result.descripcionError());
+                message.scheduleRetry(code.name() + ": " + result.descripcionError(),
+                        properties.getOutbox().getBaseBackoff());
                 outboxRepository.save(message);
                 log.warn("STP transient rejection {} for trackingKey={} — will retry (intento {})",
                         code.name(), order.getTrackingKey(), message.getAttemptCount());
@@ -237,20 +270,52 @@ public class OutboxRelayService implements RelayOutboxUseCase {
     private void handleFailure(OutboxMessage message, RuntimeException error) {
         if (message.getAttemptCount() + 1 >= properties.getOutbox().getMaxAttempts()) {
             message.markFailed(error.getMessage());
-            orderRepository.findById(message.getAggregateId()).ifPresent(order -> {
-                if (!order.isTerminal()) {
-                    order.fail("Agotados los intentos de envío: " + error.getMessage());
-                    orderRepository.save(order);
-                }
-            });
+            orderRepository.findById(message.getAggregateId())
+                    .filter(order -> !order.isTerminal())
+                    .ifPresent(order -> giveUp(order, error, message.getAttemptCount() + 1));
             log.error("Outbox message {} exhausted after {} attempts: {}",
                     message.getOutboxId(), message.getAttemptCount(), error.getMessage());
         } else {
-            message.scheduleRetry(error.getMessage());
+            message.scheduleRetry(error.getMessage(), properties.getOutbox().getBaseBackoff());
             log.warn("Outbox message {} failed (attempt {}): {}",
                     message.getOutboxId(), message.getAttemptCount() + 1, error.getMessage());
         }
         outboxRepository.save(message);
+    }
+
+    /**
+     * The relay gives up on an order, and what follows depends on whether STP may hold it. Before, both cases failed the
+     * order in silence: nobody upstream heard, so the disbursement waited for an answer forever (D59).
+     */
+    private void giveUp(StpPaymentOrder order, RuntimeException error, int attempts) {
+        StpPaymentOrderStatus from = order.status();
+        if (error instanceof UnansweredRegistration) {
+            // No answer is not a no: STP may have registered the order on an attempt whose answer got lost, and
+            // failing it here would let the caller pay twice. The reconciliation of its operation date decides.
+            String detail = "Sin respuesta de STP tras " + attempts + " intentos (" + error.getMessage()
+                    + "): lo resuelve la conciliación del " + order.getBusinessDate();
+            order.awaitReconciliation(detail);
+            orderRepository.save(order);
+            eventRepository.save(StpPaymentOrderEvent.of(order.getStpPaymentOrderId(), from,
+                    StpPaymentOrderStatus.SENT, null, detail, "SYSTEM"));
+            log.error("STP never answered trackingKey={} after {} attempts: waits for the reconciliation of {}",
+                    order.getTrackingKey(), attempts, order.getBusinessDate());
+            return;
+        }
+        // It never left (no company, no key): nothing is at STP, and the caller has to hear the request ended here.
+        String detail = "Agotados los intentos de envío: " + error.getMessage();
+        order.fail(detail);
+        orderRepository.save(order);
+        eventRepository.save(StpPaymentOrderEvent.of(order.getStpPaymentOrderId(), from,
+                StpPaymentOrderStatus.FAILED, null, detail, "SYSTEM"));
+        eventPublisher.publishOrderNotRegistered(order, detail);
+    }
+
+    /** The registration call itself failed: a timeout or a dropped connection, so STP's side is unknown. */
+    private static final class UnansweredRegistration extends RuntimeException {
+        UnansweredRegistration(RuntimeException cause) {
+            super(cause.getMessage(), cause);
+        }
     }
 
     private OrdenPagoFirma buildSignature(StpPaymentOrder order, StpCompany company, CuentaOrdenante ordering) {

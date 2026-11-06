@@ -20,6 +20,11 @@ public enum FailureCode {
     UNRESOLVED_COMPANY,
     /** El proveedor rechazó el registro de forma terminal. */
     REJECTED_BY_PROVIDER,
+    /**
+     * The provider could not execute the order for a technical reason: its link failed past its own retries, or it
+     * never registered the order. The money did not leave, and a new request may succeed where this one could not.
+     */
+    PROVIDER_TECHNICAL_FAILURE,
     /** El banco receptor devolvió el dinero. */
     RETURNED_BY_BENEFICIARY_BANK,
     /** No se pudo entregar la orden al conector. Transitorio: no termina la orden por sí solo. */
@@ -27,5 +32,20 @@ public enum FailureCode {
     /** Se agotaron los intentos de despacho. */
     MAX_ATTEMPTS_EXCEEDED,
     /** Operación canceló la orden antes de despacharla. */
-    CANCELLED_BY_OPERATOR
+    CANCELLED_BY_OPERATOR;
+
+    /**
+     * Whether a new request may succeed where this one could not: the money did not leave for a technical or a
+     * configuration reason (the link, a route or a company missing, the connector out of reach), not for a rule of the
+     * bank, the beneficiary or the instruction itself. The caller decides with it whether to ask again: a credit's
+     * disposition is retried; a rule is compensated (D63).
+     */
+    public boolean anotherAttemptMayWork() {
+        return switch (this) {
+            case PROVIDER_TECHNICAL_FAILURE, PROVIDER_UNAVAILABLE, MAX_ATTEMPTS_EXCEEDED, NO_ROUTING_RULE,
+                 UNRESOLVED_COMPANY -> true;
+            case INVALID_BENEFICIARY_ACCOUNT, INVALID_INSTRUCTION, REJECTED_BY_PROVIDER, RETURNED_BY_BENEFICIARY_BANK,
+                 CANCELLED_BY_OPERATOR -> false;
+        };
+    }
 }

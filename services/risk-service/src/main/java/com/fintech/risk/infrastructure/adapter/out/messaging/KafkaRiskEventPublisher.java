@@ -8,6 +8,7 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import com.fintech.shared.time.BusinessClock;
 
 @Component
 public class KafkaRiskEventPublisher implements RiskEventPublisher {
@@ -28,7 +29,7 @@ public class KafkaRiskEventPublisher implements RiskEventPublisher {
                 profile.getCreditAccountId(), profile.getObligorPartyId(), profile.getProductType(),
                 profile.getIfrs9Stage().name(), stageChanged, profile.getBucket().name(),
                 profile.getEad(), profile.getExpectedLossRate(), profile.getProvisionAmount(),
-                profile.getLastCalculatedAt() != null ? profile.getLastCalculatedAt() : Instant.now());
+                profile.getLastCalculatedAt() != null ? profile.getLastCalculatedAt() : BusinessClock.current().now());
         kafkaTemplate.send(TOPIC_RISK_ASSESSMENT_UPDATED, profile.getCreditAccountId().toString(), payload);
         log.debug("published risk.assessment-updated creditAccountId={} stage={} provision={}",
                 profile.getCreditAccountId(), profile.getIfrs9Stage(), profile.getProvisionAmount());

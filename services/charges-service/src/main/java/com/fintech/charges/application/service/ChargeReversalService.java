@@ -33,15 +33,17 @@ public class ChargeReversalService {
         charge.reverse(reason);
         chargeRecordRepository.save(charge);
 
-        // Reverse linked IVA automatically (CR-06)
-        chargeRecordRepository.findByLinkedChargeId(chargeId).ifPresent(iva -> {
-            iva.reverse(reason + " (linked IVA)");
-            chargeRecordRepository.save(iva);
-        });
-
         eventPublisher.publishChargeReversed(charge.getChargeId().toString(),
                 charge.getCreditAccountId(), charge.getChargeType(),
                 charge.getTotalAmount(), false);
+
+        // Reverse linked IVA automatically (CR-06) — and tell the portfolio, which holds that IVA as owed.
+        chargeRecordRepository.findByLinkedChargeId(chargeId).ifPresent(iva -> {
+            iva.reverse(reason + " (linked IVA)");
+            chargeRecordRepository.save(iva);
+            eventPublisher.publishChargeReversed(iva.getChargeId().toString(), iva.getCreditAccountId(),
+                    iva.getChargeType(), iva.getTotalAmount(), false);
+        });
 
         log.info("ChargeReversed chargeId={} creditAccountId={} type={} reason={}",
                 chargeId, charge.getCreditAccountId(), charge.getChargeType(), reason);
@@ -55,16 +57,18 @@ public class ChargeReversalService {
         charge.waive(waivedBy);
         chargeRecordRepository.save(charge);
 
-        // Waive linked IVA automatically (CR-06)
-        chargeRecordRepository.findByLinkedChargeId(chargeId).ifPresent(iva -> {
-            iva.waive(waivedBy + " (linked IVA)");
-            chargeRecordRepository.save(iva);
-        });
-
         // waived=true distinguishes from reversal for T4 accounting (loss vs. income cancellation)
         eventPublisher.publishChargeReversed(charge.getChargeId().toString(),
                 charge.getCreditAccountId(), charge.getChargeType(),
                 charge.getTotalAmount(), true);
+
+        // Waive linked IVA automatically (CR-06) — and tell the portfolio, which holds that IVA as owed.
+        chargeRecordRepository.findByLinkedChargeId(chargeId).ifPresent(iva -> {
+            iva.waive(waivedBy + " (linked IVA)");
+            chargeRecordRepository.save(iva);
+            eventPublisher.publishChargeReversed(iva.getChargeId().toString(), iva.getCreditAccountId(),
+                    iva.getChargeType(), iva.getTotalAmount(), true);
+        });
 
         log.info("ChargeWaived chargeId={} creditAccountId={} type={} waivedBy={}",
                 chargeId, charge.getCreditAccountId(), charge.getChargeType(), waivedBy);

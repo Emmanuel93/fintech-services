@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Ingreso devengado pendiente de facturar (interés, comisión, IVA). El BillingRunJob consolida los
@@ -62,13 +63,21 @@ public class InvoiceableItem {
         i.isIva           = isIva;
         i.period          = period;
         i.status          = InvoiceableItemStatus.PENDING;
-        i.createdAt       = Instant.now();
+        i.createdAt       = BusinessClock.current().now();
         return i;
     }
 
     public void markBilled(UUID invoiceRef) {
         this.status     = InvoiceableItemStatus.BILLED;
         this.invoiceRef = invoiceRef;
+    }
+
+    /** Its income was reversed before it was invoiced (D63): no CFDI is issued for a fee that was not charged. */
+    public void cancel() {
+        if (status != InvoiceableItemStatus.PENDING) {
+            throw new IllegalStateException("Only a pending item is cancelled: " + status);
+        }
+        this.status = InvoiceableItemStatus.CANCELLED;
     }
 
     public UUID getItemId()          { return itemId; }

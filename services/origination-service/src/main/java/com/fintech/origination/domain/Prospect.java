@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Aggregate root for prospect intake.
@@ -119,7 +120,7 @@ public class Prospect {
             throw new PrivacyNoticeRequiredException();
         }
 
-        Instant now = Instant.now();
+        Instant now = BusinessClock.current().now();
         Prospect p = new Prospect();
         p.prospectId              = prospectId;
         p.prospectType            = prospectType;

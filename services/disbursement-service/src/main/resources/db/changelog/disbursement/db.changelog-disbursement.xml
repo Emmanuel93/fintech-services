@@ -13,5 +13,6 @@
     <include file="db/changelog/disbursement/007-drop-routing-rules.sql"         relativeToChangelogFile="false"/>
     <include file="db/changelog/disbursement/008-seed-company-mapping.sql"       relativeToChangelogFile="false"/>
     <include file="db/changelog/disbursement/009-index-orders-by-credit-account.sql" relativeToChangelogFile="false"/>
+    <include file="db/changelog/disbursement/010-pago-de-comisiones.sql" relativeToChangelogFile="false"/>
 
 </databaseChangeLog>

@@ -3,6 +3,7 @@ package com.fintech.beneficiary.infrastructure.config;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 /**
  * Configuración del servicio: a quién le habla y con qué números trabaja.
@@ -31,34 +32,37 @@ public class BeneficiaryProperties {
 
     // ── Cotización de la colocación ──────────────────────────────────────────────────────────
 
-    private BigDecimal minPlacementAmount = new BigDecimal("5000");
+    private BigDecimal minPlacementAmount = new BigDecimal("1000");
 
     /**
      * Tope por beneficiario cuando el catálogo no lo publica. El límite de verdad lo fija el
      * producto {@code DISTRIBUTOR_LINE}; esto es el respaldo para que un catálogo incompleto no
      * abra la puerta a colocarle la línea entera a una sola persona.
      */
-    private BigDecimal maxPlacementAmount = new BigDecimal("60000");
+    private BigDecimal maxPlacementAmount = new BigDecimal("10000");
 
-    private BigDecimal amountStep = new BigDecimal("1000");
+    private BigDecimal amountStep = new BigDecimal("500");
 
     /** Plazos permitidos, en quincenas. */
-    private java.util.List<Integer> termFortnights = java.util.List.of(12, 24, 36, 48);
+    private List<Integer> termFortnights = List.of(12, 14, 16, 18, 20, 22, 24);
 
     /**
      * Tasa anual de la colocación cuando el producto no trae rate card. El pago quincenal se
      * calcula con ella sobre 24 periodos al año.
      */
-    private BigDecimal defaultAnnualRate = new BigDecimal("0.289");
+    private BigDecimal defaultAnnualRate = new BigDecimal("0.95");
 
     /** Periodos al año. La colocación se cobra por quincena porque así cobra el distribuidor. */
     private int periodsPerYear = 24;
+
+    /** The IVA on the placement's interest, inside the fortnightly payment as the portfolio's plan carries it. */
+    private BigDecimal vatRate = new BigDecimal("0.16");
 
     /**
      * Comisión del distribuidor sobre lo que cobra a tiempo. Baja por día de atraso hasta cero al
      * quinto; la escalera completa vive en commission-service.
      */
-    private BigDecimal commissionOnTimeRate = new BigDecimal("0.20");
+    private BigDecimal commissionOnTimeRate = new BigDecimal("0.18");
 
     /**
      * Simular el KYC de la beneficiaria desde un endpoint interno. Es lo que sustituye a la web
@@ -187,12 +191,14 @@ public class BeneficiaryProperties {
     public void setMaxPlacementAmount(BigDecimal v) { this.maxPlacementAmount = v; }
     public BigDecimal getAmountStep() { return amountStep; }
     public void setAmountStep(BigDecimal v) { this.amountStep = v; }
-    public java.util.List<Integer> getTermFortnights() { return termFortnights; }
-    public void setTermFortnights(java.util.List<Integer> v) { this.termFortnights = v; }
+    public List<Integer> getTermFortnights() { return termFortnights; }
+    public void setTermFortnights(List<Integer> v) { this.termFortnights = v; }
     public BigDecimal getDefaultAnnualRate() { return defaultAnnualRate; }
     public void setDefaultAnnualRate(BigDecimal v) { this.defaultAnnualRate = v; }
     public int getPeriodsPerYear() { return periodsPerYear; }
     public void setPeriodsPerYear(int v) { this.periodsPerYear = v; }
+    public BigDecimal getVatRate() { return vatRate; }
+    public void setVatRate(BigDecimal v) { this.vatRate = v; }
     public BigDecimal getCommissionOnTimeRate() { return commissionOnTimeRate; }
     public void setCommissionOnTimeRate(BigDecimal v) { this.commissionOnTimeRate = v; }
     public boolean isKycSimulationEnabled() { return kycSimulationEnabled; }

@@ -3,12 +3,18 @@ package com.fintech.commission.infrastructure.adapter.in.api;
 import com.fintech.commission.application.CreateCommissionPolicyCommand;
 import com.fintech.commission.application.port.in.CommissionPolicyUseCase;
 import com.fintech.commission.application.port.in.GetCommissionUseCase;
+import com.fintech.commission.application.service.BeneficiaryProfileService;
+import com.fintech.commission.application.service.CommissionSelfCheckService;
 import com.fintech.commission.application.service.LiquidationService;
 import com.fintech.commission.application.service.PromoterAssignmentService;
+import com.fintech.commission.infrastructure.adapter.in.api.dto.BeneficiaryProfileResponse;
 import com.fintech.commission.infrastructure.adapter.in.api.dto.CommissionPolicyResponse;
 import com.fintech.commission.infrastructure.adapter.in.api.dto.CommissionRecordResponse;
 import com.fintech.commission.infrastructure.adapter.in.api.dto.CreateCommissionPolicyRequest;
+import com.fintech.commission.infrastructure.adapter.in.api.dto.LotResponse;
+import com.fintech.commission.infrastructure.adapter.in.api.dto.PayoutAccountRequest;
 import com.fintech.commission.infrastructure.adapter.in.api.dto.PromoterCreditResponse;
+import com.fintech.shared.selfcheck.SelfCheckReport;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -31,14 +37,28 @@ class CommissionController {
     private final CommissionPolicyUseCase policyUseCase;
     private final LiquidationService liquidationService;
     private final PromoterAssignmentService promoterAssignmentService;
+    private final BeneficiaryProfileService beneficiaryProfiles;
+    private final CommissionSelfCheckService selfChecks;
 
     CommissionController(GetCommissionUseCase getCommissionUseCase, CommissionPolicyUseCase policyUseCase,
                           LiquidationService liquidationService,
-                          PromoterAssignmentService promoterAssignmentService) {
+                          PromoterAssignmentService promoterAssignmentService,
+                          BeneficiaryProfileService beneficiaryProfiles,
+                          CommissionSelfCheckService selfChecks) {
         this.getCommissionUseCase = getCommissionUseCase;
         this.policyUseCase        = policyUseCase;
         this.liquidationService   = liquidationService;
         this.promoterAssignmentService = promoterAssignmentService;
+        this.beneficiaryProfiles  = beneficiaryProfiles;
+        this.selfChecks           = selfChecks;
+    }
+
+    @Operation(summary = "Autoverificación de comisiones: cada lote contra sus registros y su neto, retenciones por "
+            + "régimen, reversas sin exceso y lo que la última corrida dejó abierto; informa lotes sin desenlace y por "
+            + "reintentar")
+    @GetMapping("/self-checks")
+    ResponseEntity<SelfCheckReport> selfChecks(@RequestParam(required = false) String period) {
+        return ResponseEntity.ok(selfChecks.check(period));
     }
 
     @Operation(summary = "Historial de comisiones de un crédito")
@@ -77,10 +97,34 @@ class CommissionController {
                 req.productType(), req.distributorPartyId(), req.commissionType(), req.rate())));
     }
 
-    @Operation(summary = "Dispara la corrida de liquidación de un período (ops/finanzas)")
+    @Operation(summary = "Dispara la corrida de liquidación de un período (ops/finanzas): toma lo devengado hasta el "
+            + "período, arma un lote por beneficiaria y producto y pide su SPEI")
     @PostMapping("/liquidation-runs")
     ResponseEntity<Map<String, Object>> runLiquidation(@RequestParam String period) {
-        int batches = liquidationService.runLiquidation(period);
-        return ResponseEntity.ok(Map.of("period", period, "batchesCreated", batches));
+        LiquidationService.LiquidationRun run = liquidationService.runLiquidation(period);
+        return ResponseEntity.ok(Map.of("period", period, "batchesCreated", run.lotsOpened(),
+                "carriedOver", run.carriedOver(), "waitingForBeneficiary", run.waitingForBeneficiary(),
+                "retried", run.retried()));
+    }
+
+    @Operation(summary = "Lotes de comisiones de un período, con sus impuestos y su pago")
+    @GetMapping("/lots")
+    ResponseEntity<List<LotResponse>> lots(@RequestParam String period) {
+        return ResponseEntity.ok(getCommissionUseCase.getLots(period).stream().map(LotResponse::from).toList());
+    }
+
+    @Operation(summary = "Perfil de pago de una beneficiaria: RFC, régimen, retenciones y cuenta de pago")
+    @GetMapping("/beneficiaries/{partyId}/profile")
+    ResponseEntity<BeneficiaryProfileResponse> profile(@PathVariable UUID partyId) {
+        return beneficiaryProfiles.find(partyId).map(BeneficiaryProfileResponse::from)
+                .map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
+    }
+
+    @Operation(summary = "Registra la cuenta (CLABE) a la que se pagan los lotes de una beneficiaria")
+    @PutMapping("/beneficiaries/{partyId}/payout-account")
+    BeneficiaryProfileResponse registerPayoutAccount(@PathVariable UUID partyId,
+                                                     @Valid @RequestBody PayoutAccountRequest req) {
+        return BeneficiaryProfileResponse.from(
+                beneficiaryProfiles.registerPayoutAccount(partyId, req.clabe(), req.holderName()));
     }
 }

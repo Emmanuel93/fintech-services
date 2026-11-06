@@ -11,4 +11,9 @@ import com.fintech.banking.domain.InternalMovement;
 public interface InternalMovementProjector {
 
     void project(InternalMovement movimiento);
+
+    /** Whether the fact {@code sourceEventId} brought money into the cash book. */
+    default boolean brought(String sourceEventId) {
+        return false;
+    }
 }

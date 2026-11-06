@@ -3,6 +3,7 @@ package com.fintech.closing.infrastructure.adapter.in.messaging;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.UUID;
 
 /** Proyección ACL de {@code credit-portfolio.balance-updated}: los saldos con los que se sella. */
@@ -19,4 +20,9 @@ public record BalanceUpdatedPayload(
          * La versión del saldo. <b>Es lo que evita que un evento viejo pise uno nuevo</b>: Kafka
          * garantiza orden por partición, no entre reentregas, y el perfil descarta lo atrasado.
          */
-        long balanceVersion) {}
+        long balanceVersion,
+        /**
+         * El día de negocio del hecho. El corte de D resta lo que tiene fecha posterior: así sella el
+         * saldo al cierre de D aunque corra después de un pago de D+1. Nulo en eventos viejos.
+         */
+        LocalDate valueDate) {}

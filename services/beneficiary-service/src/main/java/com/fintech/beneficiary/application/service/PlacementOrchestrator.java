@@ -14,12 +14,15 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.util.Locale;
+import java.text.NumberFormat;
 import java.math.MathContext;
 import java.math.RoundingMode;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Lo que la colocación necesita de afuera.
@@ -73,6 +76,17 @@ public class PlacementOrchestrator {
                             String relationship, BigDecimal amount, int termFortnights) {
         CreditPortfolioClient.CreditAccount line = requireLine(distributorPartyId);
 
+        // In arrears the line does not place: from the first day a statement is late until she pays what is overdue,
+        // the same day she pays it. The portfolio enforces it too; saying it here is what the app shows her.
+        if (line.blockedForPlacements()) {
+            BigDecimal overdue = line.overdueStatementsAmount() == null ? BigDecimal.ZERO : line.overdueStatementsAmount();
+            // A quita closed the line for good (her exit); arrears block it until she pays what is overdue.
+            boolean closed = line.placementBlockReason() != null && line.placementBlockReason().startsWith("LINE_CLOSED_AFTER_QUITA");
+            throw new PlacementValidationException(closed
+                    ? "Tu línea quedó cerrada por el convenio de quita: ya no coloca"
+                    : "Tu línea está bloqueada por atraso: paga lo vencido (" + MONEY.format(overdue) + ") para volver a colocar");
+        }
+
         BigDecimal available = line.availableCredit() == null ? BigDecimal.ZERO : line.availableCredit();
         BigDecimal payment = fortnightlyPayment(amount, termFortnights, line.nominalRate());
 
@@ -87,7 +101,7 @@ public class PlacementOrchestrator {
                 termFortnights,
                 payment,
                 VerificationMode.SELF_SERVICE_LINK,
-                Instant.now().plus(props.getInviteTtlDays(), ChronoUnit.DAYS),
+                BusinessClock.current().now().plus(props.getInviteTtlDays(), ChronoUnit.DAYS),
                 limitsFor(line),
                 available,
                 UUID.randomUUID().toString()));
@@ -215,12 +229,15 @@ public class PlacementOrchestrator {
                     BigDecimal toCollect = live.stream()
                             .map(Placement::getFortnightlyPayment)
                             .reduce(BigDecimal.ZERO, BigDecimal::add);
-                    BigDecimal commission = toCollect.multiply(props.getCommissionOnTimeRate())
+                    BigDecimal commission = toCollect.multiply(commissionRate(line))
                             .setScale(2, RoundingMode.HALF_UP);
 
                     return new LineSummary(authorized, placed, available, toCollect,
                             toCollect.subtract(commission).max(BigDecimal.ZERO),
-                            commission, line.paymentDueDate(), line.daysDelinquent());
+                            commission, line.paymentDueDate(), line.daysDelinquent(),
+                            line.blockedForPlacements(), line.placementBlockReason(),
+                            line.overdueStatementsAmount() == null ? BigDecimal.ZERO : line.overdueStatementsAmount(),
+                            commissionRate(line));
                 })
                 // Sin línea no es error: es quien pidió crédito para sí. La app lo lee como
                 // «este titular no coloca» y esconde el módulo entero.
@@ -242,7 +259,7 @@ public class PlacementOrchestrator {
                     // La comisión se devenga sobre lo cobrado, y sólo si se cobró a tiempo. La
                     // escalera completa (17/14/10/6/0) la resuelve commission-service; aquí se
                     // aplica el caso simple para que la fila no mienta mientras esa fase llega.
-                    BigDecimal rate = late > 0 ? BigDecimal.ZERO : props.getCommissionOnTimeRate();
+                    BigDecimal rate = late > 0 ? BigDecimal.ZERO : commissionRate(line(placement));
                     BigDecimal accrued = placement.getFortnightlyPayment()
                             .multiply(BigDecimal.valueOf(paid))
                             .multiply(rate)
@@ -255,17 +272,23 @@ public class PlacementOrchestrator {
     // ── Cotización ───────────────────────────────────────────────────────────────────────────
 
     /**
-     * Anualidad francesa sobre la tasa quincenal.
+     * Anualidad francesa sobre la tasa quincenal, con el IVA del interés adentro.
      *
      * <p>Es la cifra que va al contrato. La app la estima mientras se arrastra el slider, pero si
      * el teléfono y el servidor redondearan distinto, el distribuidor le prometería a su clienta
      * un número y ella firmaría otro.
+     *
+     * <p>It is the payment of the portfolio's plan for a whole first fortnight: the plan carries the interest's IVA
+     * inside a flat payment, and before this the quote left it out (at 95 % a year, $1,062.95 promised against the
+     * $1,102.42 the plan asks for $10,000 at 12 fortnights). A placement made later in its fortnight bears only its
+     * share of that first fortnight, so its plan asks a little less: the quote is what the client pays at most.
      */
     BigDecimal fortnightlyPayment(BigDecimal amount, int termFortnights, BigDecimal accountRate) {
         BigDecimal annual = accountRate != null && accountRate.signum() > 0
                 ? accountRate
                 : props.getDefaultAnnualRate();
-        BigDecimal i = annual.divide(BigDecimal.valueOf(props.getPeriodsPerYear()), MathContext.DECIMAL64);
+        BigDecimal i = annual.divide(BigDecimal.valueOf(props.getPeriodsPerYear()), MathContext.DECIMAL64)
+                .multiply(BigDecimal.ONE.add(props.getVatRate()), MathContext.DECIMAL64);
 
         if (i.signum() == 0) {
             return amount.divide(BigDecimal.valueOf(termFortnights), 2, RoundingMode.HALF_UP);
@@ -303,6 +326,12 @@ public class PlacementOrchestrator {
     private static BigDecimal orZero(BigDecimal v) { return v == null ? BigDecimal.ZERO : v; }
 
     /** Lo que la app necesita para pintar «MI LÍNEA DE DISTRIBUIDOR». */
+    /**
+     * @param blocked        the line does not place today: a statement is unpaid past its due date
+     * @param blockReason    why, in the portfolio's words; null when it is not blocked
+     * @param overdueAmount  what she must pay to place again
+     * @param commissionRate her share of what her clients pay, as the product sets it
+     */
     public record LineSummary(
             BigDecimal authorized,
             BigDecimal placed,
@@ -311,12 +340,33 @@ public class PlacementOrchestrator {
             BigDecimal dueToKredius,
             BigDecimal commissionAccrued,
             java.time.LocalDate nextDueDate,
-            int daysPastDue) {
+            int daysPastDue,
+            boolean blocked,
+            String blockReason,
+            BigDecimal overdueAmount,
+            BigDecimal commissionRate) {
 
         /** Sin línea autorizada. La app lo distingue por `authorized == 0`. */
         static LineSummary none() {
             return new LineSummary(BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO,
-                    BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, null, 0);
+                    BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, null, 0, false, null, BigDecimal.ZERO, null);
         }
     }
+
+    /** The product's share of what her clients pay when the portfolio knows it; the configured one when it does not. */
+    private BigDecimal commissionRate(CreditPortfolioClient.CreditAccount line) {
+        return line != null && line.distributorCommissionRate() != null ? line.distributorCommissionRate()
+                : props.getCommissionOnTimeRate();
+    }
+
+    /** The line a placement was made on, as the portfolio has it today; null when it cannot be read. */
+    private CreditPortfolioClient.CreditAccount line(Placement placement) {
+        try {
+            return creditPortfolio.findActiveDistributorLine(placement.getDistributorPartyId()).orElse(null);
+        } catch (RuntimeException ex) {
+            return null;
+        }
+    }
+
+    private static final NumberFormat MONEY = NumberFormat.getCurrencyInstance(Locale.of("es", "MX"));
 }

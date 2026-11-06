@@ -2,6 +2,7 @@ package com.fintech.origination.infrastructure.config;
 
 import com.fintech.origination.infrastructure.adapter.in.messaging.ApplicationStartedPayload;
 import com.fintech.origination.infrastructure.adapter.in.messaging.CreditAccountActivatedPayload;
+import com.fintech.origination.infrastructure.adapter.in.messaging.CreditAccountCancelledPayload;
 import com.fintech.origination.infrastructure.adapter.in.messaging.ScoringCompletedPayload;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.common.serialization.StringDeserializer;
@@ -81,6 +82,28 @@ public class KafkaConfig {
             ConsumerFactory<String, CreditAccountActivatedPayload> creditAccountActivatedConsumerFactory) {
         var factory = new ConcurrentKafkaListenerContainerFactory<String, CreditAccountActivatedPayload>();
         factory.setConsumerFactory(creditAccountActivatedConsumerFactory);
+        return factory;
+    }
+
+    // ── CreditAccountCancelled consumer (D63: a failed disbursement closes the application) ─────────
+
+    @Bean
+    public ConsumerFactory<String, CreditAccountCancelledPayload> creditAccountCancelledConsumerFactory(KafkaProperties properties) {
+        Map<String, Object> config = properties.buildConsumerProperties(null);
+        config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+        config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, JsonDeserializer.class);
+        config.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        config.put(JsonDeserializer.TRUSTED_PACKAGES, "com.fintech.*");
+        config.put(JsonDeserializer.VALUE_DEFAULT_TYPE, CreditAccountCancelledPayload.class.getName());
+        config.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
+        return new DefaultKafkaConsumerFactory<>(config);
+    }
+
+    @Bean
+    public ConcurrentKafkaListenerContainerFactory<String, CreditAccountCancelledPayload> creditAccountCancelledListenerContainerFactory(
+            ConsumerFactory<String, CreditAccountCancelledPayload> creditAccountCancelledConsumerFactory) {
+        var factory = new ConcurrentKafkaListenerContainerFactory<String, CreditAccountCancelledPayload>();
+        factory.setConsumerFactory(creditAccountCancelledConsumerFactory);
         return factory;
     }
 }

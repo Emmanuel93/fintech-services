@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 
 import java.time.Instant;
 import java.util.UUID;
+import com.fintech.shared.time.BusinessClock;
 
 /**
  * Attribution of a credit to its distributor/promoter (beneficiary of the commission), projected
@@ -45,7 +46,7 @@ public class CreditPromoterAssignment {
         a.beneficiaryPartyId = beneficiaryPartyId;
         a.productType        = productType;
         a.active              = true;
-        a.createdAt           = Instant.now();
+        a.createdAt           = BusinessClock.current().now();
         return a;
     }
 

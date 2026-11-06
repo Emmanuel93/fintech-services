@@ -44,6 +44,7 @@ public class CloseRun {
     @Column(name = "started_at") private Instant startedAt;
     @Column(name = "sealed_at")  private Instant sealedAt;
     @Column(name = "last_error", length = 500) private String lastError;
+    @Column(name = "completed_at") private Instant completedAt;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
@@ -92,6 +93,42 @@ public class CloseRun {
         this.lastError = error != null && error.length() > 500 ? error.substring(0, 500) : error;
     }
 
+    /**
+     * Terminó de trabajarse: sin pendientes ni tomadas. Sella si nada falló; si algo falló queda
+     * {@code FAILED} con la cuenta, y {@link #reopen()} la devuelve a trabajo cuando se reintenta.
+     */
+    public void complete(int done, int failed, int skipped) {
+        progress(done, failed, skipped);
+        this.completedAt = Instant.now();
+        if (failed == 0) {
+            seal();
+        } else {
+            fail(failed + " unidades fallidas");
+        }
+    }
+
+    /** Se reintentan sus fallidas: vuelve a {@code RUNNING}. */
+    public void reopen() {
+        if (isSealed()) {
+            throw new IllegalStateException("La corrida " + phase + " de " + businessDate
+                    + " ya está sellada: no se reabre");
+        }
+        this.status      = RunStatus.RUNNING.name();
+        this.completedAt = null;
+        this.lastError   = null;
+    }
+
+    /**
+     * Una cuenta retenida ya puede cortarse —cargos la dejó fuera del cierre y después devengó—: la corrida
+     * vuelve a trabajo aunque estuviera sellada, y al drenarse se vuelve a sellar. Sellar significaba «todo lo
+     * que podía cortarse, cortado»; la retenida no podía. Las fallidas, en cambio, sólo las reabre
+     * {@link #reopen()}.
+     */
+    public void resumeHeld() {
+        this.status      = RunStatus.RUNNING.name();
+        this.completedAt = null;
+    }
+
     public boolean isSealed()  { return RunStatus.SEALED.name().equals(status); }
     public boolean isRunning() { return RunStatus.RUNNING.name().equals(status); }
 
@@ -105,5 +142,7 @@ public class CloseRun {
     public int getFailedUnits()        { return failedUnits; }
     public int getSkippedUnits()       { return skippedUnits; }
     public Instant getSealedAt()       { return sealedAt; }
+    public Instant getCompletedAt()    { return completedAt; }
+    public Instant getStartedAt()      { return startedAt; }
     public String getLastError()       { return lastError; }
 }

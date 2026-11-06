@@ -21,8 +21,9 @@ interface SpringDataMovementTraceRepository extends JpaRepository<MovementTrace,
     /** Cualquier eslabón vacío la deja incompleta; se ordenan por antigüedad, que es la urgencia. */
     @Query("""
             SELECT t FROM MovementTrace t
-             WHERE t.bankAccountId IS NULL OR t.trackingKey IS NULL
-                OR t.lineId IS NULL OR t.voucherRef IS NULL
+             WHERE t.status <> 'FAILED'
+               AND (t.bankAccountId IS NULL OR t.trackingKey IS NULL
+                    OR t.lineId IS NULL OR t.voucherRef IS NULL)
              ORDER BY t.createdAt ASC
             """)
     List<MovementTrace> findIncomplete(Limit limite);

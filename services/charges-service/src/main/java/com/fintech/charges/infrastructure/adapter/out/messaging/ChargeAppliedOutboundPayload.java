@@ -10,5 +10,7 @@ public record ChargeAppliedOutboundPayload(
         String chargeType,
         BigDecimal totalAmount,
         /** El día al que pertenece el cargo. Contabilidad deriva de aquí el período de la póliza. */
-        LocalDate effectiveDate
+        LocalDate effectiveDate,
+        /** El cierre del día que lo generó; nulo si no salió de uno. Es el lote que cartera cuadra. */
+        LocalDate dayCloseDate
 ) {}

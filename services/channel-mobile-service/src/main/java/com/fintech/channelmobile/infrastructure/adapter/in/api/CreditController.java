@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -286,7 +287,20 @@ class CreditController {
     ResponseEntity<Map<String, Object>> dispose(@Valid @RequestBody DisposeRequest request,
                                                  HttpServletRequest httpRequest) {
         String userId = httpRequest.getHeader("X-User-Id");
-        UUID creditAccountId = resolvePrimaryCreditAccountId(userId);
+        CreditPortfolioClient.CreditAccountResponse account = resolvePrimaryCreditAccount(userId);
+        UUID creditAccountId = account.creditAccountId();
+        // En atraso la línea no coloca: desde el primer día que un estado de cuenta vence sin pagar hasta que paga lo
+        // vencido, el mismo día. Cartera lo vuelve a comprobar al autorizar; decirlo aquí es lo que ve la distribuidora.
+        if (account.blockedForPlacements()) {
+            BigDecimal vencido = account.overdueStatementsAmount() == null ? BigDecimal.ZERO : account.overdueStatementsAmount();
+            // A quita closed the line for good (her exit); arrears block it until she pays what is overdue.
+            boolean cerrada = account.placementBlockReason() != null
+                    && account.placementBlockReason().startsWith("LINE_CLOSED_AFTER_QUITA");
+            throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, cerrada
+                    ? "Tu línea quedó cerrada por el convenio de quita: ya no coloca"
+                    : "Tu línea está bloqueada por atraso: paga lo vencido (" + vencido.setScale(2, RoundingMode.HALF_UP)
+                            + ") para volver a colocar");
+        }
         UUID beneficiary = (request.beneficiaryPartyId() == null || request.beneficiaryPartyId().isBlank())
                 ? null : UUID.fromString(request.beneficiaryPartyId());
         // El tipo de disposición NO viaja: lo decide el producto (BK-13). Que la app pudiera
@@ -368,12 +382,16 @@ class CreditController {
     }
 
     private UUID resolvePrimaryCreditAccountId(String userId) {
+        return resolvePrimaryCreditAccount(userId).creditAccountId();
+    }
+
+    private CreditPortfolioClient.CreditAccountResponse resolvePrimaryCreditAccount(String userId) {
         UUID partyId = UUID.fromString(userId);
         List<CreditPortfolioClient.CreditAccountResponse> accounts =
                 creditPortfolioClient.getAccountsByPartyId(partyId, userId);
         if (accounts.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "El usuario no tiene cuentas de crédito activas");
         }
-        return accounts.get(0).creditAccountId();
+        return accounts.get(0);
     }
 }
